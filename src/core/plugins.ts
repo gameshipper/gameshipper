@@ -92,6 +92,18 @@ function entryFor(spec: string, source: string): string {
   if (!fs.existsSync(entry)) throw loadFailed(spec, `its package.json "main" (${main}) doesn't exist.`);
   // A link to a file elsewhere is outside the folder too.
   if (!isWithin(realOrSelf(entry), realOrSelf(source))) throw outside();
+  // The copy (copyPluginFolder) must not leave the main file out.
+  const parts = path.relative(source, entry).split(path.sep);
+  for (let i = 1; i <= parts.length; i++) {
+    if (!leftOutOfPlugin(parts.slice(0, i), path.join(source, ...parts.slice(0, i)))) continue;
+    const rel = parts.join('/');
+    throw loadFailed(
+      spec,
+      i < parts.length
+        ? `the plugin's main file is in a folder that isn't packaged (${parts.slice(0, i).join('/')}), so the app couldn't load it. Move ${rel} elsewhere in the folder and update package.json "main".`
+        : `the plugin's main file (${rel}) isn't packaged: files named like that never are. Rename it and update package.json "main".`,
+    );
+  }
   return entry;
 }
 
@@ -117,7 +129,8 @@ async function importsNotCopied(file: string): Promise<string[]> {
   } catch {
     // Not parseable as a module (CommonJS can be); the require() calls above still count.
   }
-  return [...new Set(specifiers.filter((s) => s !== 'electron' && !isBuiltin(s) && !URL_SCHEME.test(s)))];
+  const always = (s: string) => s === 'electron' || s.startsWith('electron/') || isBuiltin(s) || URL_SCHEME.test(s);
+  return [...new Set(specifiers.filter((s) => !always(s)))];
 }
 
 /**
@@ -190,24 +203,30 @@ function moduleTypeAt(file: string): string {
   }
 }
 
-/** Left out of a plugin folder at its top level, like staging leaves them out of the game. */
-const PLUGIN_SKIP_TOP_LEVEL = new Set(['.sdk', '.gameshipper', 'out']);
+/**
+ * Whether a folder plugin's copy leaves out the entry at `parts` (its path inside the plugin folder; `abs`
+ * is the full path), by staging's rules: .env files, steam_appid.txt, the Steamworks SDK and .git anywhere;
+ * every dot entry (.npmrc, .vscode, .sdk, .gameshipper...) and out/ at the top; node_modules/.bin.
+ */
+function leftOutOfPlugin(parts: string[], abs: string): boolean {
+  const name = parts[parts.length - 1];
+  if (isSkippedAnywhere(name)) return true;
+  if (parts.length === 1 && (name.startsWith('.') || name === 'out')) return true;
+  if (name === '.bin' && parts[parts.length - 2] === 'node_modules') return true;
+  return holdsSteamworksSdk(abs);
+}
 
 /**
- * Copies a folder plugin by staging's rules: no secrets (.env), Steam files, .git, build output or
- * node_modules/.bin. Links are copied as the files they point to, but only within the plugin folder:
- * a link out of it (to ~/.ssh, say), to nothing, or into a loop fails the build instead.
+ * Copies a folder plugin by staging's rules (see leftOutOfPlugin). Links are copied as the files they
+ * point to, but only within the plugin folder: a link out of it (to ~/.ssh, say), to nothing, or into a
+ * loop fails the build instead.
  */
 function copyPluginFolder(p: LoadedPlugin, dest: string): void {
-  const root = realOrSelf(p.source);
+  const root = fs.realpathSync(p.source);
   const filter = (src: string): boolean => {
     const rel = path.relative(p.source, src);
     if (rel === '') return true;
-    const parts = rel.split(path.sep);
-    const name = parts[parts.length - 1];
-    if (isSkippedAnywhere(name) || (parts.length === 1 && PLUGIN_SKIP_TOP_LEVEL.has(name))) return false;
-    if (name === '.bin' && parts[parts.length - 2] === 'node_modules') return false;
-    if (holdsSteamworksSdk(src)) return false;
+    if (leftOutOfPlugin(rel.split(path.sep), src)) return false;
     if (!fs.lstatSync(src).isSymbolicLink()) return true;
     let target: string;
     try {

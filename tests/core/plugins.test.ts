@@ -91,6 +91,41 @@ describe('loadPlugins', () => {
     });
   });
 
+  it("PLUGIN_LOAD_FAILED when a folder plugin's main is in a folder the copy leaves out, or is left out itself", async () => {
+    const dir = makeTmpDir();
+    const plugin = "export default { name: 'p' };";
+    writeFiles(dir, {
+      'built/package.json': '{"main":"out/index.mjs"}',
+      'built/out/index.mjs': plugin,
+      'dotted/package.json': '{"main":".build/index.mjs"}',
+      'dotted/.build/index.mjs': plugin,
+      'bin/package.json': '{"main":"node_modules/.bin/tool.mjs"}',
+      'bin/node_modules/.bin/tool.mjs': plugin,
+      'sdk/package.json': '{"main":"valve/index.mjs"}',
+      'sdk/valve/index.mjs': plugin,
+      'sdk/valve/redistributable_bin/osx/libsteam_api.dylib': 'lib',
+      'named/package.json': '{"main":"lib/steamworks_sdk_bridge.mjs"}',
+      'named/lib/steamworks_sdk_bridge.mjs': plugin,
+      'fine/package.json': '{"main":"lib/out/index.mjs"}',
+      'fine/lib/out/index.mjs': plugin,
+    });
+    for (const [spec, folder] of [
+      ['built', 'out'],
+      ['dotted', '.build'],
+      ['bin', 'node_modules/.bin'],
+      ['sdk', 'valve'],
+    ]) {
+      await expect(loadPlugins(testCtx(dir), config([spec])), spec).rejects.toMatchObject({
+        error: { code: 'PLUGIN_LOAD_FAILED', message: expect.stringContaining(`the plugin's main file is in a folder that isn't packaged (${folder})`) },
+      });
+    }
+    await expect(loadPlugins(testCtx(dir), config(['named']))).rejects.toMatchObject({
+      error: { code: 'PLUGIN_LOAD_FAILED', message: expect.stringContaining("the plugin's main file (lib/steamworks_sdk_bridge.mjs) isn't packaged") },
+    });
+    // out/ is only left out at the top of the folder.
+    expect((await loadPlugins(testCtx(dir), config(['fine'])))[0].name).toBe('p');
+  });
+
   it('PLUGIN_LOAD_FAILED for names that differ only in case, or that every object already has', async () => {
     const dir = makeTmpDir();
     const files: Record<string, string> = { 'lower.mjs': "export default { name: 'echo' };", 'upper.mjs': "export default { name: 'Echo' };" };
@@ -130,7 +165,7 @@ describe('loadPlugins', () => {
       'helper.cjs': 'exports.x = 1;',
       // Node's built-in modules and Electron are always there.
       'builtins.mjs':
-        "import * as fs from 'node:fs';\nimport path from 'path';\nexport default { name: 'builtins', main: { async open(u) { const { shell } = await import('electron'); return shell.openExternal(u); } } };",
+        "import * as fs from 'node:fs';\nimport path from 'path';\nexport default { name: 'builtins', main: { async open(u) { const { shell } = await import('electron'); return shell.openExternal(u); }, async quit() { (await import('electron/main')).app.quit(); } } };",
       'folder/index.mjs': "import { x } from './more.mjs';\nexport default { name: 'folder', main: { go: () => x } };",
       'folder/more.mjs': 'export const x = 1;',
     });
@@ -175,7 +210,7 @@ describe('copyPlugins', () => {
 describe('copyPlugins by staging rules', () => {
   const STATS = "export default { name: 'stats', main: { n() { return 1; } } };\n";
 
-  it('leaves out secrets, the SDK, build output and tool folders', async () => {
+  it('leaves out secrets, every top-level dot entry, the SDK, build output and tool folders', async () => {
     const dir = makeTmpDir();
     writeFiles(dir, {
       'tools/stats/index.mjs': STATS,
@@ -194,6 +229,10 @@ describe('copyPlugins by staging rules', () => {
       'tools/stats/node_modules/dep/index.js': '',
       'tools/stats/node_modules/dep/out/built.js': '',
       'tools/stats/node_modules/dep/node_modules/.bin/x': '',
+      'tools/stats/.npmrc': '//registry.npmjs.org/:_authToken=npm_secret',
+      'tools/stats/.vscode/settings.json': '{}',
+      'tools/stats/.github/workflows/ci.yml': '',
+      'tools/stats/.claude/settings.json': '{}',
     });
     if (process.platform !== 'win32') {
       fs.symlinkSync('lib', path.join(dir, 'tools', 'stats', 'alias'));
