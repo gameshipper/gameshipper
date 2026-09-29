@@ -37,12 +37,22 @@ describe('runBuild', () => {
       ['windows', 'built'],
       ['mac', 'failed'],
       ['linux', 'built'],
+    ]);
+    expect(r.errors.map((e) => e.code)).toEqual(['MAC_BUILD_HOST']);
+    expect(r.warnings.map((w) => w.code)).toEqual(['ICON_MISSING']);
+    expect(r.data!.outDir).toBe(path.join(dir, 'out'));
+  });
+
+  it('skips mobile targets listed in the config, with a warning', async () => {
+    const { dir, shellDir } = project();
+    const r = await runBuild(testCtx(dir), config({ targets: ['linux', 'ios', 'android'] }), { shellDir, host: 'linux', pack: fakePack });
+    expect(r.ok).toBe(true);
+    expect(r.data!.targets.map((t) => [t.target, t.status])).toEqual([
+      ['linux', 'built'],
       ['ios', 'skipped'],
       ['android', 'skipped'],
     ]);
-    expect(r.errors.map((e) => e.code)).toEqual(['MAC_BUILD_HOST']);
     expect(r.warnings.map((w) => w.code)).toEqual(['ICON_MISSING', 'TARGET_NOT_YET_SUPPORTED', 'TARGET_NOT_YET_SUPPORTED']);
-    expect(r.data!.outDir).toBe(path.join(dir, 'out'));
   });
 
   it('--target limits the build', async () => {

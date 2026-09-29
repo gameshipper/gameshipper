@@ -52,7 +52,7 @@ Builds desktop apps into `out/<target>`. For a game named "Spinning Cube" that's
 | `--target <list>` | Comma-separated subset of the configured targets, e.g. `--target windows,linux`. |
 | `--frozen-lock` | Fail instead of accepting changed or new CDN files; for CI. |
 
-`init` lists `ios` and `android` in `targets` as well; this version skips them with a `TARGET_NOT_YET_SUPPORTED` warning.
+`targets` defaults to `windows`, `mac` and `linux`. `ios` and `android` can be added to it, but this version skips them with a `TARGET_NOT_YET_SUPPORTED` warning.
 
 ### `status`
 
@@ -121,7 +121,7 @@ Other problems have codes too, such as `CDN_FETCH_FAILED`, `CDN_CHANGED`, `ENTRY
   "version": "1.0.0",
   "game": { "dir": ".", "entry": "index.html", "buildCommand": null, "outputDir": null },
   "icon": "icon.png",
-  "targets": ["windows", "mac", "linux", "ios", "android"],
+  "targets": ["windows", "mac", "linux"],
   "window": { "width": 1280, "height": 720, "fullscreen": true, "resizable": true },
   "steam": { "appId": 480 }
 }

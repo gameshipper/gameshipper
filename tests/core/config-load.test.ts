@@ -11,7 +11,7 @@ describe('parseConfig', () => {
     expect(r.ok).toBe(true);
     expect(r.data).toMatchObject({
       game: { dir: '.', entry: 'index.html', buildCommand: null, outputDir: null },
-      targets: ['windows', 'mac', 'linux', 'ios', 'android'],
+      targets: ['windows', 'mac', 'linux'],
       window: { width: 1280, height: 720, fullscreen: true, resizable: true },
       steam: { appId: 480, depots: { windows: null, mac: null, linux: null } },
       keyArtFocus: [0.5, 0.5],

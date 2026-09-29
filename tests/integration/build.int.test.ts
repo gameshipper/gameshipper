@@ -129,7 +129,7 @@ describe('end to end on this computer', () => {
       expect(build.result.errors).toEqual([]);
       expect(build.code).toBe(0);
       const status = Object.fromEntries(build.result.data.targets.map((t: { target: string; status: string }) => [t.target, t.status]));
-      expect(status).toEqual({ windows: 'built', mac: 'built', linux: 'built', ios: 'skipped', android: 'skipped' });
+      expect(status).toEqual({ windows: 'built', mac: 'built', linux: 'built' });
       expect(fs.existsSync(path.join(dir, 'out', 'windows', 'Spinning Cube.exe'))).toBe(true);
       expect(fs.existsSync(path.join(dir, 'out', 'linux', 'spinning-cube'))).toBe(true);
       expect(fs.existsSync(path.join(dir, 'out', 'mac', 'Spinning Cube.app'))).toBe(true);

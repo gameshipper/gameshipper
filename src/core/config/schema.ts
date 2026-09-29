@@ -23,7 +23,8 @@ export const ConfigSchema = z.strictObject({
   keyArt: relPath.nullable().default(null),
   keyArtFocus: z.tuple([z.number().min(0).max(1), z.number().min(0).max(1)]).default([0.5, 0.5]),
   logo: relPath.nullable().default(null),
-  targets: z.array(z.enum(TARGETS)).min(1).default([...TARGETS]),
+  // Mobile targets are only ever added on purpose: they need a bundle ID and a different build.
+  targets: z.array(z.enum(TARGETS)).min(1).default([...DESKTOP_TARGETS]),
   window: z
     .strictObject({
       width: z.number().int().min(320).default(1280),

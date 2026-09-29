@@ -66,6 +66,8 @@ describe('initProject', () => {
     expect(r.ok).toBe(true);
     const written = JSON.parse(readText(dir, 'gameshipper.json'));
     expect(written).toMatchObject({ name: 'Moon Game', version: '1.0.0', steam: { appId: 1234567 }, game: { entry: 'index.html' } });
+    // Desktop only: mobile targets are added on purpose.
+    expect(written.targets).toEqual(['windows', 'mac', 'linux']);
     expect(readText(dir, '.gitignore')).toBe('node_modules/\n# Gameshipper\n.gameshipper/\nout/\n.sdk/\n');
     expect(r.data!.gitignoreUpdated).toBe(true);
     expect(r.warnings).toEqual([]);
