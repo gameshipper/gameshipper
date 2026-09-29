@@ -1,3 +1,4 @@
+import { spawnSync } from 'node:child_process';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
@@ -205,6 +206,14 @@ describe.skipIf(!ENABLED)('Steam on this Mac with App ID 480', () => {
     );
     expect(files.filter((f) => /win64|linux64|win32|linux-x64|linux_x64/.test(f))).toEqual([]);
     expect(listFiles(mac.dir).filter((f) => f.endsWith('steam_appid.txt'))).toEqual([]);
+    // Hardened runtime on the app and on every Steam native file in it (notarization rejects any without), so the runs
+    // below prove Steam loads under the hardened runtime too.
+    expect(mac.mac).toEqual({ signing: 'adhoc', notarized: false });
+    const app = path.join(mac.dir, 'Steam Test.app');
+    expect(spawnSync('codesign', ['--verify', '--deep', '--strict', app]).status).toBe(0);
+    for (const file of [app, ...files.filter((f) => /\.(node|dylib)$/.test(f)).map((f) => path.join(unpacked, f))]) {
+      expect(spawnSync('codesign', ['-dv', file], { encoding: 'utf8' }).stderr, file).toContain('flags=0x10002(adhoc,runtime)');
+    }
     project = { dir, executable: mac.executable };
 
     const packaged = await smoke({});

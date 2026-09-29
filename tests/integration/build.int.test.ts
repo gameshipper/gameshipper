@@ -82,16 +82,18 @@ describe('end to end on this computer', () => {
   });
 
   it.skipIf(process.platform === 'win32')(
-    'cross-builds every desktop target from this host',
+    'cross-builds every desktop target and the mobile projects from this host',
     () => {
       const dir = freshGame();
-      expect(cli(['init', '--yes', '--name', 'Spinning Cube'], dir).code).toBe(0);
+      expect(cli(['init', '--yes', '--name', 'Spinning Cube', '--bundle-id', 'com.gameshipper.spinningcube'], dir).code).toBe(0);
 
       const build = cli(['build'], dir);
       expect(build.result.errors).toEqual([]);
       expect(build.code).toBe(0);
       const status = Object.fromEntries(build.result.data.targets.map((t: { target: string; status: string }) => [t.target, t.status]));
-      expect(status).toEqual({ windows: 'built', mac: 'built', linux: 'built' });
+      expect(status).toEqual({ windows: 'built', mac: 'built', linux: 'built', ios: 'built', android: 'built' });
+      expect(fs.existsSync(path.join(dir, 'out', 'ios', 'App', 'App.xcodeproj'))).toBe(true);
+      expect(fs.existsSync(path.join(dir, 'out', 'android', 'gradlew'))).toBe(true);
       expect(fs.existsSync(path.join(dir, 'out', 'windows', 'Spinning Cube.exe'))).toBe(true);
       expect(fs.existsSync(path.join(dir, 'out', 'linux', 'spinning-cube'))).toBe(true);
       expect(fs.existsSync(path.join(dir, 'out', 'mac', 'Spinning Cube.app'))).toBe(true);
