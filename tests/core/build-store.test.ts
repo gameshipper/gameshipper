@@ -7,6 +7,7 @@ import { parseConfig } from '../../src/core/config/load.js';
 import type { packageDesktop } from '../../src/core/desktop/package.js';
 import { testCtx } from '../helpers/ctx.js';
 import { makeLogoPng, makeQuadrantPng } from '../helpers/images.js';
+import { makeSolidPng } from '../helpers/png.js';
 import { makeTmpDir, writeFiles } from '../helpers/tmp.js';
 
 const fakePack: typeof packageDesktop = async (_ctx, _config, _appDir, _icon, job) => ({
@@ -42,6 +43,14 @@ describe('runBuild store images', () => {
     expect(r.ok).toBe(false);
     expect(r.errors.map((e) => e.code)).toEqual(['KEYART_INVALID']);
     expect(r.data!.targets.map((t) => [t.target, t.status])).toEqual([['linux', 'built']]);
+    expect(exitCodeFor(r)).toBe(2);
+  });
+
+  it('a fully transparent logo fails the build as an input problem (exit 2)', async () => {
+    const { dir, shellDir } = await project(await makeQuadrantPng(3840, 2160));
+    writeFiles(dir, { 'art/logo.png': makeSolidPng(800, 300, [0, 0, 0, 0]) });
+    const r = await runBuild(testCtx(dir), config, { shellDir, host: 'linux', pack: fakePack, env: {} });
+    expect(r.errors.map((e) => [e.code, e.message])).toEqual([['LOGO_INVALID', 'logo logo.png is empty (fully transparent).']]);
     expect(exitCodeFor(r)).toBe(2);
   });
 

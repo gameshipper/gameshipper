@@ -40,7 +40,8 @@ const ENLARGED = 1.001;
 async function renderArt(keyArtFile: string, art: ImageInfo, logoFile: string, logo: LogoInfo, spec: StoreImageSpec, focus: readonly [number, number]): Promise<Rendered> {
   const sharp = await loadSharp();
   const crop = coverCrop(art, spec, focus);
-  let image = sharp(keyArtFile).autoOrient().resize(crop.resize.width, crop.resize.height).extract(crop.extract);
+  // Steam shows capsules and the hero on its own backgrounds, so transparent key art is put on black first.
+  let image = sharp(keyArtFile).autoOrient().flatten({ background: '#000000' }).resize(crop.resize.width, crop.resize.height).extract(crop.extract);
   let logoScale: number | null = null;
   if (spec.kind === 'art+logo' && spec.logoBox) {
     const box = { width: Math.round(spec.width * spec.logoBox[0]), height: Math.round(spec.height * spec.logoBox[1]) };
@@ -61,12 +62,35 @@ async function renderLogo(logoFile: string, logo: LogoInfo, spec: StoreImageSpec
 }
 
 /**
- * Builds every Steam store and library image (spec §8) from keyArt + logo into out/store/. Never throws:
- * problems come back as errors and warnings, so the desktop builds still count. Leaves out/store/screenshots/ alone.
+ * Deletes the images (*.png) in out/store, leaving out/store/screenshots/ and anything else alone, so images from an
+ * earlier build never outlive a change to keyArt or logo.
+ */
+function clearStoreImages(ctx: Ctx, dir: string): void {
+  let names: string[];
+  try {
+    names = fs.readdirSync(dir);
+  } catch {
+    return;
+  }
+  for (const name of names.filter((n) => /\.png$/i.test(n))) {
+    const file = path.join(dir, name);
+    try {
+      if (fs.statSync(file).isFile()) fs.rmSync(file, { force: true });
+    } catch (e) {
+      ctx.log(`couldn't remove the old store image ${file}: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  }
+}
+
+/**
+ * Builds every Steam store and library image (spec §8) from keyArt + logo into out/store/, replacing the images an
+ * earlier build made. Never throws: problems come back as errors and warnings, so the desktop builds still count.
+ * When the images are skipped or fail, out/store is left without any. Leaves out/store/screenshots/ alone.
  */
 export async function makeStoreImages(ctx: Ctx, config: Config): Promise<StoreImagesResult> {
   const dir = storeDirFor(ctx.projectDir);
   const result: StoreImagesResult = { status: 'skipped', dir, images: [], errors: [], warnings: [] };
+  clearStoreImages(ctx, dir);
   const missing = (['keyArt', 'logo'] as const).filter((key) => !config[key]);
   if (missing.length) {
     result.warnings.push(
@@ -116,6 +140,9 @@ export async function makeStoreImages(ctx: Ctx, config: Config): Promise<StoreIm
     result.status = 'built';
   } catch (e) {
     result.status = 'failed';
+    // Half a set would look like a finished one.
+    clearStoreImages(ctx, dir);
+    result.images = [];
     if (e instanceof GsFailure) {
       result.errors.push(e.error);
     } else {

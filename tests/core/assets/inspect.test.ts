@@ -35,6 +35,12 @@ describe('inspectKeyArt', () => {
     await expect(inspectKeyArt(path.join(dir, 'bad.png'))).rejects.toThrow(failure('KEYART_INVALID'));
     await expect(inspectKeyArt(path.join(dir, 'small.png'))).rejects.toThrow(failure('KEYART_TOO_SMALL'));
   });
+
+  it('KEYART_INVALID for images that are not PNG or JPEG', async () => {
+    const dir = files({ 'k.webp': await sharp(await makeQuadrantPng(1280, 720)).webp().toBuffer() });
+    const error = await inspectKeyArt(path.join(dir, 'k.webp')).catch((e: { error: { code: string; message: string } }) => e.error);
+    expect(error).toMatchObject({ code: 'KEYART_INVALID', message: 'keyArt k.webp is a WEBP image; it must be PNG or JPEG.' });
+  });
 });
 
 describe('inspectLogo', () => {
@@ -50,6 +56,12 @@ describe('inspectLogo', () => {
     });
     await expect(inspectLogo(path.join(dir, 'logo.jpg'))).rejects.toThrow(failure('LOGO_INVALID'));
     await expect(inspectLogo(path.join(dir, 'opaque.png'))).rejects.toThrow(failure('LOGO_NOT_TRANSPARENT'));
+  });
+
+  it('LOGO_INVALID for a fully transparent logo', async () => {
+    const dir = files({ 'empty.png': makeSolidPng(400, 200, [255, 255, 255, 0]) });
+    const error = await inspectLogo(path.join(dir, 'empty.png')).catch((e: { error: { code: string; message: string } }) => e.error);
+    expect(error).toMatchObject({ code: 'LOGO_INVALID', message: 'logo empty.png is empty (fully transparent).' });
   });
 });
 

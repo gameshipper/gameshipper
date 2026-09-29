@@ -68,15 +68,45 @@ describe('makeStoreImages', () => {
     expect(r.warnings[1].message).toContain('library_logo.png');
   });
 
-  it('skips with a warning when keyArt or logo is not set', async () => {
-    const r = await makeStoreImages(testCtx(makeTmpDir()), parseConfig({ name: 'x', version: '1.0.0', logo: 'l.png' }).data!);
+  it('flattens transparent key art onto black', async () => {
+    const half = await sharp({ create: { width: 3840, height: 1080, channels: 4, background: { r: 255, g: 0, b: 0, alpha: 1 } } }).png().toBuffer();
+    const art = await sharp({ create: { width: 3840, height: 2160, channels: 4, background: { r: 255, g: 255, b: 255, alpha: 0 } } })
+      .composite([{ input: half, left: 0, top: 1080 }])
+      .png()
+      .toBuffer();
+    const dir = project(art, await makeLogoPng(1400, 600));
+    expect((await makeStoreImages(testCtx(dir), config())).errors).toEqual([]);
+    const store = path.join(dir, 'out', 'store');
+    // Top half: transparent in the key art, black in the images. Bottom half: the red art.
+    expect(await pixel(path.join(store, 'library_hero.png'), 100, 100)).toEqual([0, 0, 0, 255]);
+    expect(await pixel(path.join(store, 'library_hero.png'), 100, 1200)).toEqual([255, 0, 0, 255]);
+    expect(await pixel(path.join(store, 'header_capsule.png'), 5, 5)).toEqual([0, 0, 0, 255]);
+  });
+
+  it('replaces every image from an earlier build, keeping the screenshots', async () => {
+    const dir = project(await makeQuadrantPng(3840, 2160), await makeLogoPng(1400, 600));
+    writeFiles(dir, { 'out/store/renamed_capsule.png': makeSolidPng(10, 10), 'out/store/notes.txt': 'kept' });
+    await makeStoreImages(testCtx(dir), config());
+    const store = path.join(dir, 'out', 'store');
+    expect(fs.existsSync(path.join(store, 'renamed_capsule.png'))).toBe(false);
+    expect(fs.readdirSync(store).filter((f) => f.endsWith('.png'))).toHaveLength(8);
+    expect(fs.existsSync(path.join(store, 'notes.txt'))).toBe(true);
+    expect(fs.existsSync(path.join(store, 'screenshots', 'keep.png'))).toBe(true);
+  });
+
+  it('skips with a warning when keyArt or logo is not set, removing images from an earlier build', async () => {
+    const dir = makeTmpDir();
+    writeFiles(dir, { 'out/store/header_capsule.png': makeSolidPng(920, 430), 'out/store/screenshots/keep.png': 'x' });
+    const r = await makeStoreImages(testCtx(dir), parseConfig({ name: 'x', version: '1.0.0', logo: 'l.png' }).data!);
     expect(r.status).toBe('skipped');
     expect(r.warnings.map((w) => w.code)).toEqual(['STORE_IMAGES_SKIPPED']);
     expect(r.warnings[0].message).toBe("Store images weren't made because keyArt is not set in gameshipper.json.");
+    expect(fs.readdirSync(path.join(dir, 'out', 'store'))).toEqual(['screenshots']);
   });
 
-  it('fails with the validation error for bad inputs, writing nothing', async () => {
+  it('fails with the validation error for bad inputs, leaving no store images', async () => {
     const dir = project(await makeQuadrantPng(3840, 2160), makeSolidPng(800, 300));
+    writeFiles(dir, { 'out/store/header_capsule.png': makeSolidPng(920, 430) });
     const r = await makeStoreImages(testCtx(dir), config());
     expect(r.status).toBe('failed');
     expect(r.errors.map((e) => e.code)).toEqual(['LOGO_NOT_TRANSPARENT']);

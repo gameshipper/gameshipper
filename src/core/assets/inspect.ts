@@ -34,15 +34,15 @@ export async function imageInfo(file: string): Promise<ImageInfo | null> {
   }
 }
 
+const KEY_ART_FORMATS = new Set(['png', 'jpeg']);
+const KEY_ART_FIX = 'Export the key art as a PNG or JPEG (3840x2160 recommended) and point "keyArt" in gameshipper.json at it.';
+
 export async function inspectKeyArt(file: string): Promise<ImageInfo> {
   const info = await imageInfo(file);
   const name = path.basename(file);
-  if (!info) {
-    throw new GsFailure(
-      'KEYART_INVALID',
-      `keyArt ${name} isn't an image Gameshipper can read.`,
-      'Export the key art as a PNG or JPEG (3840x2160 recommended) and point "keyArt" in gameshipper.json at it.',
-    );
+  if (!info) throw new GsFailure('KEYART_INVALID', `keyArt ${name} isn't an image Gameshipper can read.`, KEY_ART_FIX);
+  if (!KEY_ART_FORMATS.has(info.format)) {
+    throw new GsFailure('KEYART_INVALID', `keyArt ${name} is a ${info.format.toUpperCase()} image; it must be PNG or JPEG.`, KEY_ART_FIX);
   }
   if (info.width < MIN_KEY_ART.width || info.height < MIN_KEY_ART.height) {
     throw new GsFailure(
@@ -66,11 +66,20 @@ export async function inspectLogo(file: string): Promise<LogoInfo> {
     );
   }
   // sharp says hasAlpha for an RGBA PNG with no transparent pixel; isOpaque looks at the pixels.
-  if ((await sharp(file).stats()).isOpaque) {
+  const stats = await sharp(file).stats();
+  if (stats.isOpaque) {
     throw new GsFailure(
       'LOGO_NOT_TRANSPARENT',
       `logo ${name} has no transparent pixels, so it would sit on the art as a solid box.`,
       'Re-export the logo as a PNG with a transparent background (nothing behind the lettering).',
+    );
+  }
+  // Not opaque, so it has an alpha channel (the 4th, or the 2nd for grey + alpha).
+  if (stats.channels[stats.channels.length - 1].max === 0) {
+    throw new GsFailure(
+      'LOGO_INVALID',
+      `logo ${name} is empty (fully transparent).`,
+      'Export the logo with its lettering visible on a transparent background and point "logo" in gameshipper.json at it.',
     );
   }
   const { info: trimmed } = await sharp(file).trim().toBuffer({ resolveWithObject: true });
