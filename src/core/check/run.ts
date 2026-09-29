@@ -1,11 +1,11 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { DECK_SIZE } from '../../shell/capture.js';
+import type { DiagEvent } from '../../shell/diagnostics.js';
 import { frameInfo, type FrameInfo } from '../assets/inspect.js';
 import type { Config, DesktopTarget } from '../config/schema.js';
 import type { Ctx } from '../context.js';
 import { fail, GsFailure, ok, type GsError, type Result } from '../result.js';
-import type { DiagEvent } from '../../shell/diagnostics.js';
 import { loggedEvents, runSmoke, type SmokeData } from '../smoke.js';
 import { launchChecks } from './launch.js';
 import { inspectMacSigning, type MacSigning } from './mac-signing.js';

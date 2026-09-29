@@ -157,6 +157,7 @@ describe('launchChecks', () => {
     expect(checks['deck.layout']).toMatchObject({ status: 'skip', message: "Couldn't measure the page: the game closed its window after 2.4 s." });
     const early = byId(launchChecks(evidence({ smoke: ok(data), frame: null, closed: { seconds: null } })));
     expect(early['launch.frame'].message).toBe("Couldn't capture the game's window: the game closed its window before its page loaded.");
+    expect(early['offline.requests'].message).toBe('No internet requests before the game closed its window with the network blocked.');
   });
 
   it("skips deck.layout when the page couldn't be laid out at 1280x800", () => {

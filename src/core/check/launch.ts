@@ -115,7 +115,7 @@ export function launchChecks(ev: LaunchEvidence): CheckResult[] {
   const probe = data.summary.probe ?? null;
   const checks: CheckResult[] = [];
   /** How long the game really ran: less than asked when it closed its own window. */
-  const ran = ev.closed ? (ev.closed.seconds ?? 0) : ev.seconds;
+  const ran = ev.closed ? (ev.closed.seconds === null ? 'before the game closed its window' : `in ${ev.closed.seconds} s`) : `in ${ev.seconds} s`;
 
   const blocked = [...new Set(ev.blocked.map(shortUrl))];
   checks.push(
@@ -130,7 +130,7 @@ export function launchChecks(ev: LaunchEvidence): CheckResult[] {
           fix: 'Put these files in your game folder and load them by relative path, or load them with a <script>, <link> or import map entry so `npx gameshipper build` bundles them. Online features must leave the game playable offline.',
           details: capDetails(blocked),
         }
-      : { id: 'offline.requests', group: 'offline', title: 'Runs without internet', status: 'pass', message: `No internet requests in ${ran} s with the network blocked.` },
+      : { id: 'offline.requests', group: 'offline', title: 'Runs without internet', status: 'pass', message: `No internet requests ${ran} with the network blocked.` },
   );
 
   const stopped = issues.find((i) => STOPPED_ISSUES.has(i.code));
