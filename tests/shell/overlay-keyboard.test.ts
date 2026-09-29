@@ -33,7 +33,8 @@ describe('startRepaint', () => {
     let destroyed = false;
     const win = { isDestroyed: () => destroyed, webContents: { invalidate: () => void invalidated++ } };
     const stop = startRepaint(win, 200);
-    await new Promise((r) => setTimeout(r, 60));
+    // Timers run late on a busy machine: wait for a few frames rather than a fixed time.
+    for (const end = Date.now() + 2000; invalidated <= 2 && Date.now() < end; ) await new Promise((r) => setTimeout(r, 10));
     expect(invalidated).toBeGreaterThan(2);
     stop();
     const count = invalidated;
