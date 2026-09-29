@@ -1,0 +1,79 @@
+import * as fs from 'node:fs';
+import { describe, expect, it } from 'vitest';
+import type { NotaryAuth } from '../../../src/core/sign/credentials.js';
+import { notarizeFailure, notarizeMacApp, notaryCredentials } from '../../../src/core/sign/notarize.js';
+import { signMacApp } from '../../../src/core/sign/sign.js';
+import { testCtx } from '../../helpers/ctx.js';
+import { installFakeXcrun, withEnv } from '../../helpers/fake-xcrun.js';
+import { makeMiniApp } from '../../helpers/mac-bundle.js';
+import { makeTmpDir } from '../../helpers/tmp.js';
+
+const profile: NotaryAuth = { kind: 'keychain-profile', keychainProfile: 'gs-notary' };
+
+describe('notaryCredentials', () => {
+  it('maps our auth kinds onto @electron/notarize options', () => {
+    expect(notaryCredentials(profile)).toEqual({ keychainProfile: 'gs-notary' });
+    expect(notaryCredentials({ kind: 'keychain-profile', keychainProfile: 'p', keychain: '/k' })).toEqual({ keychainProfile: 'p', keychain: '/k' });
+    expect(notaryCredentials({ kind: 'api-key', appleApiKey: '/k.p8', appleApiKeyId: 'K1' })).toEqual({ appleApiKey: '/k.p8', appleApiKeyId: 'K1' });
+  });
+});
+
+describe('notarizeFailure', () => {
+  it('NOTARIZE_FAILED names the submission, the log and how to fetch the report', () => {
+    const f = notarizeFailure('Failed to notarize via notarytool\n\n{"id":"abc-123","status":"Invalid"}', '/p/.gameshipper/logs/notarize-1.log', '/o/G.app', profile);
+    expect(f.error.code).toBe('NOTARIZE_FAILED');
+    expect(f.error.message).toContain('status: Invalid');
+    expect(f.error.fix).toContain('/p/.gameshipper/logs/notarize-1.log');
+    expect(f.error.fix).toContain('xcrun notarytool log abc-123 --keychain-profile "gs-notary"');
+  });
+
+  it('recognises a missing notarytool, stapling and signature problems', () => {
+    expect(notarizeFailure('notarytool is not available, you must be on at least Xcode 13', 'l', 'a', profile).error.code).toBe('NOTARIZE_TOOL_MISSING');
+    expect(notarizeFailure('Failed to staple your application with code: 65', 'l', '/o/G.app', profile).error).toMatchObject({
+      code: 'STAPLE_FAILED',
+      fix: expect.stringContaining('xcrun stapler staple "/o/G.app"'),
+    });
+    expect(notarizeFailure('Failed to codesign your application with code: 1', 'l', 'a', profile).error.code).toBe('MAC_SIGN_FAILED');
+  });
+});
+
+describe.runIf(process.platform === 'darwin')('notarizeMacApp against a fake notarytool (macOS)', () => {
+  async function signedApp() {
+    const dir = makeTmpDir();
+    const app = makeMiniApp(dir);
+    await signMacApp(testCtx(dir), app, null);
+    return { dir, app, fake: installFakeXcrun(dir) };
+  }
+
+  it('submits, waits, fetches the log and staples', async () => {
+    const { dir, app, fake } = await signedApp();
+    await withEnv({ PATH: `${fake.binDir}:${process.env.PATH}`, FAKE_XCRUN_LOG: fake.logFile, FAKE_NOTARY_RESULT: 'Accepted' }, () =>
+      notarizeMacApp(testCtx(dir), app, profile),
+    );
+    const calls = fs.readFileSync(fake.logFile, 'utf8');
+    expect(calls).toMatch(/^notarytool submit .*Mini\.zip --keychain-profile gs-notary --wait --output-format json$/m);
+    expect(calls).toContain('stapler staple -v Mini.app');
+  });
+
+  it("NOTARIZE_FAILED with Apple's report saved to a log file", async () => {
+    const { dir, app, fake } = await signedApp();
+    const run = withEnv({ PATH: `${fake.binDir}:${process.env.PATH}`, FAKE_XCRUN_LOG: fake.logFile, FAKE_NOTARY_RESULT: 'Invalid' }, () =>
+      notarizeMacApp(testCtx(dir), app, profile),
+    );
+    const err = await run.then(
+      () => null,
+      (e: { error: { code: string; fix: string } }) => e.error,
+    );
+    expect(err?.code).toBe('NOTARIZE_FAILED');
+    const logPath = /(\/\S+notarize-\S+\.log)/.exec(err!.fix)![1];
+    expect(fs.readFileSync(logPath, 'utf8')).toContain('secure timestamp');
+  });
+
+  it('STAPLE_FAILED when the ticket cannot be attached', async () => {
+    const { dir, app, fake } = await signedApp();
+    const run = withEnv({ PATH: `${fake.binDir}:${process.env.PATH}`, FAKE_XCRUN_LOG: fake.logFile, FAKE_NOTARY_RESULT: 'Accepted', FAKE_STAPLE_FAIL: '1' }, () =>
+      notarizeMacApp(testCtx(dir), app, profile),
+    );
+    await expect(run).rejects.toMatchObject({ error: { code: 'STAPLE_FAILED' } });
+  }, 30_000);
+});
