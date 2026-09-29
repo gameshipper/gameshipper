@@ -4,3 +4,6 @@ research_notes/
 
 # OS / editor
 .DS_Store
+
+# Steamworks SDK (licensed to the account holder; never commit)
+.sdk/
