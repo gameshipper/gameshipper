@@ -1,3 +1,4 @@
+import { spawnSync } from 'node:child_process';
 import type { DesktopTarget, Target } from '../config/schema.js';
 import { gsError, type GsError } from '../result.js';
 
@@ -23,16 +24,50 @@ export interface DesktopPlan {
   skipped: SkippedTarget[];
 }
 
+/** Tools on this machine that change what can be built. */
+export interface HostTools {
+  /** Apple's `lipo` (Xcode command-line tools), which merging a universal Mac app needs. */
+  lipo: boolean;
+}
+
+/** Runs a command without output; true when it exits 0. */
+export type RunTool = (command: string, args: string[]) => boolean;
+
+const runQuietly: RunTool = (command, args) => spawnSync(command, args, { stdio: 'ignore', timeout: 15_000 }).status === 0;
+
+/**
+ * Checks for the tools planDesktopJobs needs. `xcode-select -p` goes first: without the command-line tools,
+ * running `xcrun` makes macOS pop up an install dialog.
+ */
+export function detectHostTools(host: NodeJS.Platform = process.platform, run: RunTool = runQuietly): HostTools {
+  if (host !== 'darwin') return { lipo: false };
+  return { lipo: run('xcode-select', ['-p']) && run('xcrun', ['--find', 'lipo']) };
+}
+
 const ORDER: Target[] = ['windows', 'mac', 'linux', 'ios', 'android'];
 
-export function planDesktopJobs(targets: readonly Target[], host: NodeJS.Platform): DesktopPlan {
+function arm64MacJob(warning: GsError): DesktopJob {
+  return { target: 'mac', platform: 'darwin', arch: 'arm64', warnings: [warning] };
+}
+
+export function planDesktopJobs(targets: readonly Target[], host: NodeJS.Platform, tools: HostTools = detectHostTools(host)): DesktopPlan {
   const plan: DesktopPlan = { jobs: [], skipped: [] };
   for (const target of ORDER.filter((t) => targets.includes(t))) {
     if (target === 'windows') plan.jobs.push({ target, platform: 'win32', arch: 'x64', warnings: [] });
     else if (target === 'linux') plan.jobs.push({ target, platform: 'linux', arch: 'x64', warnings: [] });
     else if (target === 'mac') {
-      if (host === 'darwin') plan.jobs.push({ target, platform: 'darwin', arch: 'universal', warnings: [] });
-      else if (host === 'win32') {
+      if (host === 'darwin' && tools.lipo) plan.jobs.push({ target, platform: 'darwin', arch: 'universal', warnings: [] });
+      else if (host === 'darwin') {
+        plan.jobs.push(
+          arm64MacJob(
+            gsError(
+              'MAC_NOT_UNIVERSAL',
+              "This Mac build runs on Apple Silicon only: universal builds need Apple's command-line tools (lipo), which aren't installed.",
+              'Run `xcode-select --install`, then build again to include Intel Macs.',
+            ),
+          ),
+        );
+      } else if (host === 'win32') {
         plan.skipped.push({
           target,
           fatal: true,
@@ -43,18 +78,15 @@ export function planDesktopJobs(targets: readonly Target[], host: NodeJS.Platfor
           ),
         });
       } else {
-        plan.jobs.push({
-          target,
-          platform: 'darwin',
-          arch: 'arm64',
-          warnings: [
+        plan.jobs.push(
+          arm64MacJob(
             gsError(
               'MAC_NOT_UNIVERSAL',
               "This Mac build runs on Apple Silicon only; universal builds need a Mac.",
               'Build on a Mac (or the GitHub Actions template) to include Intel Macs.',
             ),
-          ],
-        });
+          ),
+        );
       }
     } else {
       plan.skipped.push({
