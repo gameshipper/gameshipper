@@ -6,6 +6,7 @@ import { parseConfig } from '../../src/core/config/load.js';
 import type { packageDesktop } from '../../src/core/desktop/package.js';
 import type { buildMobileTargets, MobileInput } from '../../src/core/mobile/build-mobile.js';
 import { GsFailure } from '../../src/core/result.js';
+import type { finishMacApp } from '../../src/core/sign/mac.js';
 import { testCtx } from '../helpers/ctx.js';
 import { makeSolidPng } from '../helpers/png.js';
 import { makeTmpDir, writeFiles } from '../helpers/tmp.js';
@@ -32,6 +33,8 @@ function project(): { dir: string; shellDir: string } {
 const config = (extra: object = {}) => parseConfig({ name: 'x', version: '1.0.0', ...extra }).data!;
 /** Keeps darwin-host tests from probing this machine for Xcode's tools. */
 const tools = { lipo: true };
+/** Stands in for signing, so a Mac target built on a Mac (the default host here) never runs codesign. */
+const finishMac: typeof finishMacApp = async () => ({ signing: 'adhoc', notarized: false, warnings: [] });
 
 describe('runBuild', () => {
   it('builds each target independently and reports status per target', async () => {
@@ -98,14 +101,14 @@ describe('runBuild', () => {
 
   it('--target limits the build', async () => {
     const { dir, shellDir } = project();
-    const r = await runBuild(testCtx(dir), config(), { shellDir, host: 'darwin', tools, only: ['linux'], pack: fakePack });
+    const r = await runBuild(testCtx(dir), config(), { shellDir, host: 'darwin', tools, only: ['linux'], pack: fakePack, finishMac });
     expect(r.ok).toBe(true);
     expect(r.data!.targets.map((t) => t.target)).toEqual(['linux']);
   });
 
   it('TARGET_NOT_CONFIGURED for a target missing from the config', async () => {
     const { dir, shellDir } = project();
-    const r = await runBuild(testCtx(dir), config({ targets: ['windows'] }), { shellDir, only: ['mac'], pack: fakePack });
+    const r = await runBuild(testCtx(dir), config({ targets: ['windows'] }), { shellDir, only: ['mac'], pack: fakePack, finishMac });
     expect(r.errors[0].code).toBe('TARGET_NOT_CONFIGURED');
   });
 
@@ -115,7 +118,7 @@ describe('runBuild', () => {
       if (job.target === 'windows') throw new GsFailure('PACKAGE_FAILED', 'disk full', 'free space');
       return fakePack(ctx, cfg, appDir, icon, job);
     };
-    const r = await runBuild(testCtx(dir), config({ targets: ['windows', 'linux'] }), { shellDir, host: 'darwin', tools, pack });
+    const r = await runBuild(testCtx(dir), config({ targets: ['windows', 'linux'] }), { shellDir, host: 'darwin', tools, pack, finishMac });
     expect(r.data!.targets.map((t) => [t.target, t.status])).toEqual([
       ['windows', 'failed'],
       ['linux', 'built'],
@@ -136,7 +139,7 @@ describe('runBuild', () => {
 
   it('stops early with the preparation error', async () => {
     const dir = makeTmpDir();
-    const r = await runBuild(testCtx(dir), config(), { shellDir: makeTmpDir(), pack: fakePack });
+    const r = await runBuild(testCtx(dir), config(), { shellDir: makeTmpDir(), pack: fakePack, finishMac });
     expect(r.errors[0].code).toBe('ENTRY_MISSING');
   });
 
@@ -161,7 +164,7 @@ describe('runBuild', () => {
 
   it('ASSET_MISSING when the icon file is gone', async () => {
     const { dir, shellDir } = project();
-    const r = await runBuild(testCtx(dir), config({ icon: 'icon.png' }), { shellDir, pack: fakePack });
+    const r = await runBuild(testCtx(dir), config({ icon: 'icon.png' }), { shellDir, pack: fakePack, finishMac });
     expect(r.errors[0].code).toBe('ASSET_MISSING');
   });
 
@@ -182,7 +185,7 @@ describe('runBuild', () => {
   it('frozenLock reaches CDN bundling', async () => {
     const { dir, shellDir } = project();
     writeFiles(dir, { 'index.html': '<script src="https://cdn.example.invalid/lib.js"></script>' });
-    const r = await runBuild(testCtx(dir), config(), { shellDir, frozenLock: true, pack: fakePack });
+    const r = await runBuild(testCtx(dir), config(), { shellDir, frozenLock: true, pack: fakePack, finishMac });
     expect(r.errors[0].code).toBe('CDN_NOT_LOCKED');
   });
 });

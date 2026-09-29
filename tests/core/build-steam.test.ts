@@ -96,7 +96,7 @@ describe('runBuild with Steam and plugins', () => {
 
   it('bundles only the natives of the targets being built', async () => {
     const { dir, shellDir } = project();
-    await runBuild(testCtx(dir), config(), { shellDir, host: 'darwin', tools, only: ['linux'], pack: fakePack, env: {}, koffi });
+    await runBuild(testCtx(dir), config(), { shellDir, host: 'darwin', tools, only: ['linux'], pack: fakePack, env: {}, koffi, finishMac });
     expect(fs.readdirSync(path.join(dir, '.gameshipper', 'app', 'node_modules', '@koromix'))).toEqual(['koffi-linux-x64']);
   });
 
@@ -108,7 +108,7 @@ describe('runBuild with Steam and plugins', () => {
 
   it('a failing beforePackage stops the build', async () => {
     const { dir, shellDir } = project({ 'stop.mjs': "export default { name: 'stop', beforePackage() { throw new Error('not today'); } };" });
-    const r = await runBuild(testCtx(dir), config({ plugins: ['stop.mjs'] }), { shellDir, host: 'darwin', tools, pack: fakePack, env: {}, koffi });
+    const r = await runBuild(testCtx(dir), config({ plugins: ['stop.mjs'] }), { shellDir, host: 'darwin', tools, pack: fakePack, env: {}, koffi, finishMac });
     expect(r.errors.map((e) => e.code)).toEqual(['PLUGIN_HOOK_FAILED']);
     expect(r.data).toBeUndefined();
   });
