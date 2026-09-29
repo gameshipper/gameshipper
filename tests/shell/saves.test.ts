@@ -1,7 +1,7 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { createSaveStore } from '../../src/shell/saves.js';
+import { callSaveStore, createSaveStore } from '../../src/shell/saves.js';
 import { makeTmpDir } from '../helpers/tmp.js';
 
 describe('createSaveStore', () => {
@@ -63,6 +63,17 @@ describe('createSaveStore', () => {
     expect(await store.load('slot')).toBeNull();
   });
 
+  it('lists in call order with pending saves and deletes', async () => {
+    const store = createSaveStore(makeTmpDir());
+    void store.save('a', 1);
+    expect(await store.list()).toEqual(['a']);
+    const listed = store.list();
+    const deleted = store.delete('a');
+    expect(await listed).toEqual(['a']);
+    await deleted;
+    expect(await store.list()).toEqual([]);
+  });
+
   it('lists only valid slot names that are regular files', async () => {
     const dir = makeTmpDir();
     const store = createSaveStore(dir);
@@ -74,5 +85,32 @@ describe('createSaveStore', () => {
     fs.writeFileSync(path.join(dir, 'notes.txt'), '1');
     fs.mkdirSync(path.join(dir, 'x.json'));
     expect(await store.list()).toEqual(['good']);
+  });
+});
+
+describe('callSaveStore', () => {
+  const game = 'app://game/index.html';
+
+  it('runs save, load, list and delete for the game page', async () => {
+    const store = createSaveStore(makeTmpDir());
+    await callSaveStore(store, game, 'save', 'slot1', { hp: 3 });
+    expect(await callSaveStore(store, game, 'load', 'slot1')).toEqual({ hp: 3 });
+    expect(await callSaveStore(store, game, 'list')).toEqual(['slot1']);
+    await callSaveStore(store, game, 'delete', 'slot1');
+    expect(await callSaveStore(store, game, 'list')).toEqual([]);
+  });
+
+  it('refuses callers that are not game pages', async () => {
+    const store = createSaveStore(makeTmpDir());
+    for (const sender of ['https://evil.example/', 'app://other/index.html', null, undefined]) {
+      await expect(callSaveStore(store, sender, 'save', 'pwn', 1)).rejects.toThrow(/only available to the game/);
+    }
+    expect(await store.list()).toEqual([]);
+  });
+
+  it('passes slots through unconverted and rejects unknown operations', async () => {
+    const store = createSaveStore(makeTmpDir());
+    await expect(callSaveStore(store, game, 'save', undefined, 1)).rejects.toThrow(/Invalid save slot name/);
+    await expect(callSaveStore(store, game, 'format')).rejects.toThrow(/Unknown saves operation: format/);
   });
 });

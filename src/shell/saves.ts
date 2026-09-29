@@ -1,5 +1,6 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
+import { isGameUrl } from './policy.js';
 
 export interface SaveStore {
   save(slot: string, data: unknown): Promise<void>;
@@ -23,19 +24,12 @@ let tmpCounter = 0;
 export function createSaveStore(dir: string): SaveStore {
   const file = (slot: string) => path.join(dir, `${slot}.json`);
 
-  // Operations on one slot run one after another, in call order, so the last save wins
-  // and a delete issued after a save is not undone by it.
-  const queues = new Map<string, Promise<void>>();
-  function inOrder<T>(slot: string, op: () => Promise<T>): Promise<T> {
-    const result = (queues.get(slot) ?? Promise.resolve()).then(op);
-    const tail = result.then(
-      () => undefined,
-      () => undefined,
-    );
-    queues.set(slot, tail);
-    void tail.then(() => {
-      if (queues.get(slot) === tail) queues.delete(slot);
-    });
+  // Operations run one after another, in call order: the last save to a slot wins, a delete
+  // issued after a save is not undone by it, and list() sees every earlier save and delete.
+  let queue: Promise<unknown> = Promise.resolve();
+  function inOrder<T>(op: () => Promise<T>): Promise<T> {
+    const result = queue.then(op);
+    queue = result.catch(() => undefined);
     return result;
   }
 
@@ -44,7 +38,7 @@ export function createSaveStore(dir: string): SaveStore {
       checkSlot(slot);
       const json = JSON.stringify(data);
       if (json === undefined) throw new Error('Save data must be JSON-serializable (got undefined).');
-      return inOrder(slot, async () => {
+      return inOrder(async () => {
         await fs.promises.mkdir(dir, { recursive: true });
         const tmp = `${file(slot)}.${process.pid}.${++tmpCounter}.tmp`;
         try {
@@ -58,7 +52,7 @@ export function createSaveStore(dir: string): SaveStore {
     },
     async load(slot) {
       checkSlot(slot);
-      return inOrder(slot, async () => {
+      return inOrder(async () => {
         try {
           return JSON.parse(await fs.promises.readFile(file(slot), 'utf8')) as unknown;
         } catch (e) {
@@ -68,20 +62,49 @@ export function createSaveStore(dir: string): SaveStore {
       });
     },
     async list() {
-      try {
-        return (await fs.promises.readdir(dir, { withFileTypes: true }))
-          .filter((d) => d.isFile() && d.name.endsWith('.json'))
-          .map((d) => d.name.slice(0, -'.json'.length))
-          .filter((slot) => SLOT.test(slot))
-          .sort();
-      } catch (e) {
-        if ((e as NodeJS.ErrnoException).code === 'ENOENT') return [];
-        throw e;
-      }
+      return inOrder(async () => {
+        try {
+          return (await fs.promises.readdir(dir, { withFileTypes: true }))
+            .filter((d) => d.isFile() && d.name.endsWith('.json'))
+            .map((d) => d.name.slice(0, -'.json'.length))
+            .filter((slot) => SLOT.test(slot))
+            .sort();
+        } catch (e) {
+          if ((e as NodeJS.ErrnoException).code === 'ENOENT') return [];
+          throw e;
+        }
+      });
     },
     async delete(slot) {
       checkSlot(slot);
-      return inOrder(slot, () => fs.promises.rm(file(slot), { force: true }));
+      return inOrder(() => fs.promises.rm(file(slot), { force: true }));
     },
   };
+}
+
+/**
+ * Runs one `window.gameshipper.saves` call arriving over IPC. Only the game's own pages may use
+ * saves, so a web page the window somehow ends up showing can't read or write them. Slots are
+ * passed through unconverted: the store rejects anything that isn't a valid slot name.
+ */
+export async function callSaveStore(
+  store: SaveStore,
+  senderUrl: string | null | undefined,
+  op: unknown,
+  slot?: unknown,
+  data?: unknown,
+): Promise<unknown> {
+  if (!isGameUrl(senderUrl)) throw new Error('Saves are only available to the game (app://game/).');
+  switch (op) {
+    case 'save':
+      return store.save(slot as string, data);
+    case 'load':
+      return store.load(slot as string);
+    case 'list':
+      return store.list();
+    case 'delete':
+      return store.delete(slot as string);
+    default:
+      throw new Error(`Unknown saves operation: ${String(op)}`);
+  }
 }
