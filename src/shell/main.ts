@@ -2,6 +2,7 @@ import { app, BrowserWindow, ipcMain, Menu, protocol, session, shell, type WebCo
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { Readable } from 'node:stream';
+import { floatingKeyboardArgs } from './deck-keyboard.js';
 import {
   createDiagnostics,
   LOAD_BACKSTOP_EXTRA_SECONDS,
@@ -12,7 +13,9 @@ import {
 import { chromiumSwitches } from './flags.js';
 import { isFullscreenToggle } from './keys.js';
 import { mimeType } from './mime.js';
+import { chooseOverlay, startRepaint } from './overlay.js';
 import { caseMismatch, requestParts, userDataDir } from './paths.js';
+import { createPluginHost, type PluginHost } from './plugins-runtime.js';
 import {
   classifyLoadFailure,
   CROSS_ORIGIN_ISOLATION_HEADERS,
@@ -26,6 +29,8 @@ import {
 import { planFileResponse } from './range.js';
 import { entryUrl, readRuntimeConfig } from './runtime-config.js';
 import { callSaveStore, createSaveStore, type SaveStore } from './saves.js';
+import { createSteamApi } from './steam-api.js';
+import { isSteamDeck, startSteam, type SteamSession, type SteamworksLoad } from './steam.js';
 
 const env = process.env;
 const diagnostics = createDiagnostics(env.GAMESHIPPER_LOG ?? null);
@@ -40,6 +45,9 @@ const errorText = (e: unknown): string => {
   }
 };
 
+/** Set once Steam has been started (below); a smoke run that fails before that has none. */
+let steam: SteamSession | null = null;
+
 // A smoke run always ends with a summary or a non-zero exit code; it never hangs.
 let smokeDone = false;
 /** Set once the page has finished loading (or its load was stopped); the backstop checks it. */
@@ -48,6 +56,15 @@ function finishSmoke(code: number): void {
   if (smokeDone) return;
   smokeDone = true;
   let exitCode = code;
+  const client = steam?.client;
+  if (client) {
+    try {
+      // Whether Steam says its overlay hooked the game: only the events log keeps it.
+      diagnostics.record({ kind: 'steam-overlay', enabled: client.utils.isOverlayEnabled() });
+    } catch {
+      // Asking must never keep the run from ending.
+    }
+  }
   if (env.GAMESHIPPER_SMOKE_OUT) {
     try {
       writeSummary(env.GAMESHIPPER_SMOKE_OUT, diagnostics.summary());
@@ -56,6 +73,8 @@ function finishSmoke(code: number): void {
       exitCode = code || 1;
     }
   }
+  // app.exit() skips will-quit, so Steam is told here that the game closed.
+  steam?.stop();
   app.exit(exitCode);
 }
 
@@ -74,8 +93,45 @@ if (smoke) {
 env.ELECTRON_DISABLE_SECURITY_WARNINGS = 'true';
 
 const config = readRuntimeConfig(path.join(__dirname, 'config.json'));
-const gameRoot = path.join(__dirname, '..', 'game');
+const appRoot = path.join(__dirname, '..');
+const gameRoot = path.join(appRoot, 'game');
 const gameEntry = entryUrl(config.entry);
+
+/** Loaded only when the app has a Steam library, so builds without the SDK never load native code. */
+function loadSteamworks(): SteamworksLoad {
+  const steamworks = require('steamworks-ffi-node') as typeof import('steamworks-ffi-node');
+  return {
+    instance: () => steamworks.default.getInstance(),
+    logger: steamworks.SteamLogger,
+    isSteamRunning(libraryPath) {
+      const koffi = require('koffi') as typeof import('koffi');
+      return Boolean(koffi.load(libraryPath).func('SteamAPI_IsSteamRunning', 'bool', [])());
+    },
+  };
+}
+
+// Steam starts before the window: a packaged build of a real App ID that Steam didn't launch quits at
+// once, so Steam can launch it properly (restartAppIfNecessary).
+steam = startSteam({
+  appId: config.steamAppId,
+  // Inside app.asar in packaged builds: steamworks-ffi-node looks in app.asar.unpacked itself.
+  sdkDir: path.join(appRoot, 'steamworks_sdk'),
+  isPackaged: app.isPackaged,
+  platform: process.platform,
+  env,
+  load: loadSteamworks,
+});
+const overlay = steam.client ? chooseOverlay(config.steamOverlay, process.platform, env) : 'none';
+diagnostics.record({ kind: 'steam', state: steam.state, appId: config.steamAppId, overlay, message: steam.message });
+if (steam.state === 'restarting') app.exit(0);
+
+// Plugins load in the background from the start; a call from the game waits for its plugin.
+const plugins = createPluginHost(
+  appRoot,
+  config.plugins,
+  (url) => import(url),
+  (plugin, message) => diagnostics.record({ kind: 'plugin-error', plugin, message }),
+);
 
 if (smoke) {
   // Backstop: end the run even if the page never loads, and report that as a failure, not a pass.
@@ -149,6 +205,35 @@ function registerSaves(store: SaveStore): void {
   );
 }
 
+/** window.steam, and on a Steam Deck Steam's on-screen keyboard over the game's text fields. */
+function registerSteam(): void {
+  const deck = isSteamDeck(env);
+  const client = steam?.client ?? null;
+  const api = createSteamApi({ client, isSteamDeck: deck });
+  ipcMain.handle('gameshipper:steam', (event, op: unknown, args: unknown) => api.call(event.senderFrame?.url, op, args));
+  if (!client || !deck) return;
+  const keyboard = (event: Electron.IpcMainEvent, show: () => void): void => {
+    if (!isGameUrl(event.senderFrame?.url)) return;
+    try {
+      show();
+    } catch (e) {
+      const message = `Couldn't use Steam's on-screen keyboard: ${errorText(e)}`;
+      diagnostics.record({ kind: 'console', level: 'warning', message, source: '', line: 0 });
+    }
+  };
+  ipcMain.on('gameshipper:text-focus', (event, info: unknown) =>
+    keyboard(event, () => {
+      const args = floatingKeyboardArgs(info);
+      if (args) client.utils.showFloatingGamepadTextInput(...args);
+    }),
+  );
+  ipcMain.on('gameshipper:text-blur', (event) => keyboard(event, () => client.utils.dismissFloatingGamepadTextInput()));
+}
+
+function registerPlugins(host: PluginHost): void {
+  ipcMain.handle('gameshipper:plugin', (event, name: unknown, fn: unknown, args: unknown) => host.call(event.senderFrame?.url, name, fn, args));
+}
+
 function watchRemoteRequests(): void {
   const filter = { urls: ['http://*/*', 'https://*/*'] };
   session.defaultSession.webRequest.onCompleted(filter, (d) =>
@@ -215,14 +300,14 @@ function keepInGame(details: { url: string; isMainFrame: boolean; initiator?: We
   leaveGame(details.url, originOf(details.initiator));
 }
 
-function createWindow(): BrowserWindow {
+function createWindow(pluginManifest: Record<string, string[]>): BrowserWindow {
   const iconFile = path.join(__dirname, 'icon.png');
   const win = new BrowserWindow({
     title: config.name,
     width: config.window.width,
     height: config.window.height,
     resizable: config.window.resizable,
-    fullscreen: env.SteamDeck === '1' || (config.window.fullscreen && env.GAMESHIPPER_WINDOWED !== '1'),
+    fullscreen: isSteamDeck(env) || (config.window.fullscreen && env.GAMESHIPPER_WINDOWED !== '1'),
     backgroundColor: '#000000',
     autoHideMenuBar: true,
     show: false,
@@ -232,6 +317,8 @@ function createWindow(): BrowserWindow {
       contextIsolation: true,
       sandbox: true,
       nodeIntegration: false,
+      // The sandboxed preload can't read files, so it gets the plugin list on its command line.
+      additionalArguments: [`--gameshipper-plugins=${encodeURIComponent(JSON.stringify(pluginManifest))}`],
     },
   });
   const wc = win.webContents;
@@ -294,6 +381,23 @@ function createWindow(): BrowserWindow {
   return win;
 }
 
+/** Gives the Steam overlay frames to draw on (overlay.ts says why each OS differs). */
+function attachOverlay(win: BrowserWindow): void {
+  const client = steam?.client;
+  if (!client) return;
+  if (overlay === 'repaint') startRepaint(win);
+  if (overlay === 'native') {
+    win.webContents.once('did-finish-load', () => {
+      try {
+        client.addElectronSteamOverlay(win, { title: config.name, fps: 60 });
+      } catch (e) {
+        const message = `Couldn't start the Steam overlay window: ${errorText(e)}`;
+        diagnostics.record({ kind: 'console', level: 'warning', message, source: '', line: 0 });
+      }
+    });
+  }
+}
+
 function armSmokeTest(win: BrowserWindow): void {
   const wc = win.webContents;
   const runFullDuration = (): void => {
@@ -312,16 +416,23 @@ function armSmokeTest(win: BrowserWindow): void {
 }
 
 app.on('window-all-closed', () => app.quit());
+// Steam sees the game as closed only once it shuts down its connection.
+app.on('will-quit', () => steam?.stop());
 
 void app.whenReady().then(() => {
+  // Steam is launching the game again; this copy only waits to exit.
+  if (steam?.state === 'restarting') return;
   Menu.setApplicationMenu(
     process.platform === 'darwin' ? Menu.buildFromTemplate([{ role: 'appMenu' }, { role: 'editMenu' }, { role: 'windowMenu' }]) : null,
   );
   protocol.handle('app', serve);
   restrictPermissions();
   registerSaves(createSaveStore(path.join(app.getPath('userData'), 'saves')));
+  registerSteam();
+  registerPlugins(plugins);
   watchRemoteRequests();
-  const win = createWindow();
+  const win = createWindow(plugins.manifest());
+  attachOverlay(win);
   if (smoke) armSmokeTest(win);
   void loadGame(win);
 });

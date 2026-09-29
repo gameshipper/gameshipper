@@ -4,6 +4,24 @@
 const { contextBridge, ipcRenderer } = require('electron') as typeof import('electron');
 
 const callSaves = (op: string, ...args: unknown[]): Promise<unknown> => ipcRenderer.invoke('gameshipper:saves', op, ...args);
+/** Every op must be in STEAM_OPS (src/shell/steam-api.ts); tests/shell/preload.test.ts checks. */
+const callSteam = (op: string, ...args: unknown[]): Promise<unknown> => ipcRenderer.invoke('gameshipper:steam', op, args);
+
+// gameshipper.plugins.<name>.<fn>(...args), from the list main.ts passes on the command line: a sandboxed
+// preload can't read files.
+const PLUGIN_ARG = '--gameshipper-plugins=';
+let pluginManifest: Record<string, string[]> = {};
+try {
+  const arg = process.argv.find((a) => a.startsWith(PLUGIN_ARG));
+  if (arg) pluginManifest = JSON.parse(decodeURIComponent(arg.slice(PLUGIN_ARG.length))) as Record<string, string[]>;
+} catch {
+  pluginManifest = {};
+}
+const plugins: Record<string, Record<string, (...args: unknown[]) => Promise<unknown>>> = {};
+for (const [name, fns] of Object.entries(pluginManifest)) {
+  plugins[name] = {};
+  for (const fn of fns) plugins[name][fn] = (...args: unknown[]) => ipcRenderer.invoke('gameshipper:plugin', name, fn, args);
+}
 
 contextBridge.exposeInMainWorld('gameshipper', {
   version: 1,
@@ -13,4 +31,59 @@ contextBridge.exposeInMainWorld('gameshipper', {
     list: () => callSaves('list'),
     delete: (slot: string) => callSaves('delete', slot),
   },
+  plugins,
 });
+
+// Every method resolves to a harmless value (false, null or []) when Steam isn't available.
+contextBridge.exposeInMainWorld('steam', {
+  isAvailable: () => callSteam('isAvailable'),
+  getUserName: () => callSteam('getUserName'),
+  getSteamId: () => callSteam('getSteamId'),
+  getLanguage: () => callSteam('getLanguage'),
+  isSteamDeck: () => callSteam('isSteamDeck'),
+  unlockAchievement: (id: string) => callSteam('unlockAchievement', id),
+  clearAchievement: (id: string) => callSteam('clearAchievement', id),
+  isAchievementUnlocked: (id: string) => callSteam('isAchievementUnlocked', id),
+  listAchievements: () => callSteam('listAchievements'),
+  getStat: (name: string, kind?: 'int' | 'float') => callSteam('getStat', name, kind),
+  setStat: (name: string, value: number, kind?: 'int' | 'float') => callSteam('setStat', name, value, kind),
+  storeStats: () => callSteam('storeStats'),
+  uploadLeaderboardScore: (leaderboard: string, score: number) => callSteam('uploadLeaderboardScore', leaderboard, score),
+  getLeaderboardEntries: (leaderboard: string, count?: number) => callSteam('getLeaderboardEntries', leaderboard, count),
+  setRichPresence: (key: string, value: string | null) => callSteam('setRichPresence', key, value),
+  clearRichPresence: () => callSteam('clearRichPresence'),
+  activateOverlay: (dialog?: string) => callSteam('activateOverlay', dialog),
+  activateOverlayWebPage: (url: string) => callSteam('activateOverlayWebPage', url),
+  // GemShell-style names, so games written for GemShell need few or no changes.
+  getPersonaName: () => callSteam('getUserName'),
+  getSteamID: () => callSteam('getSteamId'),
+  getAchievement: (id: string) => callSteam('isAchievementUnlocked', id),
+  getStatInt: (name: string) => callSteam('getStat', name, 'int'),
+  getStatFloat: (name: string) => callSteam('getStat', name, 'float'),
+  setStatInt: (name: string, value: number) => callSteam('setStat', name, value, 'int'),
+  setStatFloat: (name: string, value: number) => callSteam('setStat', name, value, 'float'),
+  requestStats: () => callSteam('isAvailable'),
+  requestStatsAndWait: () => callSteam('isAvailable'),
+  runCallbacks: () => Promise.resolve(),
+});
+
+// Steam Deck on-screen keyboard: tell the main process when a text field gains or loses focus.
+window.addEventListener(
+  'focusin',
+  (event) => {
+    const el = event.target as HTMLElement | null;
+    if (!el || typeof el.getBoundingClientRect !== 'function') return;
+    const tag = el.tagName.toLowerCase();
+    if (tag !== 'input' && tag !== 'textarea' && !el.isContentEditable) return;
+    const r = el.getBoundingClientRect();
+    ipcRenderer.send('gameshipper:text-focus', {
+      tag,
+      type: el.getAttribute('type') ?? '',
+      editable: el.isContentEditable,
+      rect: { x: r.x, y: r.y, width: r.width, height: r.height },
+      scale: window.devicePixelRatio,
+    });
+  },
+  true,
+);
+window.addEventListener('focusout', () => ipcRenderer.send('gameshipper:text-blur'), true);
