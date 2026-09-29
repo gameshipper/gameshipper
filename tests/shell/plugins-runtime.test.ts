@@ -37,6 +37,14 @@ describe('createPluginHost', () => {
     await expect(h.call(GAME, 'echo', '__proto__', [])).rejects.toThrow('Unknown plugin function');
   });
 
+  it("runs only the plugin's own functions, never inherited ones", async () => {
+    const inherited = [{ name: 'proto', entry: 'plugins/proto/index.mjs', functions: ['toString', 'hasOwnProperty'] }];
+    const h = createPluginHost('/app', inherited, async () => ({ default: { name: 'proto', main: {} } }), () => {});
+    await expect(h.call(GAME, 'proto', 'toString', [])).rejects.toThrow('Plugin proto has no function toString.');
+    await expect(h.call(GAME, 'proto', 'hasOwnProperty', ['x'])).rejects.toThrow('has no function hasOwnProperty');
+    await expect(h.call(GAME, 'constructor', 'name', [])).rejects.toThrow('Unknown plugin function');
+  });
+
   it('answers only the game itself', async () => {
     const { host: h } = host();
     await expect(h.call('https://example.com/', 'echo', 'shout', ['hi'])).rejects.toThrow('Plugins are only available to the game (app://game/).');

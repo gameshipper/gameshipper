@@ -97,6 +97,12 @@ describe('runBuild with Steam and plugins', () => {
     expect(fs.readdirSync(path.join(dir, '.gameshipper', 'app', 'node_modules', '@koromix'))).toEqual(['koffi-linux-x64']);
   });
 
+  it("carries the plugins' warnings", async () => {
+    const { dir, shellDir } = project({ 'helper.mjs': 'export const x = 1;', 'single.mjs': "import { x } from './helper.mjs';\nexport default { name: 'single', main: { x: () => x } };" });
+    const r = await runBuild(testCtx(dir), config({ targets: ['linux'], plugins: ['single.mjs'] }), { shellDir, host: 'linux', pack: fakePack, env: {}, koffi });
+    expect(r.warnings.map((w) => w.code)).toEqual(['PLUGIN_IMPORTS_NOT_COPIED', 'ICON_MISSING']);
+  });
+
   it('a failing beforePackage stops the build', async () => {
     const { dir, shellDir } = project({ 'stop.mjs': "export default { name: 'stop', beforePackage() { throw new Error('not today'); } };" });
     const r = await runBuild(testCtx(dir), config({ plugins: ['stop.mjs'] }), { shellDir, host: 'darwin', tools, pack: fakePack, env: {}, koffi });

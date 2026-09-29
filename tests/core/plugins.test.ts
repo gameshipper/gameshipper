@@ -2,6 +2,7 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { parseConfig } from '../../src/core/config/load.js';
+import { listFiles } from '../../src/core/fsutil.js';
 import { copyPlugins, loadPlugins, runPluginHook } from '../../src/core/plugins.js';
 import { testCtx } from '../helpers/ctx.js';
 import { makeTmpDir, readText, writeFiles } from '../helpers/tmp.js';
@@ -64,6 +65,90 @@ describe('loadPlugins', () => {
     expect(await reason(['emptyfolder'])).toContain('index.mjs');
     expect(await reason(['badpkg'])).toContain("its package.json can't be read");
   });
+
+  it("PLUGIN_LOAD_FAILED when a folder plugin's main is outside its folder", async () => {
+    const dir = makeTmpDir();
+    writeFiles(dir, {
+      'shared.mjs': "export default { name: 'shared' };",
+      'up/package.json': '{"main":"../shared.mjs"}',
+      'absolute/package.json': JSON.stringify({ main: path.join(dir, 'shared.mjs') }),
+      'missing/package.json': '{"main":"src/nope.mjs"}',
+    });
+    for (const spec of ['up', 'absolute']) {
+      await expect(loadPlugins(testCtx(dir), config([spec])), spec).rejects.toMatchObject({
+        error: { code: 'PLUGIN_LOAD_FAILED', message: expect.stringContaining('outside the plugin folder') },
+      });
+    }
+    if (process.platform !== 'win32') {
+      writeFiles(dir, { 'linked/package.json': '{"main":"index.mjs"}' });
+      fs.symlinkSync(path.join(dir, 'shared.mjs'), path.join(dir, 'linked', 'index.mjs'));
+      await expect(loadPlugins(testCtx(dir), config(['linked']))).rejects.toMatchObject({
+        error: { code: 'PLUGIN_LOAD_FAILED', message: expect.stringContaining('outside the plugin folder') },
+      });
+    }
+    await expect(loadPlugins(testCtx(dir), config(['missing']))).rejects.toMatchObject({
+      error: { code: 'PLUGIN_LOAD_FAILED', message: expect.stringContaining('"main" (src/nope.mjs) doesn\'t exist') },
+    });
+  });
+
+  it('PLUGIN_LOAD_FAILED for names that differ only in case, or that every object already has', async () => {
+    const dir = makeTmpDir();
+    const files: Record<string, string> = { 'lower.mjs': "export default { name: 'echo' };", 'upper.mjs': "export default { name: 'Echo' };" };
+    for (const name of ['constructor', 'toString', 'hasOwnProperty', 'valueOf', 'isPrototypeOf']) files[`${name}.mjs`] = `export default { name: '${name}' };`;
+    writeFiles(dir, files);
+    await expect(loadPlugins(testCtx(dir), config(['lower.mjs', 'upper.mjs']))).rejects.toMatchObject({
+      error: { code: 'PLUGIN_LOAD_FAILED', message: expect.stringContaining('"echo", which differs only in letter case') },
+    });
+    for (const name of ['constructor', 'toString', 'hasOwnProperty', 'valueOf', 'isPrototypeOf']) {
+      await expect(loadPlugins(testCtx(dir), config([`${name}.mjs`])), name).rejects.toMatchObject({
+        error: { code: 'PLUGIN_LOAD_FAILED', message: expect.stringContaining(`"${name}" can't be a plugin name`) },
+      });
+    }
+  });
+
+  it('loads fresh code when a plugin changes between loads (a long-running process)', async () => {
+    const dir = makeTmpDir();
+    const file = path.join(dir, 'live.mjs');
+    fs.writeFileSync(file, "export default { name: 'live', main: { one() {} } };");
+    expect((await loadPlugins(testCtx(dir), config(['live.mjs'])))[0].functions).toEqual(['one']);
+    fs.writeFileSync(file, "export default { name: 'live', main: { one() {}, two() {} } };");
+    const later = new Date(Date.now() + 10_000);
+    fs.utimesSync(file, later, later);
+    expect((await loadPlugins(testCtx(dir), config(['live.mjs'])))[0].functions).toEqual(['one', 'two']);
+  });
+
+  it('warns PLUGIN_IMPORTS_NOT_COPIED when a single-file plugin imports other files or packages', async () => {
+    const dir = makeTmpDir();
+    writeFiles(dir, {
+      'helper.mjs': 'export const x = 1;',
+      'node_modules/leftpad/package.json': '{"name":"leftpad","main":"index.js"}',
+      'node_modules/leftpad/index.js': 'module.exports = (s) => s;',
+      'relative.mjs': "import { x } from './helper.mjs';\nexport default { name: 'relative', main: { go: () => x } };",
+      'bare.mjs': "import leftpad from 'leftpad';\nexport default { name: 'bare', main: { go: () => leftpad('x') } };",
+      'lazy.mjs': "export default { name: 'lazy', main: { async go() { return import('./helper.mjs'); } } };",
+      'required.cjs': "const { x } = require('./helper.cjs');\nmodule.exports = { name: 'required', main: { go: () => x } };",
+      'helper.cjs': 'exports.x = 1;',
+      // Node's built-in modules and Electron are always there.
+      'builtins.mjs':
+        "import * as fs from 'node:fs';\nimport path from 'path';\nexport default { name: 'builtins', main: { async open(u) { const { shell } = await import('electron'); return shell.openExternal(u); } } };",
+      'folder/index.mjs': "import { x } from './more.mjs';\nexport default { name: 'folder', main: { go: () => x } };",
+      'folder/more.mjs': 'export const x = 1;',
+    });
+    const specs = ['relative.mjs', 'bare.mjs', 'lazy.mjs', 'required.cjs', 'builtins.mjs', 'folder'];
+    const plugins = await loadPlugins(testCtx(dir), config(specs));
+    const warned = plugins.map((p) => [p.name, p.warnings.map((w) => w.code)]);
+    expect(warned).toEqual([
+      ['relative', ['PLUGIN_IMPORTS_NOT_COPIED']],
+      ['bare', ['PLUGIN_IMPORTS_NOT_COPIED']],
+      ['lazy', ['PLUGIN_IMPORTS_NOT_COPIED']],
+      ['required', ['PLUGIN_IMPORTS_NOT_COPIED']],
+      ['builtins', []],
+      ['folder', []],
+    ]);
+    expect(plugins[0].warnings[0].message).toContain('./helper.mjs');
+    expect(plugins[0].warnings[0].message).toContain('only the plugin file is packaged');
+    expect(plugins[0].warnings[0].fix).toMatch(/^Bundle it into one file .* or make it a folder plugin/);
+  });
 });
 
 describe('copyPlugins', () => {
@@ -87,6 +172,68 @@ describe('copyPlugins', () => {
   });
 });
 
+describe('copyPlugins by staging rules', () => {
+  const STATS = "export default { name: 'stats', main: { n() { return 1; } } };\n";
+
+  it('leaves out secrets, the SDK, build output and tool folders', async () => {
+    const dir = makeTmpDir();
+    writeFiles(dir, {
+      'tools/stats/index.mjs': STATS,
+      'tools/stats/lib/util.js': '',
+      'tools/stats/.env': 'SECRET=1',
+      'tools/stats/lib/.env.local': 'SECRET=1',
+      'tools/stats/steam_appid.txt': '480',
+      'tools/stats/lib/.DS_Store': '',
+      'tools/stats/.git/HEAD': 'ref',
+      'tools/stats/vendor/steamworks_sdk_165.zip': 'zip',
+      'tools/stats/valve/redistributable_bin/osx/libsteam_api.dylib': 'lib',
+      'tools/stats/.sdk/any.zip': 'zip',
+      'tools/stats/.gameshipper/app/shell/main.js': '',
+      'tools/stats/out/windows/game.exe': '',
+      'tools/stats/node_modules/.bin/tool': '',
+      'tools/stats/node_modules/dep/index.js': '',
+      'tools/stats/node_modules/dep/out/built.js': '',
+      'tools/stats/node_modules/dep/node_modules/.bin/x': '',
+    });
+    if (process.platform !== 'win32') {
+      fs.symlinkSync('lib', path.join(dir, 'tools', 'stats', 'alias'));
+      fs.symlinkSync('.env', path.join(dir, 'tools', 'stats', 'settings.txt'));
+    }
+    const appDir = makeTmpDir();
+    copyPlugins(appDir, await loadPlugins(testCtx(dir), config(['tools/stats'])));
+    const expected = ['index.mjs', 'lib/util.js', 'node_modules/dep/index.js', 'node_modules/dep/out/built.js', 'package.json'];
+    if (process.platform !== 'win32') expected.unshift('alias/util.js');
+    expect(listFiles(path.join(appDir, 'plugins', 'stats'))).toEqual(expected);
+  });
+
+  it.skipIf(process.platform === 'win32')('PLUGIN_LOAD_FAILED for links out of the plugin folder, loops and failed copies', async () => {
+    const outside = makeTmpDir();
+    writeFiles(outside, { 'id_rsa': 'key', 'more/x.js': '' });
+    const cases: Array<[string, (pluginDir: string) => void, string]> = [
+      ['a file outside', (p) => fs.symlinkSync(path.join(outside, 'id_rsa'), path.join(p, 'key.txt')), 'links outside the plugin folder'],
+      ['a folder outside', (p) => fs.symlinkSync(path.join(outside, 'more'), path.join(p, 'more')), 'links outside the plugin folder'],
+      ['a loop', (p) => fs.symlinkSync('..', path.join(p, 'lib', 'loop')), 'links to a folder that contains it'],
+      ['nothing', (p) => fs.symlinkSync('missing.js', path.join(p, 'gone.js')), "links to something that doesn't exist"],
+    ];
+    for (const [what, link, reason] of cases) {
+      const dir = makeTmpDir();
+      writeFiles(dir, { 'tools/stats/index.mjs': STATS, 'tools/stats/lib/util.js': '' });
+      link(path.join(dir, 'tools', 'stats'));
+      const plugins = await loadPlugins(testCtx(dir), config(['tools/stats']));
+      expect(() => copyPlugins(makeTmpDir(), plugins), what).toThrow(
+        expect.objectContaining({ error: expect.objectContaining({ code: 'PLUGIN_LOAD_FAILED', message: expect.stringContaining(reason) }) }),
+      );
+    }
+    // A plugin folder that holds the app (the project root, say) can't be copied into it.
+    const dir = makeTmpDir();
+    writeFiles(dir, { 'index.mjs': STATS });
+    const plugins = await loadPlugins(testCtx(dir), config(['.']));
+    expect(() => copyPlugins(path.join(dir, '.gameshipper', 'app'), plugins)).toThrow(
+      expect.objectContaining({ error: expect.objectContaining({ code: 'PLUGIN_LOAD_FAILED', message: expect.stringContaining("couldn't be copied into the app") }) }),
+    );
+  });
+});
+
 describe('runPluginHook', () => {
   it('runs hooks in order with a prefixed log, and reports failures', async () => {
     const dir = makeTmpDir();
@@ -102,6 +249,16 @@ describe('runPluginHook', () => {
     await runPluginHook([echo], 'beforePackage', { ...base, targets: ['mac'] });
     await expect(runPluginHook([bad], 'afterPackage', base)).rejects.toMatchObject({
       error: { code: 'PLUGIN_HOOK_FAILED', message: "Plugin bad's afterPackage failed: disk full" },
+    });
+  });
+
+  it('PLUGIN_HOOK_FAILED when a hook never finishes', async () => {
+    const dir = makeTmpDir();
+    writeFiles(dir, { 'stuck.mjs': "export default { name: 'stuck', beforePackage() { return new Promise(() => {}); } };" });
+    const [stuck] = await loadPlugins(testCtx(dir), config(['stuck.mjs']));
+    const hookCtx = { projectDir: dir, appDir: dir, config: config([]), log: () => {}, targets: ['mac' as const] };
+    await expect(runPluginHook([stuck], 'beforePackage', hookCtx, { timeoutMs: 50 })).rejects.toMatchObject({
+      error: { code: 'PLUGIN_HOOK_FAILED', message: expect.stringContaining("Plugin stuck's beforePackage timed out") },
     });
   });
 });

@@ -47,7 +47,8 @@ export function createPluginHost(
       }
       const main = await loading.get(plugin.name);
       if (!main) throw new Error(`Plugin ${plugin.name} failed to load; see the events log.`);
-      const f = main[fn];
+      // Own properties only: never something every object has, like constructor or toString.
+      const f = Object.hasOwn(main, fn) ? main[fn] : undefined;
       if (typeof f !== 'function') throw new Error(`Plugin ${plugin.name} has no function ${fn}.`);
       return f.apply(main, Array.isArray(args) ? args : []);
     },

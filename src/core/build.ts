@@ -82,7 +82,7 @@ export async function prepareApp(
   // Valve's SDK is never game content, even when a setting points inside the game folder.
   const staged = await stageGame(ctx, config, { exclude: steamSdkPaths(sdkOptions, sdkFound) });
   const bundled = await bundleCdn(ctx, staged.stageDir, { frozenLock: opts.frozenLock });
-  const warnings = [...staged.warnings, ...bundled.warnings];
+  const warnings = [...plugins.flatMap((p) => p.warnings), ...staged.warnings, ...bundled.warnings];
   let iconBase: string | null = null;
   if (config.icon) {
     const iconPath = path.join(ctx.projectDir, config.icon);

@@ -199,7 +199,7 @@ export default {
 };
 ```
 
-Plugin and function names use letters, digits and `_`. A plugin's files are never copied into the game itself. A failing `beforePackage` stops the build (`PLUGIN_HOOK_FAILED`); a failing `afterPackage` fails that target. Only use plugins you trust: they run with the same rights as the game.
+Plugin and function names use letters, digits and `_`, and no two plugins may share a name, even in different letter case. A single-file plugin is copied alone, so one that imports other files or packages gets a `PLUGIN_IMPORTS_NOT_COPIED` warning: bundle it into one file or make it a folder plugin. A folder plugin is copied whole by the same rules as the game (no `.env` files, Steamworks SDK, `.git`, `out/` or `node_modules/.bin`); its `main` must be inside the folder, and a link out of the folder fails the build with `PLUGIN_LOAD_FAILED`. A plugin's files are never copied into the game itself. A failing `beforePackage` stops the build (`PLUGIN_HOOK_FAILED`), as does a hook still running after 5 minutes; a failing `afterPackage` fails that target. Only use plugins you trust: they run with the same rights as the game.
 
 ## TypeScript
 

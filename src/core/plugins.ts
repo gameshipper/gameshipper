@@ -1,10 +1,13 @@
 import * as fs from 'node:fs';
+import { isBuiltin } from 'node:module';
 import * as path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import type { RuntimePlugin } from '../shell/runtime-config.js';
 import type { Config, DesktopTarget } from './config/schema.js';
 import type { Ctx } from './context.js';
-import { GsFailure } from './result.js';
+import { findJsSpecifiers } from './prepare/rewrite-js.js';
+import { holdsSteamworksSdk, isSkippedAnywhere, isWithin, loopsBack, realOrSelf } from './prepare/stage.js';
+import { GsFailure, gsError, type GsError } from './result.js';
 
 export interface PluginHookContext {
   projectDir: string;
@@ -46,6 +49,8 @@ export interface LoadedPlugin {
   /** Names of the functions in `main`. */
   functions: string[];
   plugin: GameshipperPlugin;
+  /** Problems that don't stop the build (PLUGIN_IMPORTS_NOT_COPIED). */
+  warnings: GsError[];
 }
 
 /** Plugin and function names: usable as gameshipper.plugins.<name>.<fn>. */
@@ -66,29 +71,69 @@ function readPackageJson(file: string): { main?: unknown; type?: unknown } {
   return fs.existsSync(file) ? ((JSON.parse(fs.readFileSync(file, 'utf8')) as { main?: unknown; type?: unknown } | null) ?? {}) : {};
 }
 
-function entryFor(source: string): string | null {
+/** The module file a plugin spec points to. A folder plugin's entry must be inside the folder: only the folder is packaged. */
+function entryFor(spec: string, source: string): string {
   if (!fs.statSync(source).isDirectory()) return source;
-  const { main } = readPackageJson(path.join(source, 'package.json'));
-  if (typeof main === 'string') return path.join(source, main);
-  return ['index.mjs', 'index.js', 'index.cjs'].map((n) => path.join(source, n)).find((f) => fs.existsSync(f)) ?? null;
+  let main: unknown;
+  try {
+    ({ main } = readPackageJson(path.join(source, 'package.json')));
+  } catch (e) {
+    throw loadFailed(spec, `its package.json can't be read: ${message(e)}`);
+  }
+  if (typeof main !== 'string') {
+    const index = ['index.mjs', 'index.js', 'index.cjs'].map((n) => path.join(source, n)).find((f) => fs.existsSync(f));
+    if (!index) throw loadFailed(spec, 'the folder has no package.json "main", index.mjs, index.js or index.cjs.');
+    return index;
+  }
+  const entry = path.resolve(source, main);
+  const outside = (): GsFailure =>
+    loadFailed(spec, `its package.json "main" (${main}) is outside the plugin folder, and only the folder is packaged. Move that file into the folder.`);
+  if (!isWithin(entry, source)) throw outside();
+  if (!fs.existsSync(entry)) throw loadFailed(spec, `its package.json "main" (${main}) doesn't exist.`);
+  // A link to a file elsewhere is outside the folder too.
+  if (!isWithin(realOrSelf(entry), realOrSelf(source))) throw outside();
+  return entry;
 }
 
-/** Imports and checks every plugin listed in gameshipper.json, in order. Throws PLUGIN_LOAD_FAILED. */
+/** CommonJS require('...') calls, which es-module-lexer doesn't report. */
+const REQUIRE_CALL = /\brequire\s*\(\s*(['"])([^'"\n]+)\1\s*\)/g;
+/** node:, data:, file: and other URL schemes: never a file next to the plugin or a package. */
+const URL_SCHEME = /^[a-z][a-z0-9+.-]*:/i;
+
+/**
+ * What a single-file plugin loads besides Node's built-in modules and Electron: other files (./x.js) and
+ * packages (lodash). Only the plugin file itself is copied into the app, so those are missing there.
+ */
+async function importsNotCopied(file: string): Promise<string[]> {
+  let code: string;
+  try {
+    code = fs.readFileSync(file, 'utf8');
+  } catch {
+    return [];
+  }
+  const specifiers = [...code.matchAll(REQUIRE_CALL)].map((m) => m[2]);
+  try {
+    specifiers.push(...(await findJsSpecifiers(code)).map((s) => s.specifier));
+  } catch {
+    // Not parseable as a module (CommonJS can be); the require() calls above still count.
+  }
+  return [...new Set(specifiers.filter((s) => s !== 'electron' && !isBuiltin(s) && !URL_SCHEME.test(s)))];
+}
+
+/**
+ * Imports and checks every plugin listed in gameshipper.json, in order. Throws PLUGIN_LOAD_FAILED.
+ * Each import asks for the file as it is now (the URL carries its modification time), so a long-running
+ * process sees a plugin's latest code. Only the plugin's own file is reloaded, not the files it imports.
+ */
 export async function loadPlugins(ctx: Ctx, config: Config): Promise<LoadedPlugin[]> {
   const loaded: LoadedPlugin[] = [];
   for (const spec of config.plugins) {
     const source = path.resolve(ctx.projectDir, spec);
     if (!fs.existsSync(source)) throw loadFailed(spec, `${source} doesn't exist.`);
-    let entryFile: string | null;
-    try {
-      entryFile = entryFor(source);
-    } catch (e) {
-      throw loadFailed(spec, `its package.json can't be read: ${message(e)}`);
-    }
-    if (!entryFile || !fs.existsSync(entryFile)) throw loadFailed(spec, 'the folder has no package.json "main", index.mjs, index.js or index.cjs.');
+    const entryFile = entryFor(spec, source);
     let mod: { default?: unknown };
     try {
-      mod = (await import(pathToFileURL(entryFile).href)) as { default?: unknown };
+      mod = (await import(`${pathToFileURL(entryFile).href}?v=${fs.statSync(entryFile).mtimeMs}`)) as { default?: unknown };
     } catch (e) {
       throw loadFailed(spec, message(e));
     }
@@ -97,7 +142,20 @@ export async function loadPlugins(ctx: Ctx, config: Config): Promise<LoadedPlugi
     if (typeof plugin.name !== 'string' || !NAME.test(plugin.name)) {
       throw loadFailed(spec, `"name" must be letters, digits and _, starting with a letter (like "myplugin"); got ${JSON.stringify(plugin.name)}.`);
     }
-    if (loaded.some((p) => p.name === plugin.name)) throw loadFailed(spec, `another plugin is already named "${plugin.name}".`);
+    // gameshipper.plugins.<name> must be the plugin's own, never a property every object has.
+    if (Object.hasOwn(Object.prototype, plugin.name)) {
+      throw loadFailed(spec, `"${plugin.name}" can't be a plugin name: every JavaScript object already has it. Pick another name.`);
+    }
+    // Plugins are copied to plugins/<name>/, and Windows and macOS don't tell "Echo" from "echo".
+    const clash = loaded.find((p) => p.name.toLowerCase() === plugin.name.toLowerCase());
+    if (clash) {
+      throw loadFailed(
+        spec,
+        clash.name === plugin.name
+          ? `another plugin is already named "${plugin.name}".`
+          : `another plugin is named "${clash.name}", which differs only in letter case. Give one of them another name.`,
+      );
+    }
     if (plugin.main !== undefined && (typeof plugin.main !== 'object' || plugin.main === null)) throw loadFailed(spec, '"main" must be an object of functions.');
     for (const hook of ['beforePackage', 'afterPackage'] as const) {
       if (plugin[hook] !== undefined && typeof plugin[hook] !== 'function') throw loadFailed(spec, `"${hook}" must be a function.`);
@@ -106,7 +164,18 @@ export async function loadPlugins(ctx: Ctx, config: Config): Promise<LoadedPlugi
     const functions = Object.keys(main).filter((k) => typeof main[k] === 'function');
     const badName = functions.find((f) => !NAME.test(f));
     if (badName) throw loadFailed(spec, `main.${badName} needs a plain name (letters, digits and _, starting with a letter).`);
-    loaded.push({ name: plugin.name, spec, source, entryFile, functions, plugin });
+    const warnings: GsError[] = [];
+    const imports = entryFile === source ? await importsNotCopied(entryFile) : [];
+    if (imports.length) {
+      warnings.push(
+        gsError(
+          'PLUGIN_IMPORTS_NOT_COPIED',
+          `Plugin ${plugin.name} (${spec}) loads ${imports.join(', ')}, but only the plugin file is packaged, so it may fail to load in the game.`,
+          'Bundle it into one file (with esbuild, say) or make it a folder plugin: a folder with a package.json "main" or an index.mjs is copied whole.',
+        ),
+      );
+    }
+    loaded.push({ name: plugin.name, spec, source, entryFile, functions, plugin, warnings });
     ctx.log(`loaded plugin ${plugin.name} from ${entryFile} (game functions: ${functions.join(', ') || 'none'})`);
   }
   return loaded;
@@ -121,43 +190,126 @@ function moduleTypeAt(file: string): string {
   }
 }
 
+/** Left out of a plugin folder at its top level, like staging leaves them out of the game. */
+const PLUGIN_SKIP_TOP_LEVEL = new Set(['.sdk', '.gameshipper', 'out']);
+
+/**
+ * Copies a folder plugin by staging's rules: no secrets (.env), Steam files, .git, build output or
+ * node_modules/.bin. Links are copied as the files they point to, but only within the plugin folder:
+ * a link out of it (to ~/.ssh, say), to nothing, or into a loop fails the build instead.
+ */
+function copyPluginFolder(p: LoadedPlugin, dest: string): void {
+  const root = realOrSelf(p.source);
+  const filter = (src: string): boolean => {
+    const rel = path.relative(p.source, src);
+    if (rel === '') return true;
+    const parts = rel.split(path.sep);
+    const name = parts[parts.length - 1];
+    if (isSkippedAnywhere(name) || (parts.length === 1 && PLUGIN_SKIP_TOP_LEVEL.has(name))) return false;
+    if (name === '.bin' && parts[parts.length - 2] === 'node_modules') return false;
+    if (holdsSteamworksSdk(src)) return false;
+    if (!fs.lstatSync(src).isSymbolicLink()) return true;
+    let target: string;
+    try {
+      target = fs.realpathSync(src);
+    } catch {
+      throw loadFailed(p.spec, `${rel} links to something that doesn't exist. Remove the link or point it at a real file.`);
+    }
+    // A link with a harmless name can still point at a secret (settings.txt -> .env).
+    if (isSkippedAnywhere(path.basename(target))) return false;
+    if (!isWithin(target, root)) {
+      throw loadFailed(p.spec, `${rel} links outside the plugin folder (to ${target}), so it isn't packaged. Replace the link with a copy.`);
+    }
+    if (fs.statSync(target).isDirectory() && loopsBack(src, target, p.source)) {
+      throw loadFailed(p.spec, `${rel} links to a folder that contains it. Remove the link.`);
+    }
+    return true;
+  };
+  fs.cpSync(p.source, dest, { recursive: true, dereference: true, filter });
+}
+
 /**
  * Copies each plugin into <app>/plugins/<name>/ and describes it for the shell. A plugin is one
  * file, or a folder copied whole (for plugins that import other files or have node_modules).
- * The copy keeps the module type (ESM/CommonJS) the plugin had in the project.
+ * The copy keeps the module type (ESM/CommonJS) the plugin had in the project. Throws PLUGIN_LOAD_FAILED.
  */
 export function copyPlugins(appDir: string, plugins: LoadedPlugin[]): RuntimePlugin[] {
   return plugins.map((p) => {
     const dest = path.join(appDir, 'plugins', p.name);
     const isDir = fs.statSync(p.source).isDirectory();
-    if (isDir) {
-      fs.cpSync(p.source, dest, { recursive: true, dereference: true, filter: (src) => path.basename(src) !== '.git' });
-    } else {
-      fs.mkdirSync(dest, { recursive: true });
-      fs.copyFileSync(p.source, path.join(dest, path.basename(p.source)));
-    }
-    if (!fs.existsSync(path.join(dest, 'package.json'))) {
-      fs.writeFileSync(path.join(dest, 'package.json'), `${JSON.stringify({ type: moduleTypeAt(p.entryFile) })}\n`);
+    try {
+      if (isDir) {
+        copyPluginFolder(p, dest);
+      } else {
+        fs.mkdirSync(dest, { recursive: true });
+        fs.copyFileSync(p.source, path.join(dest, path.basename(p.source)));
+      }
+      if (!fs.existsSync(path.join(dest, 'package.json'))) {
+        fs.writeFileSync(path.join(dest, 'package.json'), `${JSON.stringify({ type: moduleTypeAt(p.entryFile) })}\n`);
+      }
+    } catch (e) {
+      if (e instanceof GsFailure) throw e;
+      // ERR_FS_CP_EINVAL (a plugin folder that holds the app), ELOOP, a full disk...
+      throw loadFailed(p.spec, `it couldn't be copied into the app: ${message(e)}`);
     }
     const entryRel = isDir ? path.relative(p.source, p.entryFile) : path.basename(p.source);
     return { name: p.name, entry: ['plugins', p.name, ...entryRel.split(path.sep)].join('/'), functions: p.functions };
   });
 }
 
-export async function runPluginHook(plugins: LoadedPlugin[], hook: 'beforePackage', hookCtx: BeforePackageContext): Promise<void>;
-export async function runPluginHook(plugins: LoadedPlugin[], hook: 'afterPackage', hookCtx: AfterPackageContext): Promise<void>;
-/** Runs one build hook of every plugin, in order. Throws PLUGIN_HOOK_FAILED. */
-export async function runPluginHook(plugins: LoadedPlugin[], hook: 'beforePackage' | 'afterPackage', hookCtx: PluginHookContext): Promise<void> {
+/** How long a build hook may run before the build gives up on it. */
+export const PLUGIN_HOOK_TIMEOUT_MS = 5 * 60_000;
+
+export interface HookOptions {
+  /** Default PLUGIN_HOOK_TIMEOUT_MS. */
+  timeoutMs?: number;
+}
+
+function formatDuration(ms: number): string {
+  if (ms >= 60_000) {
+    const n = Math.round(ms / 60_000);
+    return `${n} minute${n === 1 ? '' : 's'}`;
+  }
+  return ms >= 1000 ? `${Math.round(ms / 1000)} seconds` : `${ms} ms`;
+}
+
+export async function runPluginHook(plugins: LoadedPlugin[], hook: 'beforePackage', hookCtx: BeforePackageContext, opts?: HookOptions): Promise<void>;
+export async function runPluginHook(plugins: LoadedPlugin[], hook: 'afterPackage', hookCtx: AfterPackageContext, opts?: HookOptions): Promise<void>;
+/** Runs one build hook of every plugin, in order. Throws PLUGIN_HOOK_FAILED, also when a hook runs past its timeout. */
+export async function runPluginHook(
+  plugins: LoadedPlugin[],
+  hook: 'beforePackage' | 'afterPackage',
+  hookCtx: PluginHookContext,
+  opts: HookOptions = {},
+): Promise<void> {
+  const timeoutMs = opts.timeoutMs ?? PLUGIN_HOOK_TIMEOUT_MS;
   for (const p of plugins) {
     const fn = p.plugin[hook] as ((ctx: PluginHookContext) => unknown) | undefined;
     if (!fn) continue;
+    const timedOut = Symbol('timed out');
+    let timer: NodeJS.Timeout | undefined;
+    let outcome: unknown;
     try {
-      await fn.call(p.plugin, { ...hookCtx, log: (message: string) => hookCtx.log(`[plugin ${p.name}] ${message}`) });
+      outcome = await Promise.race([
+        (async () => fn.call(p.plugin, { ...hookCtx, log: (line: string) => hookCtx.log(`[plugin ${p.name}] ${line}`) }))(),
+        new Promise<typeof timedOut>((resolve) => {
+          timer = setTimeout(() => resolve(timedOut), timeoutMs);
+        }),
+      ]);
     } catch (e) {
       throw new GsFailure(
         'PLUGIN_HOOK_FAILED',
         `Plugin ${p.name}'s ${hook} failed: ${message(e)}`,
         `Fix ${hook} in ${p.entryFile}, or remove the plugin from "plugins" in gameshipper.json.`,
+      );
+    } finally {
+      clearTimeout(timer);
+    }
+    if (outcome === timedOut) {
+      throw new GsFailure(
+        'PLUGIN_HOOK_FAILED',
+        `Plugin ${p.name}'s ${hook} timed out: it was still running after ${formatDuration(timeoutMs)}.`,
+        `Make ${hook} in ${p.entryFile} finish (await its work, and don't wait for something that never comes), or remove the plugin from "plugins" in gameshipper.json.`,
       );
     }
   }
