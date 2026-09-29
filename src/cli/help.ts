@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { ConfigSchema } from '../core/config/schema.js';
+import { APPLE_ENV } from '../core/sign/credentials.js';
 import { GAMESHIPPER_VERSION } from '../core/version.js';
 
 export interface FlagHelp {
@@ -94,6 +95,17 @@ export const COMMANDS: CommandHelp[] = [
 
 export const EXIT_CODES = { '0': 'success', '1': 'a target or check failed', '2': 'invalid config, usage or missing input' };
 
+/** Every environment variable Gameshipper reads. Secrets (Apple's) only ever come from here, never from gameshipper.json. */
+export const ENVIRONMENT: Array<{ name: string; description: string }> = [
+  { name: 'GAMESHIPPER_CACHE', description: "Gameshipper's download cache (CDN files, Steamworks SDK libraries, native Steam bridges). Default: the OS's user cache folder." },
+  { name: 'GAMESHIPPER_STEAM_SDK', description: 'Your Steamworks SDK zip or folder (after --steam-sdk and steam.sdk).' },
+  {
+    name: 'GAMESHIPPER_NPM_REGISTRY',
+    description: "The npm registry other OSes' native Steam bridges (@koromix/koffi-*) are downloaded from. Default: npm_config_registry, then https://registry.npmjs.org.",
+  },
+  ...Object.entries(APPLE_ENV).map(([name, description]) => ({ name, description })),
+];
+
 export function helpData() {
   return {
     name: 'gameshipper',
@@ -101,6 +113,7 @@ export function helpData() {
     commands: COMMANDS,
     globalFlags: GLOBAL_FLAGS,
     exitCodes: EXIT_CODES,
+    environment: ENVIRONMENT,
     resultShape:
       'Every command prints { ok, data, errors[], warnings[], logPath }. logPath (the run log) is present for build, play and check, unless gameshipper.json is missing or invalid. Each error has code, message and fix; fix may be absent on warnings.',
     agentLoop: [

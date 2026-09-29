@@ -4,6 +4,7 @@ import type { CheckReport, CheckStatus } from '../core/check/types.js';
 import type { InitData } from '../core/config/init.js';
 import type { PlayData } from '../core/play.js';
 import type { Result } from '../core/result.js';
+import type { MacSigningInfo } from '../core/sign/mac.js';
 import { problemCount } from '../core/smoke.js';
 import type { StatusData } from '../core/status.js';
 
@@ -29,11 +30,17 @@ export function initSummary(r: Result<InitData>): string[] {
   ];
 }
 
+function macSigningLabel(mac: MacSigningInfo): string {
+  if (mac.notarized) return 'signed and notarized';
+  if (mac.signing === 'developer-id') return 'signed, not notarized';
+  return mac.signing === 'adhoc' ? 'ad-hoc signed' : 'unsigned';
+}
+
 export function buildSummary(r: Result<BuildData>, projectDir: string): string[] {
   if (!r.data) return [];
   const lines = r.data.targets.map((t) => {
     const name = t.target.padEnd(8);
-    if (t.status === 'built' && t.output) return `✓ ${name} ${rel(projectDir, t.output.executable)}`;
+    if (t.status === 'built' && t.output) return `✓ ${name} ${rel(projectDir, t.output.executable)}${t.output.mac ? ` (${macSigningLabel(t.output.mac)})` : ''}`;
     if (t.status === 'failed') return `✗ ${name} failed (${t.errors.map((e) => e.code).join(', ')})`;
     return `- ${name} skipped`;
   });

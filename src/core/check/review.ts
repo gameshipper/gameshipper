@@ -103,7 +103,7 @@ export function macSigningCheck(config: Config, builds: BuildInfo[], host: NodeJ
     status: 'fail',
     code: 'CHECK_MAC_NOT_NOTARIZED',
     message: `The Mac app ${state}, so macOS blocks it for players.`,
-    fix: 'Sign it with your Apple Developer ID and notarize it (Gameshipper\'s own Mac signing isn\'t available yet), or remove "mac" from targets in gameshipper.json.',
+    fix: 'On a Mac with a paid Apple Developer account, set GAMESHIPPER_MAC_IDENTITY and GAMESHIPPER_NOTARY_PROFILE (`npx gameshipper help --json` lists them under "environment"), then run `npx gameshipper build --target mac`. Or remove "mac" from targets in gameshipper.json.',
     details: signing.detail ? capDetails(signing.detail.split('\n')) : undefined,
   };
 }

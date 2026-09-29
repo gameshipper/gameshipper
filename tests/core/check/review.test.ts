@@ -145,6 +145,13 @@ describe('macSigningCheck', () => {
     expect(macSigningCheck(mac, builds, 'darwin', signing({ stapled: false })).message).toContain('not notarized');
   });
 
+  it("points at Gameshipper's own signing settings", () => {
+    const adhoc = macSigningCheck(mac, builds, 'darwin', signing({ kind: 'adhoc', authority: null, stapled: false }));
+    expect(adhoc.fix).toContain('GAMESHIPPER_MAC_IDENTITY');
+    expect(adhoc.fix).toContain('GAMESHIPPER_NOTARY_PROFILE');
+    expect(adhoc.fix).toContain('npx gameshipper build --target mac');
+  });
+
   it('warns when notarization or signing cannot be checked, and skips when there is no Mac build', () => {
     expect(macSigningCheck(mac, builds, 'darwin', signing({ stapled: null }))).toMatchObject({ status: 'warn', code: 'CHECK_MAC_SIGNING_UNKNOWN', fix: 'Run `xcode-select --install`, then check again.' });
     expect(macSigningCheck(mac, builds, 'linux', null)).toMatchObject({ status: 'warn', code: 'CHECK_MAC_SIGNING_UNKNOWN' });
