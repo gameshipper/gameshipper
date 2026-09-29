@@ -42,7 +42,7 @@ Runs the game in the same shell the builds use. The window stays a window even w
 | Flag | |
 |---|---|
 | `--smoke` | Run for a few seconds, quit, and report errors, missing files, internet use and crashes. |
-| `--seconds <n>` | How long a smoke run lasts after the page loads (default 5). Implies `--smoke`. |
+| `--seconds <n>` | How long a smoke run lasts after the page loads (default 5, at most 600). Implies `--smoke`. |
 | `--screenshot <s,s,...>` | Save 1920x1080 store screenshots this many seconds after the page loads, then quit, e.g. `--screenshot 5,10,15,20,25`. |
 | `--fullscreen` | Honour `window.fullscreen` from `gameshipper.json`. |
 | `--frozen-lock` | Fail instead of accepting changed or new CDN files; for CI. |
@@ -69,16 +69,18 @@ Launches the latest build for this computer once, for 15 seconds (`--seconds` to
 | Group | What |
 |---|---|
 | Offline | nothing is loaded from the internet (every blocked address is listed) |
-| Launch | it starts, has no console errors or missing files, draws a picture, and exits with code 0 when its window closes; builds for other operating systems are listed as built, not launched here |
-| Steam Deck | at 1280x800 nothing is cut off and no scrollbars appear; it reads a gamepad (while running, or anywhere in its code); text fields are listed |
+| Launch | it starts, has no console errors or missing files, draws a non-uniform frame (with a warning when it's mostly one colour, like a loading screen), and exits with code 0 when its window closes; builds for other operating systems are listed as built, not launched here |
+| Steam Deck | at 1280x800 nothing is cut off, no text runs past the screen edge and no scrollbars appear; it reads a gamepad (while running, or in its own code: engine and library files aren't searched); text fields are listed |
 | Review | a build for every desktop target, no `steam_appid.txt`, the Mac build signed and notarized, a custom icon, your own App ID |
-| Store | all eight images at their exact sizes, at least five 1920x1080 screenshots, and reminders about the trailer and Steam's AI disclosure |
+| Store | all eight images at their exact sizes and newer than the key art and logo, at least five 1920x1080 screenshots, and reminders about the trailer and Steam's AI disclosure |
 
 Run it after `build`: it never builds anything itself. The Deck-size frame is saved as `.gameshipper/check/frame.png` and the full report as `.gameshipper/check/report.json`. Until Gameshipper signs Mac builds, a Mac build made on a Mac is only ad-hoc signed, so on a Mac `review.mac-signing` fails with `CHECK_MAC_NOT_NOTARIZED`.
 
+The network block stops the game's requests (each is listed in `offline.requests`) and its WebRTC connections (not listed). It doesn't cover WebTransport, or networking a [plugin](#plugins) does in Electron's main process: `offline.requests` never sees those.
+
 | Flag | |
 |---|---|
-| `--seconds <n>` | How long the game runs with the network blocked (default 15). |
+| `--seconds <n>` | How long the game runs with the network blocked (default 15, at most 600). |
 
 ### `status`
 
@@ -141,10 +143,10 @@ Other problems have codes too, such as `CDN_FETCH_FAILED`, `CDN_CHANGED`, `ENTRY
 | `offline.requests` | fail | `CHECK_OFFLINE` |
 | `launch.run` | fail (warn when this computer's OS isn't a target) | `CHECK_NOT_LAUNCHED`, `CHECK_LAUNCH_FAILED` |
 | `launch.errors` | warn | `CHECK_GAME_ERRORS` |
-| `launch.frame` | fail | `CHECK_BLANK_FRAME` |
+| `launch.frame` | fail (warn when the frame is mostly one colour) | `CHECK_BLANK_FRAME`, `CHECK_MOSTLY_BLANK_FRAME` |
 | `launch.exit` | fail | `CHECK_EXIT_CODE` |
 | `launch.other-os` | info | |
-| `deck.layout` | warn | `CHECK_DECK_LAYOUT` |
+| `deck.layout` | warn (skip when the page couldn't be laid out at 1280x800) | `CHECK_DECK_LAYOUT` |
 | `deck.gamepad` | warn | `CHECK_NO_GAMEPAD` |
 | `deck.text-input` | always passes; lists text fields | |
 | `review.builds` | fail | `CHECK_BUILD_MISSING` |
@@ -152,7 +154,7 @@ Other problems have codes too, such as `CDN_FETCH_FAILED`, `CDN_CHANGED`, `ENTRY
 | `review.mac-signing` | fail on a Mac, warn elsewhere | `CHECK_MAC_NOT_NOTARIZED`, `CHECK_MAC_SIGNING_UNKNOWN` |
 | `review.icon` | warn | `CHECK_DEFAULT_ICON` |
 | `review.app-id` | warn | `CHECK_TEST_APP_ID` |
-| `store.images` | fail | `CHECK_STORE_IMAGES` |
+| `store.images` | fail (also when older than the key art or logo) | `CHECK_STORE_IMAGES` |
 | `store.screenshots` | fail | `CHECK_SCREENSHOTS` |
 | `store.trailer`, `ai.disclosure` | info | |
 
@@ -215,7 +217,9 @@ Set `keyArt` (PNG or JPEG, 3840x2160 recommended, at least 1280x720) and `logo` 
 | `library_hero.png` | 3840x1240 | key art only |
 | `library_logo.png` | 1280x720 | the logo on a transparent background |
 
-Crops centre on `keyArtFocus`: `[x, y]` as fractions of the key art's width and height, `[0.5, 0.5]` by default. Unusable art fails the build with `KEYART_INVALID`, `KEYART_TOO_SMALL`, `LOGO_INVALID` or `LOGO_NOT_TRANSPARENT` (exit code 2, like a bad icon); art that had to be enlarged gives `KEYART_LOW_RES` or `LOGO_LOW_RES`; without `keyArt` and `logo`, builds warn `STORE_IMAGES_SKIPPED`.
+Crops centre on `keyArtFocus`: `[x, y]` as fractions of the key art's width and height, `[0.5, 0.5]` by default. Transparent parts of the key art come out black. Unusable art fails the build with `KEYART_INVALID` (not a PNG or JPEG), `KEYART_TOO_SMALL`, `LOGO_INVALID` (not a PNG, or fully transparent) or `LOGO_NOT_TRANSPARENT` (exit code 2, like a bad icon); art that had to be enlarged gives `KEYART_LOW_RES` or `LOGO_LOW_RES`; without `keyArt` and `logo`, builds warn `STORE_IMAGES_SKIPPED`. Each build replaces the images in `out/store/`, and one that skips them or fails leaves none there, so `check` never passes old ones.
+
+The key art and logo are left out of the game itself unless one of its HTML, JavaScript or CSS files mentions the file's name (then the game may show it, so it ships).
 
 Steam needs at least five 1920x1080 gameplay screenshots. Press **F12** during `npx gameshipper play` to save one to `out/store/screenshots/`. It's always exactly 1920x1080, whatever your screen's scaling. F12 only does this in `play`: in your shipped game it stays Steam's screenshot key.
 
