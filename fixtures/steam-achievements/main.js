@@ -25,16 +25,16 @@ async function run() {
   report('cleared', !(await steam.isAchievementUnlocked(ACHIEVEMENT)));
   report('achievements', (await steam.listAchievements()).length);
   report('presence', await steam.setRichPresence('status', 'Testing Gameshipper'));
-  // A round-trip on one of Spacewar's int stats: set, store, read back, then put the old value back.
+  // A round-trip on one of Spacewar's int stats that changes nothing: write its current value back, store, read it.
+  // Spacewar's NumGames only ever goes up (a lower value is refused), so this test must never increase it: that
+  // would change the signed-in account for good.
   const games = await steam.getStat('NumGames', 'int');
   report('stat', typeof games);
   if (typeof games === 'number') {
-    const set = await steam.setStat('NumGames', games + 1, 'int');
+    const set = await steam.setStat('NumGames', games, 'int');
     const stored = await steam.storeStats();
-    const readBack = (await steam.getStat('NumGames', 'int')) === games + 1;
+    const readBack = (await steam.getStat('NumGames', 'int')) === games;
     report('statRoundTrip', { set, stored, readBack });
-    await steam.setStat('NumGames', games, 'int');
-    report('statRestored', (await steam.getStat('NumGames', 'int')) === games);
   } else {
     report('statRoundTrip', null);
   }

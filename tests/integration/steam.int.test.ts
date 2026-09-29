@@ -14,7 +14,7 @@ import { makeTmpDir, writeFiles } from '../helpers/tmp.js';
 // The first two describe blocks run everywhere. The last is opt-in (GAMESHIPPER_STEAM_E2E=1): it needs macOS, a
 // running, signed-in Steam client, network access, and a Steamworks SDK zip (GAMESHIPPER_STEAM_E2E_SDK, or the newest
 // in the repo's .sdk/ folder). On the signed-in account it unlocks and then clears Spacewar's ACH_WIN_ONE_GAME, and
-// sets Spacewar's NumGames stat one higher and back. Run it with --reporter=verbose to see each test's outcome:
+// writes Spacewar's NumGames stat back with its current value (no net change). Run it with --reporter=verbose:
 //   GAMESHIPPER_STEAM_E2E=1 GAMESHIPPER_STEAM_E2E_SDK=<zip> npm run test:integration -- tests/integration/steam.int.test.ts --reporter=verbose
 // Whether Steam's overlay hooks the game can only be checked on an unlocked screen; that test is skipped otherwise.
 const ENABLED = process.env.GAMESHIPPER_STEAM_E2E === '1' && process.platform === 'darwin';
@@ -51,9 +51,8 @@ const EXPECTED_REPORT = {
   achievements: expect.any(Number),
   presence: true,
   stat: 'number',
+  // NumGames written back with its own value (it only ever goes up, so the test never changes it).
   statRoundTrip: { set: true, stored: true, readBack: true },
-  // Putting NumGames back fails if Spacewar only lets it grow; that's not what the test checks.
-  statRestored: expect.any(Boolean),
   save: { level: 2 },
   plugin: 'HI',
   done: true,
@@ -158,7 +157,7 @@ describe.skipIf(!ENABLED)('Steam on this Mac with App ID 480', () => {
     return runSmoke(testCtx(dir), { command: executable, args: [], seconds: 8, userDataDir: path.join(dir, '.gameshipper', 'int-data'), windowed: true, env: extraEnv });
   };
 
-  it('status, play --smoke, the Mac build and the packaged app all use Steam', async (ctx) => {
+  it('status, play --smoke, the Mac build and the packaged app all use Steam', async () => {
     const dir = newProject(env);
     dirs.push(dir);
 
@@ -174,7 +173,6 @@ describe.skipIf(!ENABLED)('Steam on this Mac with App ID 480', () => {
     const devEvents: DiagEvent[] = play.result.data.smoke.summary.events;
     expect(steamEvent(devEvents)).toMatchObject({ state: 'ready', appId: 480, overlay: 'none' });
     report(devEvents);
-    await ctx.annotate(`Spacewar's NumGames put back after the round-trip: ${gameReport(devEvents).statRestored}`);
     // Extracted once into <cache>/steamworks-sdk/<version>-<start of the zip's SHA-256>.
     const version = status.result.data.steamSdk.version;
     const cached = fs.readdirSync(path.join(env.GAMESHIPPER_CACHE, 'steamworks-sdk')).filter((n) => !n.startsWith('.'));
