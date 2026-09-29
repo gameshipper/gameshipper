@@ -121,6 +121,21 @@ describe('scanHtml details', () => {
     expect(scan.moduleScripts).toEqual(['go()']);
   });
 
+  it('collects only the Google Fonts stylesheet, not its preconnect links', () => {
+    const html = `<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Roboto&display=swap" rel="stylesheet">`;
+    expect(scanHtml(html).urls).toEqual(['https://fonts.googleapis.com/css2?family=Roboto&display=swap']);
+    const out = rewriteHtml(html, { url: () => '/v/f.css', importMap: (m) => m, moduleScript: (c) => c, style: (c) => c });
+    expect(out).toBe(html.replace('https://fonts.googleapis.com/css2?family=Roboto&display=swap', '/v/f.css'));
+  });
+
+  it('collects <link> URLs only for rels that load a resource', () => {
+    const rels = ['stylesheet', 'modulepreload', 'PRELOAD', 'shortcut icon', 'apple-touch-icon', 'canonical', 'dns-prefetch', 'manifest', ''];
+    const html = rels.map((rel, i) => `<link rel="${rel}" href="https://x/${i}">`).join('\n') + '\n<link href="https://x/no-rel">';
+    expect(scanHtml(html).urls).toEqual(['https://x/0', 'https://x/1', 'https://x/2', 'https://x/3', 'https://x/4']);
+  });
+
   it('looks inside <template> content', () => {
     const html = '<template><img src="https://x/t.png"><style>b{}</style></template>';
     expect(scanHtml(html).urls).toEqual(['https://x/t.png']);

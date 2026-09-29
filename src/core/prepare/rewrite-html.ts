@@ -13,6 +13,9 @@ const URL_ATTRS: Array<[tag: string, attr: string]> = [
   ['source', 'src'],
 ];
 
+/** <link> rels that make the browser fetch the href. Others (preconnect, canonical, ...) are just hints or metadata. */
+const LOADING_RELS = new Set(['stylesheet', 'modulepreload', 'preload', 'icon', 'apple-touch-icon']);
+
 export interface HtmlScan {
   importMap: ImportMap | null;
   urls: string[];
@@ -74,6 +77,12 @@ const getAttr = (el: Element, name: string): string | undefined => el.attrs.find
 
 const scriptType = (el: Element): string => (getAttr(el, 'type') ?? '').trim().toLowerCase();
 
+const loadsResource = (el: Element): boolean =>
+  (getAttr(el, 'rel') ?? '')
+    .toLowerCase()
+    .split(/[\t\n\f\r ]+/)
+    .some((rel) => LOADING_RELS.has(rel));
+
 /** The source text between an element's tags (script and style bodies). */
 function body(html: string, el: Element): Body | null {
   const loc = el.sourceCodeLocation;
@@ -97,7 +106,7 @@ function inspect(html: string): Doc {
   const urls: UrlRef[] = [];
   for (const [tag, attr] of URL_ATTRS) {
     for (const el of els) {
-      if (el.tagName !== tag) continue;
+      if (el.tagName !== tag || (tag === 'link' && !loadsResource(el))) continue;
       const value = getAttr(el, attr);
       if (value) urls.push({ el, attr, value });
     }
