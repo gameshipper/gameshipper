@@ -34,3 +34,32 @@ export function buildNumber(version: string): number {
   const [major, minor, patch] = version.split('.').map(Number);
   return major * 1_000_000 + minor * 1_000 + patch;
 }
+
+/** The highest versionCode Google Play accepts. */
+export const MAX_VERSION_CODE = 2_100_000_000;
+
+/**
+ * VERSION_UNSUPPORTED when buildNumber can't represent the version: a minor or patch of 1000 or more would give two
+ * versions the same build number (1.1000.0 and 2.0.0), and a major of 2100 or more (past 2100.0.0) goes past
+ * Google Play's limit. null when it fits.
+ */
+export function checkMobileVersion(config: Config): GsError | null {
+  const [major, minor, patch] = config.version.split('.').map(Number);
+  const why =
+    minor >= 1000 || patch >= 1000
+      ? 'its second and third numbers must be below 1000'
+      : buildNumber(config.version) > MAX_VERSION_CODE
+        ? `its build number ${buildNumber(config.version)} is past Google Play's limit of ${MAX_VERSION_CODE}`
+        : null;
+  if (!why) return null;
+  return gsError(
+    'VERSION_UNSUPPORTED',
+    `version ${config.version} can't be an iOS and Android build number: ${why}.`,
+    `Set "version" in gameshipper.json to one like 1.2.3 (major below 2100, minor and patch below 1000): the build number is major × 1,000,000 + minor × 1,000 + patch, so 1.2.3 becomes 1002003. It must only ever go up once the game is in a store.`,
+  );
+}
+
+/** Why iOS and Android can't be built with this config (BUNDLE_ID_REQUIRED, BUNDLE_ID_INVALID, VERSION_UNSUPPORTED), or null. */
+export function mobileConfigError(config: Config): GsError | null {
+  return checkBundleId(config) ?? checkMobileVersion(config);
+}

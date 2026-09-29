@@ -1,6 +1,7 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { describe, expect, it } from 'vitest';
+import { exitCodeFor } from '../../src/cli/output.js';
 import { runBuild } from '../../src/core/build.js';
 import { parseConfig } from '../../src/core/config/load.js';
 import type { packageDesktop } from '../../src/core/desktop/package.js';
@@ -31,6 +32,7 @@ function project(): { dir: string; shellDir: string } {
   return { dir, shellDir };
 }
 const config = (extra: object = {}) => parseConfig({ name: 'x', version: '1.0.0', ...extra }).data!;
+const MOBILE = { bundleId: 'com.jane.moon' };
 /** Keeps darwin-host tests from probing this machine for Xcode's tools. */
 const tools = { lipo: true };
 /** Stands in for signing, so a Mac target built on a Mac (the default host here) never runs codesign. */
@@ -59,7 +61,7 @@ describe('runBuild', () => {
       seen.push({ targets, input });
       return fakeMobile(ctx, cfg, targets, input);
     };
-    const r = await runBuild(testCtx(dir), config({ icon: 'icon.png', targets: ['linux', 'ios', 'android'] }), { shellDir, host: 'linux', pack: fakePack, mobile });
+    const r = await runBuild(testCtx(dir), config({ icon: 'icon.png', targets: ['linux', 'ios', 'android'], mobile: MOBILE }), { shellDir, host: 'linux', pack: fakePack, mobile });
     expect(r.ok).toBe(true);
     expect(r.data!.targets.map((t) => [t.target, t.status])).toEqual([
       ['linux', 'built'],
@@ -75,14 +77,40 @@ describe('runBuild', () => {
 
   it('reports an error iOS and Android share once, and fails only those targets', async () => {
     const { dir, shellDir } = project();
-    const mobile: Mobile = async (_ctx, _cfg, targets) => targets.map((target) => ({ target, error: { code: 'BUNDLE_ID_REQUIRED', message: 'no bundle ID', fix: 'set it' } }));
-    const r = await runBuild(testCtx(dir), config({ targets: ['linux', 'ios', 'android'] }), { shellDir, host: 'linux', pack: fakePack, mobile });
+    const mobile: Mobile = async (_ctx, _cfg, targets) => targets.map((target) => ({ target, error: { code: 'MOBILE_GENERATE_FAILED', message: 'disk full', fix: 'free space' } }));
+    const r = await runBuild(testCtx(dir), config({ targets: ['linux', 'ios', 'android'], mobile: MOBILE }), { shellDir, host: 'linux', pack: fakePack, mobile });
     expect(r.data!.targets.map((t) => [t.target, t.status])).toEqual([
       ['linux', 'built'],
       ['ios', 'failed'],
       ['android', 'failed'],
     ]);
-    expect(r.errors.map((e) => e.code)).toEqual(['BUNDLE_ID_REQUIRED']);
+    expect(r.errors.map((e) => e.code)).toEqual(['MOBILE_GENERATE_FAILED']);
+  });
+
+  it('a bundle ID or version the stores reject stops the build before anything is built (exit 2)', async () => {
+    const buildCommand = `node -e "require('fs').writeFileSync('ran.txt', '1')"`;
+    const cases: Array<[object, string]> = [
+      [{}, 'BUNDLE_ID_REQUIRED'],
+      [{ mobile: { bundleId: 'com.example.new' } }, 'BUNDLE_ID_INVALID'],
+      [{ mobile: MOBILE, version: '1.1000.0' }, 'VERSION_UNSUPPORTED'],
+    ];
+    for (const [extra, code] of cases) {
+      const { dir, shellDir } = project();
+      const pack: Pack = async () => {
+        throw new Error('nothing may be packaged');
+      };
+      const r = await runBuild(testCtx(dir), config({ targets: ['linux', 'ios'], game: { buildCommand, outputDir: '.' }, ...extra }), { shellDir, host: 'linux', pack, mobile: fakeMobile });
+      expect(r.errors.map((e) => e.code), code).toEqual([code]);
+      expect(r.data).toBeUndefined();
+      expect(exitCodeFor(r)).toBe(2);
+      expect(fs.existsSync(path.join(dir, 'ran.txt')), code).toBe(false);
+    }
+  });
+
+  it('no bundle ID is needed when --target leaves the mobile targets out', async () => {
+    const { dir, shellDir } = project();
+    const r = await runBuild(testCtx(dir), config({ targets: ['linux', 'ios'] }), { shellDir, host: 'linux', only: ['linux'], pack: fakePack, mobile: fakeMobile });
+    expect(r.errors).toEqual([]);
   });
 
   it('a mobile-only build packages nothing and runs no desktop build hooks', async () => {
@@ -91,12 +119,14 @@ describe('runBuild', () => {
     const pack: Pack = async () => {
       throw new Error('nothing to package');
     };
-    const r = await runBuild(testCtx(dir), config({ targets: ['ios'], plugins: ['hooks.mjs'] }), { shellDir, host: 'win32', pack, mobile: fakeMobile });
+    const r = await runBuild(testCtx(dir), config({ targets: ['ios'], plugins: ['hooks.mjs'], mobile: MOBILE }), { shellDir, host: 'win32', pack, mobile: fakeMobile });
     expect(r.errors).toEqual([]);
     expect(r.data!.targets.map((t) => [t.target, t.status])).toEqual([['ios', 'built']]);
     expect(fs.existsSync(path.join(dir, 'before.txt'))).toBe(false);
-    // No desktop app is made, so no Steamworks SDK is needed.
+    // No desktop app is made, so no Steamworks SDK is needed, and the icon warning is about the phone projects.
     expect(r.warnings.map((w) => w.code)).toEqual(['ICON_MISSING', 'STORE_IMAGES_SKIPPED']);
+    expect(r.warnings[0].message).not.toContain('Electron');
+    expect(r.warnings[0].message).toContain('iOS and Android');
   });
 
   it('--target limits the build', async () => {

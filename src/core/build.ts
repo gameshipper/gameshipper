@@ -8,6 +8,7 @@ import { makeIcons } from './desktop/icons.js';
 import { macAppFor, packageDesktop, type DesktopOutput } from './desktop/package.js';
 import { planDesktopJobs, type HostTools } from './desktop/targets.js';
 import { buildMobileTargets, MOBILE_TARGETS, type MobileOutput, type MobileTarget } from './mobile/build-mobile.js';
+import { mobileConfigError } from './mobile/bundle-id.js';
 import { loadPlugins, runPluginHook, type LoadedPlugin, type PluginHookContext } from './plugins.js';
 import { bundleCdn } from './prepare/bundle-cdn.js';
 import { runBuildCommand, stageGame } from './prepare/stage.js';
@@ -78,7 +79,7 @@ const PLAY_ICON_WARNINGS = new Set(['ICON_INVALID', 'ICON_NOT_SQUARE', 'ICON_TOO
  * → Steam support. Throws GsFailure.
  * For `play`, an unusable icon is a warning and the app gets the default icon: it mustn't stop anyone testing the game.
  * `natives` lists every OS/CPU the app will run on (the packaging jobs, or this computer for `play`): Steam support
- * is bundled for each.
+ * is bundled for each. `mobileOnly`: a build of only iOS and Android, whose warnings shouldn't talk about Electron.
  */
 export async function prepareApp(
   ctx: Ctx,
@@ -86,6 +87,7 @@ export async function prepareApp(
   opts: PrepareOptions,
   purpose: 'build' | 'play',
   natives: NativeTarget[],
+  { mobileOnly = false }: { mobileOnly?: boolean } = {},
 ): Promise<PreparedApp> {
   // Checked first: a broken plugin or SDK setting should fail before a long game build.
   const plugins = await loadPlugins(ctx, config);
@@ -111,7 +113,13 @@ export async function prepareApp(
     }
   } else {
     warnings.push(
-      gsError('ICON_MISSING', 'No icon set, so builds use the default Electron icon.', 'Add a square PNG (1024x1024 or larger) and set "icon" in gameshipper.json.'),
+      gsError(
+        'ICON_MISSING',
+        mobileOnly
+          ? "No icon set, so the iOS and Android projects keep Capacitor's placeholder icon and splash screen."
+          : 'No icon set, so builds use the default Electron icon.',
+        'Add a square PNG (1024x1024 or larger) and set "icon" in gameshipper.json.',
+      ),
     );
   }
   const appDir = assembleApp(ctx.projectDir, config, {
@@ -154,6 +162,10 @@ export async function runBuild(ctx: Ctx, config: Config, opts: BuildOptions): Pr
     }
   }
   const wanted = opts.only ? config.targets.filter((t) => opts.only?.includes(t)) : config.targets;
+  const mobileTargets = wanted.filter((t): t is MobileTarget => (MOBILE_TARGETS as readonly Target[]).includes(t));
+  // Before anything is built: the bundle ID and version are config errors (exit 2), like half-set Apple variables.
+  const mobileError = mobileTargets.length ? mobileConfigError(config) : null;
+  if (mobileError) return fail(mobileError);
   // Planned first: the jobs decide which OSes' Steam files the app needs.
   const plan = planDesktopJobs(wanted, opts.host ?? process.platform, opts.tools);
 
@@ -164,7 +176,7 @@ export async function runBuild(ctx: Ctx, config: Config, opts: BuildOptions): Pr
     // Before the game build: half-set Apple variables or a missing certificate would otherwise only show after packaging.
     if (plan.jobs.some((j) => j.target === 'mac')) macSigning = await planMacSigning(opts.host ?? process.platform, opts.env ?? process.env);
     const natives = plan.jobs.map((j) => ({ platform: j.platform, arch: j.arch }));
-    prepared = await prepareApp(ctx, config, opts, 'build', natives);
+    prepared = await prepareApp(ctx, config, opts, 'build', natives, { mobileOnly: !plan.jobs.length && mobileTargets.length > 0 });
     hookBase = { projectDir: ctx.projectDir, appDir: prepared.appDir, config, log: (m) => ctx.log(m) };
     // May still change the app folder: it runs before any target is packaged. Hooks are for desktop apps only.
     if (plan.jobs.length) await runPluginHook(prepared.plugins, 'beforePackage', { ...hookBase, targets: plan.jobs.map((j) => j.target) });
@@ -197,7 +209,6 @@ export async function runBuild(ctx: Ctx, config: Config, opts: BuildOptions): Pr
       targets.push({ target: job.target, status: 'failed', errors: [error], warnings: job.warnings });
     }
   }
-  const mobileTargets = wanted.filter((t): t is MobileTarget => (MOBILE_TARGETS as readonly Target[]).includes(t));
   const iconPng = prepared.iconBase ? `${prepared.iconBase}.png` : null;
   for (const r of await (opts.mobile ?? buildMobileTargets)(ctx, config, mobileTargets, { stageDir: prepared.stageDir, iconPng })) {
     targets.push(

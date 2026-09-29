@@ -3,7 +3,7 @@ import * as path from 'node:path';
 import type { Config } from '../config/schema.js';
 import type { Ctx } from '../context.js';
 import { errorDetails, GsFailure, gsError, type GsError } from '../result.js';
-import { checkBundleId } from './bundle-id.js';
+import { mobileConfigError } from './bundle-id.js';
 import { runCapacitor } from './capacitor.js';
 import { writeAndroidImages, writeIosImages } from './images.js';
 import { configureAndroid } from './native-android.js';
@@ -78,8 +78,8 @@ function mobileError(ctx: Ctx, what: string, e: unknown): GsError {
  */
 export async function buildMobileTargets(ctx: Ctx, config: Config, targets: readonly MobileTarget[], input: MobileInput): Promise<MobileTargetResult[]> {
   if (!targets.length) return [];
-  const idError = checkBundleId(config);
-  if (idError) return targets.map((target) => ({ target, error: idError }));
+  const configError = mobileConfigError(config);
+  if (configError) return targets.map((target) => ({ target, error: configError }));
   let workDir: string;
   try {
     workDir = prepareMobileWorkspace(ctx, config, input.stageDir);

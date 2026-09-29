@@ -23,6 +23,8 @@ const USAGE_CODES = new Set([
   'BUNDLE_ID_REQUIRED',
   // mobile.bundleId has a part iOS or Android can't use (a Java keyword), or `init --bundle-id` got one.
   'BUNDLE_ID_INVALID',
+  // "version" can't be turned into an iOS and Android build number (1.1000.0, 2101.0.0).
+  'VERSION_UNSUPPORTED',
   // The Apple signing variables are half-set, or name a certificate that isn't in the keychain.
   'APPLE_CREDENTIALS_INVALID',
   'MAC_IDENTITY_NOT_FOUND',

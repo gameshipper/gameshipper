@@ -6,7 +6,7 @@ import { fail, gsError, ok } from '../../src/core/result.js';
 
 describe('mobile projects in the CLI', () => {
   it('a bundle ID the stores reject is an input error (exit 2); generation failures are exit 1', () => {
-    for (const code of ['BUNDLE_ID_REQUIRED', 'BUNDLE_ID_INVALID']) expect(exitCodeFor(fail(gsError(code, 'x'))), code).toBe(2);
+    for (const code of ['BUNDLE_ID_REQUIRED', 'BUNDLE_ID_INVALID', 'VERSION_UNSUPPORTED']) expect(exitCodeFor(fail(gsError(code, 'x'))), code).toBe(2);
     for (const code of ['MOBILE_GENERATE_FAILED', 'MOBILE_TEMPLATE_UNEXPECTED']) expect(exitCodeFor(fail(gsError(code, 'x'))), code).toBe(1);
   });
 
