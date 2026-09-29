@@ -1,7 +1,11 @@
 import type { SteamworksClient } from '../../src/shell/steam.js';
 
-/** An in-memory stand-in for a steamworks-ffi-node instance, logging every call. */
-export function fakeSteamClient(overrides: Partial<SteamworksClient> = {}): SteamworksClient & { calls: string[] } {
+/**
+ * An in-memory stand-in for a steamworks-ffi-node instance, logging every call. Like the real one it has a
+ * `libraryLoader` with the flat Steam API bindings the shell's storeStats uses; `storeResult` is what
+ * StoreStats() returns.
+ */
+export function fakeSteamClient(overrides: Partial<SteamworksClient> = {}, storeResult = true): SteamworksClient & { calls: string[] } {
   const calls: string[] = [];
   const log = (s: string) => calls.push(s);
   const unlocked = new Set<string>();
@@ -53,5 +57,9 @@ export function fakeSteamClient(overrides: Partial<SteamworksClient> = {}): Stea
     },
     ...overrides,
   };
-  return Object.assign(client, { calls });
+  const libraryLoader = {
+    SteamAPI_SteamUserStats: () => 'user-stats-interface',
+    SteamAPI_ISteamUserStats_StoreStats: (stats: unknown) => (log(`StoreStats ${String(stats)}`), storeResult),
+  };
+  return Object.assign(client, { calls, libraryLoader });
 }

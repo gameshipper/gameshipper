@@ -237,6 +237,11 @@ describe('copyPlugins by staging rules', () => {
     if (process.platform !== 'win32') {
       fs.symlinkSync('lib', path.join(dir, 'tools', 'stats', 'alias'));
       fs.symlinkSync('.env', path.join(dir, 'tools', 'stats', 'settings.txt'));
+      // A link to something the copy leaves out is left out too.
+      fs.symlinkSync('.npmrc', path.join(dir, 'tools', 'stats', 'npm.txt'));
+      fs.symlinkSync(path.join('..', '.vscode', 'settings.json'), path.join(dir, 'tools', 'stats', 'lib', 'editor.json'));
+      fs.symlinkSync('.github', path.join(dir, 'tools', 'stats', 'ci'));
+      fs.symlinkSync(path.join('out', 'windows'), path.join(dir, 'tools', 'stats', 'build'));
     }
     const appDir = makeTmpDir();
     copyPlugins(appDir, await loadPlugins(testCtx(dir), config(['tools/stats'])));

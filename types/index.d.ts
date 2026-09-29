@@ -67,7 +67,7 @@ export interface GameshipperSteam {
    * that range isn't saved (resolves false, with a warning in `play --smoke`).
    */
   setStat(name: string, value: number, kind?: 'int' | 'float'): Promise<boolean>;
-  /** setStat already saves; kept for code written for other tools. */
+  /** Sends the stats and achievements changed so far to Steam (setStat already does after each change). */
   storeStats(): Promise<boolean>;
 
   /**

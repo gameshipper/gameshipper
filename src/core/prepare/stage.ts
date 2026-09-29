@@ -223,6 +223,17 @@ export async function stageGame(ctx: Ctx, config: Config, opts: StageOptions = {
   // Plugins run in Electron's main process; core/plugins.ts copies them into the app separately. The SDK
   // is never shipped as game files. Compared by real path, so a link to one of them is left out too.
   const excluded = new Set([...config.plugins.map((p) => path.resolve(ctx.projectDir, p)), ...(opts.exclude ?? [])].map(realOrSelf));
+  /**
+   * A link target staging would leave out: a dot entry at the top of the game folder or the project (.npmrc,
+   * .vscode, ...) or anything in one, or anything named like a file never staged; outside both folders,
+   * anything in a dot folder or dot-named (~/.aws/credentials, ~/.npmrc).
+   */
+  const dotTarget = (target: string): boolean => {
+    const root = [realSource, project].find((r) => isWithin(target, r));
+    const parts = (root ? path.relative(root, target) : target).split(path.sep).filter(Boolean);
+    if (!root) return parts.some((p) => p.startsWith('.'));
+    return (parts[0]?.startsWith('.') ?? false) || parts.some(isSkippedAnywhere);
+  };
   // Called for every path before it's copied (links not yet followed).
   const keep = (src: string): boolean => {
     const rel = path.relative(source, src);
@@ -243,6 +254,7 @@ export async function stageGame(ctx: Ctx, config: Config, opts: StageOptions = {
       return skipLink(src, "links to a folder that holds Gameshipper's staging folder (.gameshipper/stage)", LOOP_FIX);
     }
     if (isWithin(target, realStage)) return skipLink(src, "links into Gameshipper's staging folder (.gameshipper/stage)", LOOP_FIX);
+    if (dotTarget(target)) return false;
     if (fs.statSync(target).isDirectory() && loopsBack(src, target, source)) {
       return skipLink(src, 'links to a folder that contains it', LOOP_FIX);
     }

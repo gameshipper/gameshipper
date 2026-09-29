@@ -1,5 +1,5 @@
 import { isGameUrl } from './policy.js';
-import type { SteamworksClient } from './steam.js';
+import { storeUserStats, type SteamworksClient } from './steam.js';
 
 /**
  * Every operation window.steam can ask the main process for. The preload maps each game-facing
@@ -173,8 +173,8 @@ export function createSteamApi(state: SteamApiState): SteamApi {
         },
       };
     },
-    // setStat already sends stats to Steam; this exists for GemShell-style code.
-    storeStats: () => ({ fallback: false, run: () => true }),
+    // setStat already sends each stat to Steam; this sends anything still pending, for GemShell-style code.
+    storeStats: () => ({ fallback: false, run: (c) => storeUserStats(c) }),
     uploadLeaderboardScore: (a) => {
       const name = text(a, 0, 'The leaderboard name');
       const score = Math.trunc(number(a, 1, 'The score'));

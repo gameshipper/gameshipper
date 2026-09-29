@@ -249,7 +249,7 @@ npm run typecheck
 npm run test:integration  # builds Gameshipper, then packages and runs real apps
 ```
 
-The Steam end-to-end test is opt-in. It needs macOS, a running, signed-in Steam client, network access and a Steamworks SDK zip, and on the signed-in account it unlocks then clears Spacewar's `ACH_WIN_ONE_GAME` and writes its `NumGames` stat back with its current value (leaving the account as it was):
+The Steam end-to-end test is opt-in. It needs macOS, a running, signed-in Steam client, network access and a Steamworks SDK zip, and on the signed-in account it unlocks then clears Spacewar's `ACH_WIN_ONE_GAME` (only when the account doesn't have it yet) and writes its `NumGames` stat back with its current value (leaving the account as it was):
 
 ```sh
 GAMESHIPPER_STEAM_E2E=1 GAMESHIPPER_STEAM_E2E_SDK=/path/to/steamworks_sdk_165.zip \

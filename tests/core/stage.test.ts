@@ -233,6 +233,34 @@ describe('stageGame', () => {
     expect(fs.readFileSync(path.join(stageDir, 'cfg', 'alias.txt'), 'utf8')).toBe('ok');
   });
 
+  it.skipIf(process.platform === 'win32')('never ships a top-level dot entry, or a dot folder outside the project, through a link', async () => {
+    const dir = makeTmpDir();
+    const outside = makeTmpDir();
+    writeFiles(outside, { '.aws/credentials': 'key', 'music.ogg': 'ogg' });
+    writeFiles(dir, { 'index.html': '', '.npmrc': '//registry.npmjs.org/:_authToken=npm_secret', '.vscode/settings.json': '{}', 'config/.htaccess': 'x' });
+    fs.symlinkSync('.npmrc', path.join(dir, 'settings.txt'));
+    fs.symlinkSync(path.join('.vscode', 'settings.json'), path.join(dir, 'editor.json'));
+    fs.symlinkSync('.vscode', path.join(dir, 'editor'));
+    fs.symlinkSync(path.join(outside, '.aws', 'credentials'), path.join(dir, 'creds.txt'));
+    // Staged like the files they point to: a nested dot file is game content, and so is a plain file elsewhere.
+    fs.symlinkSync(path.join('config', '.htaccess'), path.join(dir, 'htaccess.txt'));
+    fs.symlinkSync(path.join(outside, 'music.ogg'), path.join(dir, 'music.ogg'));
+    const { stageDir, warnings } = await stageGame(testCtx(dir), cfg());
+    expect(warnings).toEqual([]);
+    for (const skipped of ['settings.txt', 'editor.json', 'editor', 'creds.txt']) expect(present(path.join(stageDir, skipped)), skipped).toBe(false);
+    for (const kept of ['htaccess.txt', 'music.ogg', 'config/.htaccess']) expect(present(path.join(stageDir, kept)), kept).toBe(true);
+  });
+
+  it.skipIf(process.platform === 'win32')("never ships the project's dot entries through a link from a game subfolder", async () => {
+    const dir = makeTmpDir();
+    writeFiles(dir, { 'dist/index.html': '', '.npmrc': 'token', 'assets/logo.png': 'png' });
+    fs.symlinkSync(path.join('..', '.npmrc'), path.join(dir, 'dist', 'token.txt'));
+    fs.symlinkSync(path.join('..', 'assets'), path.join(dir, 'dist', 'assets'));
+    const { stageDir } = await stageGame(testCtx(dir), cfg({ game: { buildCommand: 'true', outputDir: 'dist' } }));
+    expect(present(path.join(stageDir, 'token.txt'))).toBe(false);
+    expect(present(path.join(stageDir, 'assets', 'logo.png'))).toBe(true);
+  });
+
   it('GAME_DIR_INVALID when game.dir is a file', async () => {
     const dir = makeTmpDir();
     writeFiles(dir, { 'index.html': '' });

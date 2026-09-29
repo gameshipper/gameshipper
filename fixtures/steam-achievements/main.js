@@ -19,10 +19,15 @@ async function run() {
   report('user', typeof name === 'string' && name.length > 0); // Never log the player's name itself.
   report('language', await steam.getLanguage());
   report('deck', await steam.isSteamDeck());
-  report('unlock', await steam.unlockAchievement(ACHIEVEMENT));
-  report('unlocked', await steam.isAchievementUnlocked(ACHIEVEMENT));
-  report('clear', await steam.clearAchievement(ACHIEVEMENT)); // Leave the test account as it was.
-  report('cleared', !(await steam.isAchievementUnlocked(ACHIEVEMENT)));
+  // Never clear an achievement the account really has: unlock and clear it only when it starts locked.
+  const alreadyUnlocked = await steam.isAchievementUnlocked(ACHIEVEMENT);
+  report('achievementAlreadyUnlocked', alreadyUnlocked);
+  if (!alreadyUnlocked) {
+    report('unlock', await steam.unlockAchievement(ACHIEVEMENT));
+    report('unlocked', await steam.isAchievementUnlocked(ACHIEVEMENT));
+    report('clear', await steam.clearAchievement(ACHIEVEMENT)); // Leave the test account as it was.
+    report('cleared', !(await steam.isAchievementUnlocked(ACHIEVEMENT)));
+  }
   report('achievements', (await steam.listAchievements()).length);
   report('presence', await steam.setRichPresence('status', 'Testing Gameshipper'));
   // A round-trip on one of Spacewar's int stats that changes nothing: write its current value back, store, read it.

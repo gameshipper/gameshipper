@@ -43,6 +43,23 @@ export interface SteamworksClient {
   };
 }
 
+type FlatStatsApi = Partial<Record<'SteamAPI_SteamUserStats' | 'SteamAPI_ISteamUserStats_StoreStats', (...args: unknown[]) => unknown>>;
+
+/**
+ * Sends the stats and achievements changed so far to Steam: ISteamUserStats::StoreStats(), and its answer.
+ * steamworks-ffi-node 0.11 has no public call for it (its setStat* and unlockAchievement store after each
+ * change), so this uses the flat Steam API bindings its instance keeps in `libraryLoader`, the ones those
+ * calls use. False when they aren't there.
+ */
+export function storeUserStats(client: SteamworksClient): boolean {
+  const lib = (client as unknown as { libraryLoader?: FlatStatsApi }).libraryLoader;
+  const userStats = lib?.SteamAPI_SteamUserStats;
+  const store = lib?.SteamAPI_ISteamUserStats_StoreStats;
+  if (typeof userStats !== 'function' || typeof store !== 'function') return false;
+  const stats = userStats.call(lib);
+  return stats ? Boolean(store.call(lib, stats)) : false;
+}
+
 /** What main.ts gets from require('steamworks-ffi-node') (injected so tests never load native code). */
 export interface SteamworksLoad {
   instance(): SteamworksClient;

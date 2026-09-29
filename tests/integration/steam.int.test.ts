@@ -44,6 +44,7 @@ const EXPECTED_REPORT = {
   user: true,
   language: expect.any(String),
   deck: false,
+  achievementAlreadyUnlocked: false,
   unlock: true,
   unlocked: true,
   clear: true,
@@ -93,6 +94,7 @@ describe('the Steam fixture without an SDK', () => {
       user: false,
       language: null,
       deck: false,
+      achievementAlreadyUnlocked: false,
       unlock: false,
       unlocked: false,
       clear: false,
@@ -147,9 +149,15 @@ describe.skipIf(!ENABLED)('Steam on this Mac with App ID 480', () => {
   /** Set by the injected-overlay run: its events, and the screen lock read before and after it. */
   let injected: { events: DiagEvent[]; lock: Array<{ state: ScreenLock; raw: string }> } | undefined;
 
+  /** The fixture's report. When the account already has ACH_WIN_ONE_GAME, the game leaves it alone (never clears it). */
   const report = (events: DiagEvent[]) => {
     const r = gameReport(events);
-    expect(r).toEqual(EXPECTED_REPORT);
+    if (r.achievementAlreadyUnlocked === true) {
+      const { unlock, unlocked, clear, cleared, ...rest } = EXPECTED_REPORT;
+      expect(r).toEqual({ ...rest, achievementAlreadyUnlocked: true });
+    } else {
+      expect(r).toEqual(EXPECTED_REPORT);
+    }
     expect(r.achievements).toBeGreaterThan(0);
   };
   const smoke = (extraEnv: NodeJS.ProcessEnv) => {

@@ -42,7 +42,18 @@ describe('window.steam main-process API', () => {
     expect(await api.call(GAME, 'setStat', ['FeetTraveled', 20])).toBe(true);
     expect(client.calls).toEqual(expect.arrayContaining(['setStatInt NumGames 4', 'setStatInt FeetTraveled 20', 'setStatFloat FeetTraveled 20']));
     expect(await api.call(GAME, 'setStat', ['NumGames', 5, 'int'])).toBe(true);
+  });
+
+  it("stores stats through Steam's own StoreStats(), returning its answer", async () => {
+    const { api, client } = withSteam();
     expect(await api.call(GAME, 'storeStats', [])).toBe(true);
+    expect(client.calls).toContain('StoreStats user-stats-interface');
+    const refused = fakeSteamClient({}, false);
+    expect(await createSteamApi({ client: refused, isSteamDeck: false }).call(GAME, 'storeStats', [])).toBe(false);
+    expect(refused.calls).toContain('StoreStats user-stats-interface');
+    // A steamworks-ffi-node without those bindings: nothing happened.
+    const bare = Object.assign(fakeSteamClient(), { libraryLoader: undefined });
+    expect(await createSteamApi({ client: bare, isSteamDeck: false }).call(GAME, 'storeStats', [])).toBe(false);
   });
 
   it('refuses integer stats and scores outside 32 bits, with a warning, with or without Steam', async () => {

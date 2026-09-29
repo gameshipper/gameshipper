@@ -239,6 +239,9 @@ function copyPluginFolder(p: LoadedPlugin, dest: string): void {
     if (!isWithin(target, root)) {
       throw loadFailed(p.spec, `${rel} links outside the plugin folder (to ${target}), so it isn't packaged. Replace the link with a copy.`);
     }
+    // A link to something the copy leaves out (.npmrc, .github, out/...) is left out too.
+    const targetParts = path.relative(root, target).split(path.sep).filter(Boolean);
+    if (targetParts.some((_, i) => leftOutOfPlugin(targetParts.slice(0, i + 1), path.join(root, ...targetParts.slice(0, i + 1))))) return false;
     if (fs.statSync(target).isDirectory() && loopsBack(src, target, p.source)) {
       throw loadFailed(p.spec, `${rel} links to a folder that contains it. Remove the link.`);
     }
