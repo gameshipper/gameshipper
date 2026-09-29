@@ -29,8 +29,8 @@ import {
 import { planFileResponse } from './range.js';
 import { entryUrl, readRuntimeConfig } from './runtime-config.js';
 import { callSaveStore, createSaveStore, type SaveStore } from './saves.js';
-import { createSteamApi } from './steam-api.js';
-import { isSteamDeck, startSteam, type SteamSession, type SteamworksLoad } from './steam.js';
+import { createSteamApi, type SteamApi } from './steam-api.js';
+import { isSteamDeck, startSteam, withSteamErrors, type SteamSession, type SteamworksLoad } from './steam.js';
 
 const env = process.env;
 const diagnostics = createDiagnostics(env.GAMESHIPPER_LOG ?? null);
@@ -47,6 +47,22 @@ const errorText = (e: unknown): string => {
 
 /** Set once Steam has been started (below); a smoke run that fails before that has none. */
 let steam: SteamSession | null = null;
+/** window.steam's main-process side, set once the app is ready. */
+let steamApi: SteamApi | null = null;
+/** How long quitting waits for the game's last Steam calls (a leaderboard upload, say) before shutting Steam down. */
+const STEAM_QUIT_WAIT_MS = 1000;
+
+/**
+ * Shuts Steam down so it sees the game as closed. Calls still waiting for Steam get up to STEAM_QUIT_WAIT_MS
+ * first: steamworks-ffi-node polls for their results, and a poll after the shutdown could crash the game.
+ */
+async function stopSteam(): Promise<void> {
+  try {
+    await steamApi?.whenIdle(STEAM_QUIT_WAIT_MS);
+  } finally {
+    steam?.stop();
+  }
+}
 
 // A smoke run always ends with a summary or a non-zero exit code; it never hangs.
 let smokeDone = false;
@@ -73,9 +89,9 @@ function finishSmoke(code: number): void {
       exitCode = code || 1;
     }
   }
-  // app.exit() skips will-quit, so Steam is told here that the game closed.
-  steam?.stop();
-  app.exit(exitCode);
+  // app.exit() skips will-quit, so Steam is told here that the game closed. Nothing runs after app.exit(), so no
+  // poll for a Steam call's result can come after the shutdown.
+  void stopSteam().finally(() => app.exit(exitCode));
 }
 
 if (smoke) {
@@ -214,6 +230,7 @@ function registerSteam(): void {
     isSteamDeck: deck,
     warn: (message) => diagnostics.record({ kind: 'console', level: 'warning', message, source: '', line: 0 }),
   });
+  steamApi = api;
   ipcMain.handle('gameshipper:steam', (event, op: unknown, args: unknown) => api.call(event.senderFrame?.url, op, args));
   if (!client || !deck) return;
   const keyboard = (event: Electron.IpcMainEvent, show: () => void): void => {
@@ -392,12 +409,16 @@ function attachOverlay(win: BrowserWindow): void {
   if (overlay === 'repaint') startRepaint(win);
   if (overlay === 'native') {
     win.webContents.once('did-finish-load', () => {
+      // steamworks-ffi-node says why it couldn't only through its logger.
+      const reasons: string[] = [];
+      let reason: string | null;
       try {
-        client.addElectronSteamOverlay(win, { title: config.name, fps: 60 });
+        const added = withSteamErrors(loadSteamworks().logger, reasons, () => client.addElectronSteamOverlay(win, { title: config.name, fps: 60 }));
+        reason = added ? null : reasons.join(' ') || "steamworks-ffi-node couldn't create its overlay window";
       } catch (e) {
-        const message = `Couldn't start the Steam overlay window: ${errorText(e)}`;
-        diagnostics.record({ kind: 'console', level: 'warning', message, source: '', line: 0 });
+        reason = `its overlay window failed to start: ${errorText(e)}`;
       }
+      if (reason) diagnostics.record({ kind: 'steam-overlay', enabled: false, reason });
     });
   }
 }
@@ -421,7 +442,15 @@ function armSmokeTest(win: BrowserWindow): void {
 
 app.on('window-all-closed', () => app.quit());
 // Steam sees the game as closed only once it shuts down its connection.
-app.on('will-quit', () => steam?.stop());
+app.on('will-quit', (event) => {
+  if (!steamApi?.pendingCalls()) {
+    steam?.stop();
+    return;
+  }
+  // Let the game's last Steam calls finish first; app.exit() then quits without coming back here.
+  event.preventDefault();
+  void stopSteam().finally(() => app.exit(0));
+});
 
 void app.whenReady().then(() => {
   // Steam is launching the game again; this copy only waits to exit.

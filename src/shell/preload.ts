@@ -86,22 +86,31 @@ exposeReplaceable('steam', '__gameshipperSteam', {
   runCallbacks: () => Promise.resolve(),
 });
 
-// Steam Deck on-screen keyboard: tell the main process when a text field gains or loses focus.
+// Steam Deck on-screen keyboard: tell the main process when a text field gains or loses focus
+// (deck-keyboard.ts decides which fields get which keyboard).
+const showKeyboardFor = (target: EventTarget | null): void => {
+  const el = target as HTMLElement | null;
+  if (!el || typeof el.getBoundingClientRect !== 'function' || typeof el.tagName !== 'string') return;
+  const tag = el.tagName.toLowerCase();
+  if (tag !== 'input' && tag !== 'textarea' && !el.isContentEditable) return;
+  const r = el.getBoundingClientRect();
+  ipcRenderer.send('gameshipper:text-focus', {
+    tag,
+    // The normalized type: lowercase, and "text" for a missing or unknown one.
+    type: tag === 'input' ? (el as HTMLInputElement).type : '',
+    editable: el.isContentEditable,
+    readOnly: (tag === 'input' || tag === 'textarea') && (el as HTMLInputElement).readOnly,
+    rect: { x: r.x, y: r.y, width: r.width, height: r.height },
+    scale: window.devicePixelRatio,
+  });
+};
+window.addEventListener('focusin', (event) => showKeyboardFor(event.target), true);
+// A tap on the field that already has focus (after the player closed the keyboard) opens it again.
 window.addEventListener(
-  'focusin',
+  'pointerdown',
   (event) => {
-    const el = event.target as HTMLElement | null;
-    if (!el || typeof el.getBoundingClientRect !== 'function') return;
-    const tag = el.tagName.toLowerCase();
-    if (tag !== 'input' && tag !== 'textarea' && !el.isContentEditable) return;
-    const r = el.getBoundingClientRect();
-    ipcRenderer.send('gameshipper:text-focus', {
-      tag,
-      type: el.getAttribute('type') ?? '',
-      editable: el.isContentEditable,
-      rect: { x: r.x, y: r.y, width: r.width, height: r.height },
-      scale: window.devicePixelRatio,
-    });
+    const focused = document.activeElement;
+    if (focused && focused !== document.body && event.target instanceof Node && focused.contains(event.target)) showKeyboardFor(focused);
   },
   true,
 );

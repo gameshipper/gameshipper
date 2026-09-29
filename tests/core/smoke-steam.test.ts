@@ -29,6 +29,15 @@ describe('summaryToIssues for Steam and plugins', () => {
     expect([r.errors, r.warnings]).toEqual([[], []]);
   });
 
+  it("an overlay helper that couldn't start is a warning", () => {
+    const r = summaryToIssues({ droppedInfo: 0, events: [{ kind: 'steam-overlay', enabled: false, reason: '[Steam Overlay] Failed to create overlay window' }] });
+    expect(r.errors).toEqual([]);
+    expect(r.warnings).toEqual([
+      expect.objectContaining({ code: 'STEAM_OVERLAY_FAILED', message: "Steam's overlay (Shift+Tab) couldn't be set up: [Steam Overlay] Failed to create overlay window" }),
+    ]);
+    expect(r.warnings[0].fix).toContain('steam.overlay');
+  });
+
   it('a plugin that fails to load in the game is an error', () => {
     const r = summaryToIssues({ droppedInfo: 0, events: [{ kind: 'plugin-error', plugin: 'echo', message: 'Unexpected token' }] });
     expect(r.errors.map((e) => [e.code, e.message])).toEqual([['PLUGIN_LOAD_FAILED', 'Plugin echo failed to load in the game: Unexpected token']]);

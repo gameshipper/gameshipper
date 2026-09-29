@@ -10,11 +10,12 @@ export function overlayInjected(platform: NodeJS.Platform, env: NodeJS.ProcessEn
 }
 
 /**
- * How the Steam overlay (Shift+Tab) gets frames to draw over, for steam.overlay = "auto":
- * - macOS: steamworks-ffi-node's native Metal window mirroring the game, and only when Steam
- *   injected its overlay. Measured on macOS with Electron 44: with Chromium's own frames
- *   isOverlayEnabled() stays false even with a canvas repainting every frame; with the native
- *   window it turns true within about 2 seconds.
+ * How the Steam overlay (Shift+Tab) gets frames to draw over, for steam.overlay = "auto". Only when
+ * Steam injected its overlay (it does when it launches the game) on macOS and Linux, where that shows;
+ * nothing is done for runs Steam didn't launch.
+ * - macOS: steamworks-ffi-node's native Metal window mirroring the game. Measured on macOS with
+ *   Electron 44: with Chromium's own frames isOverlayEnabled() stays false even with a canvas
+ *   repainting every frame; with the native window it turns true within about 2 seconds.
  * - Windows and Linux: the repaint loop steamworks.js uses. With in-process-gpu (and
  *   disable-direct-composition on Windows), Steam hooks Chromium's GPU output directly and only
  *   needs a new frame every tick.
@@ -22,21 +23,21 @@ export function overlayInjected(platform: NodeJS.Platform, env: NodeJS.ProcessEn
 export function chooseOverlay(setting: OverlaySetting, platform: NodeJS.Platform, env: NodeJS.ProcessEnv): OverlayMode {
   if (setting === 'off') return 'none';
   if (setting === 'native' || setting === 'repaint') return setting;
-  if (platform === 'darwin') return overlayInjected(platform, env) ? 'native' : 'none';
-  return 'repaint';
+  if (!overlayInjected(platform, env)) return 'none';
+  return platform === 'darwin' ? 'native' : 'repaint';
 }
 
 /** The BrowserWindow parts the repaint loop uses. */
 export interface RepaintWindow {
   isDestroyed(): boolean;
-  webContents: { isPainting(): boolean; invalidate(): void };
+  webContents: { invalidate(): void };
 }
 
 /** Forces a new frame 60 times a second so the overlay always has something to draw over. Returns stop(). */
 export function startRepaint(win: RepaintWindow, fps = 60): () => void {
   const timer = setInterval(() => {
     if (win.isDestroyed()) clearInterval(timer);
-    else if (!win.webContents.isPainting()) win.webContents.invalidate();
+    else win.webContents.invalidate();
   }, 1000 / fps);
   return () => clearInterval(timer);
 }

@@ -23,8 +23,11 @@ export type DiagEvent =
    */
   | { kind: 'blocked-navigation'; url: string; action: 'opened-externally' | 'blocked' }
   | { kind: 'steam'; state: SteamState; appId: number; overlay: OverlayMode; message: string | null }
-  /** Recorded when a smoke run ends: whether Steam says its overlay hooked the game. */
-  | { kind: 'steam-overlay'; enabled: boolean }
+  /**
+   * Recorded when a smoke run ends: whether Steam says its overlay hooked the game. With a `reason` (and
+   * enabled false), recorded as soon as the overlay helper (steam.overlay "native") couldn't start.
+   */
+  | { kind: 'steam-overlay'; enabled: boolean; reason?: string }
   /** A plugin's module failed to load in the game's main process. */
   | { kind: 'plugin-error'; plugin: string; message: string };
 

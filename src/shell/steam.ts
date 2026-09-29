@@ -110,6 +110,24 @@ export function shouldRestartThroughSteam(appId: number, isPackaged: boolean, en
 
 const cleanMessage = (m: string) => m.replace(/^\[Steamworks\]\s*(ERROR:\s*)?/, '').trim();
 
+/**
+ * Runs `fn` while collecting what steamworks-ffi-node logs through its SteamLogger's error() (its only way
+ * of saying why something failed) into `reasons`, and puts the logger back afterwards. Throws what `fn`
+ * throws, and when the logger can't be hooked.
+ */
+export function withSteamErrors<T>(logger: SteamworksLoad['logger'], reasons: string[], fn: () => T): T {
+  const original = logger.error;
+  logger.error = (...args: unknown[]) => {
+    reasons.push(cleanMessage(args.map(String).join(' ')));
+    original.apply(logger, args);
+  };
+  try {
+    return fn();
+  } finally {
+    logger.error = original;
+  }
+}
+
 /** Connects to Steam if this app has the SDK and Steam is running. Never throws. */
 export function startSteam(opts: StartSteamOptions): SteamSession {
   const exists = opts.exists ?? fs.existsSync;
@@ -124,32 +142,32 @@ export function startSteam(opts: StartSteamOptions): SteamSession {
     return off('init-failed', `Couldn't load the Steam bridge: ${(e as Error).message}`);
   }
   const reasons: string[] = [];
-  const logError = lib.logger.error;
-  lib.logger.error = (...args: unknown[]) => {
-    reasons.push(cleanMessage(args.map(String).join(' ')));
-    logError.apply(lib.logger, args);
-  };
-  let client: SteamworksClient;
+  let started = null as SteamworksClient | null;
   try {
-    client = lib.instance();
-    client.setSdkPath(opts.sdkDir);
-    if (shouldRestartThroughSteam(opts.appId, opts.isPackaged, opts.env) && client.restartAppIfNecessary(opts.appId)) {
-      return off('restarting', 'The game was not started by Steam, so Steam is relaunching it.');
-    }
-    if (!client.init({ appId: opts.appId })) {
-      let running = true;
-      try {
-        running = lib.isSteamRunning(libraryPath);
-      } catch {
-        running = true;
+    const early = withSteamErrors(lib.logger, reasons, (): SteamSession | null => {
+      const c = lib.instance();
+      c.setSdkPath(opts.sdkDir);
+      if (shouldRestartThroughSteam(opts.appId, opts.isPackaged, opts.env) && c.restartAppIfNecessary(opts.appId)) {
+        return off('restarting', 'The game was not started by Steam, so Steam is relaunching it.');
       }
-      return running ? off('init-failed', reasons[0] ?? 'SteamAPI_Init() failed.') : off('not-running', 'Steam is not running.');
-    }
+      if (!c.init({ appId: opts.appId })) {
+        let running = true;
+        try {
+          running = lib.isSteamRunning(libraryPath);
+        } catch {
+          running = true;
+        }
+        return running ? off('init-failed', reasons[0] ?? 'SteamAPI_Init() failed.') : off('not-running', 'Steam is not running.');
+      }
+      started = c;
+      return null;
+    });
+    if (early) return early;
   } catch (e) {
     return off('init-failed', (e as Error).message);
-  } finally {
-    lib.logger.error = logError;
   }
+  if (!started) return off('init-failed', 'SteamAPI_Init() failed.');
+  const client: SteamworksClient = started;
 
   const timer = setInterval(() => {
     try {

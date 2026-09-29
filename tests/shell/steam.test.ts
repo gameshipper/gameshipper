@@ -73,6 +73,21 @@ describe('startSteam', () => {
     expect(logger.error).toBe(original);
   });
 
+  it('never throws, even when the logger cannot be hooked', () => {
+    const logger = Object.freeze({ error: (..._args: unknown[]) => {} });
+    const session = startSteam({
+      appId: 480,
+      sdkDir: SDK,
+      isPackaged: false,
+      platform: 'darwin',
+      env: {},
+      load: () => ({ instance: () => fakeSteamClient(), logger, isSteamRunning: () => true }),
+      exists: () => true,
+    });
+    expect(session.state).toBe('init-failed');
+    expect(session.message).toMatch(/read.only|Cannot assign/i);
+  });
+
   it('init-failed when the bridge itself fails to load', () => {
     const session = startSteam({
       appId: 480,

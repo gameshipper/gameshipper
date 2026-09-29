@@ -1,8 +1,11 @@
-/** What the preload reports when something in the game gets focus. */
+/** What the preload reports when a text field in the game gets focus, or is tapped while it has it. */
 export interface FocusInfo {
   tag: string;
+  /** An input's normalized type (el.type: lowercase, "text" when missing or unknown); "" otherwise. */
   type: string;
   editable: boolean;
+  /** A read-only input or textarea takes no typing, so it gets no keyboard. */
+  readOnly?: boolean;
   /** getBoundingClientRect() in CSS pixels. */
   rect: { x: number; y: number; width: number; height: number };
   /** window.devicePixelRatio */
@@ -30,10 +33,15 @@ function modeFor(tag: unknown, type: unknown, editable: unknown): number | null 
  */
 export function floatingKeyboardArgs(info: unknown): [number, number, number, number, number] | null {
   if (!info || typeof info !== 'object') return null;
-  const { tag, type, editable, rect, scale } = info as Partial<FocusInfo>;
+  const { tag, type, editable, readOnly, rect, scale } = info as Partial<FocusInfo>;
+  if (readOnly === true) return null;
   const mode = modeFor(tag, type, editable);
   if (mode === null) return null;
-  const s = typeof scale === 'number' && scale > 0 ? scale : 1;
-  const px = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? Math.round(v * s) : 0);
+  const s = typeof scale === 'number' && Number.isFinite(scale) && scale > 0 ? scale : 1;
+  // Anything that isn't a finite number of pixels counts as 0: the keyboard still opens, just anywhere.
+  const px = (v: unknown) => {
+    const scaled = typeof v === 'number' ? Math.round(v * s) : Number.NaN;
+    return Number.isFinite(scaled) ? scaled : 0;
+  };
   return [mode, px(rect?.x), px(rect?.y), px(rect?.width), px(rect?.height)];
 }

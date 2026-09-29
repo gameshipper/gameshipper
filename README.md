@@ -99,6 +99,7 @@ The loop: `status --json`, `init --yes --json`, then `play --smoke --json` until
 | `GAME_CONSOLE_WARNING` | warning | The game logged a warning. |
 | `STEAM_INIT_FAILED` | error | Steam is running but didn't start for the game's App ID (usually one the signed-in account doesn't own). |
 | `STEAM_NOT_RUNNING` | warning | Steam isn't running, so `window.steam` was a no-op. |
+| `STEAM_OVERLAY_FAILED` | warning | The native overlay window (see [Steam](#steam)) couldn't start, so Shift+Tab shows no overlay. |
 | `PLUGIN_LOAD_FAILED` | error | A plugin's module failed to load in the game. |
 | `GAME_NAVIGATION_BLOCKED` | warning | The game tried to take its window to a page that isn't the game's, like `about:blank` or `file:`, or an embedded site tried to open a link. Web, mail and `steam:` links the game itself opens aren't reported: they open in the player's browser or app. |
 
@@ -179,8 +180,9 @@ if (window.steam && (await steam.isAvailable())) {
 Every method resolves to a harmless value (`false`, `null` or `[]`) when Steam isn't running, so the game never needs to guard each call. Also available: `getSteamId`, `getLanguage`, `isSteamDeck`, `clearAchievement`, `isAchievementUnlocked`, `listAchievements`, `getStat`, `storeStats`, `clearRichPresence`, `activateOverlayWebPage`, and GemShell-style names (`getPersonaName`, `getSteamID`, `getAchievement`, `getStatInt`, `setStatInt`, `getStatFloat`, `setStatFloat`, `requestStats`, `requestStatsAndWait`, `runCallbacks`), so GemShell games need few or no changes. Only the game's own pages can use `window.steam`. `window.steam` and `window.gameshipper` are ordinary globals: a game that has its own `steam` or `gameshipper` (a top-level `const`, `let`, `var`, `function` or `class` in a classic script, or `window.steam = ...`) keeps working, and its own takes the place of Gameshipper's.
 
 - **App ID.** `steam.appId` defaults to 480, Valve's Spacewar test app, which every Steam account can use. With your own App ID, a packaged build started outside Steam asks Steam to launch it (Valve's standard check).
-- **Overlay (Shift+Tab).** `steam.overlay` is `"auto"` by default. On macOS that uses a native window that mirrors the game so Steam's overlay can draw on it (only when Steam launched the game); on Windows and Linux it keeps a new frame coming 60 times a second. Set `"native"`, `"repaint"` or `"off"` to override.
-- **Steam Deck.** Steam's on-screen keyboard opens when a text field gets focus.
+- **Overlay (Shift+Tab).** `steam.overlay` is `"auto"` by default. On macOS that uses a native window that mirrors the game so Steam's overlay can draw on it; on Windows and Linux it keeps a new frame coming 60 times a second. On macOS and Linux this happens only when Steam launched the game, which is when Steam injects its overlay. Set `"native"`, `"repaint"` or `"off"` to override. `play --smoke` warns `STEAM_OVERLAY_FAILED` when the native window couldn't start.
+- **Steam Deck.** Steam's on-screen keyboard opens when a text field gets focus, and again when the player taps the field after closing it. Read-only fields get no keyboard.
+- **Quitting.** The game waits up to a second for Steam calls still in flight (a leaderboard upload, say) before it disconnects from Steam.
 - **Troubleshooting.** `play --smoke --json` reports `STEAM_NOT_RUNNING` (a warning: start Steam) or `STEAM_INIT_FAILED` (an error: usually an App ID the signed-in account doesn't own).
 
 ## Plugins

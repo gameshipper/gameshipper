@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { floatingKeyboardArgs } from '../../src/shell/deck-keyboard.js';
 import { chooseOverlay, overlayInjected, startRepaint } from '../../src/shell/overlay.js';
 
+const LINUX_STEAM = { LD_PRELOAD: '/home/u/.steam/ubuntu12_64/gameoverlayrenderer.so' };
 const MAC_STEAM = { DYLD_INSERT_LIBRARIES: '/Users/u/Library/Application Support/Steam/Steam.AppBundle/Steam/Contents/MacOS/gameoverlayrenderer.dylib' };
 
 describe('chooseOverlay', () => {
@@ -9,7 +10,8 @@ describe('chooseOverlay', () => {
     expect(chooseOverlay('auto', 'darwin', MAC_STEAM)).toBe('native');
     expect(chooseOverlay('auto', 'darwin', {})).toBe('none');
     expect(chooseOverlay('auto', 'win32', {})).toBe('repaint');
-    expect(chooseOverlay('auto', 'linux', {})).toBe('repaint');
+    expect(chooseOverlay('auto', 'linux', LINUX_STEAM)).toBe('repaint');
+    expect(chooseOverlay('auto', 'linux', {})).toBe('none');
   });
 
   it('explicit settings win', () => {
@@ -29,7 +31,7 @@ describe('startRepaint', () => {
   it('invalidates the window every frame until stopped or destroyed', async () => {
     let invalidated = 0;
     let destroyed = false;
-    const win = { isDestroyed: () => destroyed, webContents: { isPainting: () => false, invalidate: () => void invalidated++ } };
+    const win = { isDestroyed: () => destroyed, webContents: { invalidate: () => void invalidated++ } };
     const stop = startRepaint(win, 200);
     await new Promise((r) => setTimeout(r, 60));
     expect(invalidated).toBeGreaterThan(2);
@@ -52,6 +54,20 @@ describe('floatingKeyboardArgs', () => {
     expect(floatingKeyboardArgs({ tag: 'input', type: 'number', editable: false, rect, scale: 1 })?.[0]).toBe(3);
     expect(floatingKeyboardArgs({ tag: 'textarea', type: '', editable: false, rect, scale: 1 })?.[0]).toBe(1);
     expect(floatingKeyboardArgs({ tag: 'div', type: '', editable: true, rect, scale: 1 })?.[0]).toBe(1);
+  });
+
+  it('ignores read-only fields', () => {
+    expect(floatingKeyboardArgs({ tag: 'input', type: 'text', editable: false, readOnly: true, rect, scale: 1 })).toBeNull();
+    expect(floatingKeyboardArgs({ tag: 'textarea', type: '', editable: false, readOnly: true, rect, scale: 1 })).toBeNull();
+    expect(floatingKeyboardArgs({ tag: 'input', type: 'text', editable: false, readOnly: false, rect, scale: 1 })).toEqual([0, 10, 20, 300, 40]);
+  });
+
+  it('uses only finite numbers for the scale and the field', () => {
+    for (const scale of [Number.POSITIVE_INFINITY, Number.NaN, -2, 0]) {
+      expect(floatingKeyboardArgs({ tag: 'input', type: 'text', editable: false, rect, scale }), String(scale)).toEqual([0, 10, 20, 300, 40]);
+    }
+    const junk = { x: Number.NaN, y: Number.POSITIVE_INFINITY, width: 1e308, height: '40' };
+    expect(floatingKeyboardArgs({ tag: 'input', type: 'text', editable: false, rect: junk, scale: 2 })).toEqual([0, 0, 0, 0, 0]);
   });
 
   it('ignores elements that do not take text, and junk', () => {

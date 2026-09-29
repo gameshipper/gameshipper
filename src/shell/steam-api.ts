@@ -60,6 +60,14 @@ export interface SteamApi {
    * the game's own pages may use Steam, so a page the window somehow ends up showing can't.
    */
   call(senderUrl: string | null | undefined, op: unknown, args: unknown): Promise<unknown>;
+  /** How many Steam calls are still running (a leaderboard upload waits for Steam's answer, say). */
+  pendingCalls(): number;
+  /**
+   * Resolves once the calls running now have finished, or after `timeoutMs`, whichever comes first.
+   * steamworks-ffi-node keeps polling Steam for a call's result, and a poll after SteamAPI_Shutdown() uses
+   * freed memory, so the game waits for them before shutting Steam down.
+   */
+  whenIdle(timeoutMs: number): Promise<void>;
 }
 
 function text(args: unknown[], i: number, what: string, max = 256): string {
@@ -232,6 +240,7 @@ export function createSteamApi(state: SteamApiState): SteamApi {
     },
   };
 
+  const pending = new Set<Promise<unknown>>();
   return {
     async call(senderUrl, op, args) {
       if (!isGameUrl(senderUrl)) throw new Error('Steam is only available to the game (app://game/).');
@@ -239,12 +248,31 @@ export function createSteamApi(state: SteamApiState): SteamApi {
       const { fallback, run } = handlers[op as SteamOp](Array.isArray(args) ? args : []);
       const client = state.client;
       if (!client || !run) return fallback;
+      const running = (async () => {
+        try {
+          return await run(client);
+        } catch {
+          // A failing Steam call must never break the game; it just "didn't happen".
+          return fallback;
+        }
+      })();
+      pending.add(running);
       try {
-        return await run(client);
-      } catch {
-        // A failing Steam call must never break the game; it just "didn't happen".
-        return fallback;
+        return await running;
+      } finally {
+        pending.delete(running);
       }
+    },
+    pendingCalls: () => pending.size,
+    whenIdle(timeoutMs) {
+      if (pending.size === 0) return Promise.resolve();
+      return new Promise((resolve) => {
+        const timer = setTimeout(resolve, timeoutMs);
+        void Promise.allSettled([...pending]).then(() => {
+          clearTimeout(timer);
+          resolve();
+        });
+      });
     },
   };
 }

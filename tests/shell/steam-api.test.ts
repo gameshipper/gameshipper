@@ -145,6 +145,29 @@ describe('window.steam main-process API', () => {
     expect(await createSteamApi({ client, isSteamDeck: false }).call(GAME, 'unlockAchievement', ['A'])).toBe(false);
   });
 
+  it('tells when its Steam calls have finished, waiting at most the given time', async () => {
+    const client = fakeSteamClient();
+    const waiting: Array<() => void> = [];
+    const finish = () => waiting.forEach((resolve) => resolve());
+    client.leaderboards.findLeaderboard = () => new Promise((resolve) => waiting.push(() => resolve({ handle: 2n })));
+    const api = createSteamApi({ client, isSteamDeck: false });
+    expect(api.pendingCalls()).toBe(0);
+    await api.whenIdle(1000);
+    const upload = api.call(GAME, 'uploadLeaderboardScore', ['Feet Traveled', 5]);
+    const other = api.call(GAME, 'getLeaderboardEntries', ['Other']);
+    expect(api.pendingCalls()).toBe(2);
+    const started = Date.now();
+    await api.whenIdle(50);
+    expect(Date.now() - started).toBeGreaterThanOrEqual(40);
+    expect(api.pendingCalls()).toBe(2);
+    const idle = api.whenIdle(5000);
+    finish();
+    await idle;
+    expect(api.pendingCalls()).toBe(0);
+    expect(await upload).toMatchObject({ success: true });
+    expect(await other).toEqual([expect.objectContaining({ rank: 1 })]);
+  });
+
   it('answers only the game itself', async () => {
     const { api, client } = withSteam();
     for (const sender of ['https://example.com/', 'about:blank', undefined]) {

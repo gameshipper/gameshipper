@@ -240,7 +240,18 @@ export function summaryToIssues(
         }
         break;
       case 'steam-overlay':
-        // Only the events log keeps it: Steam hooks its overlay only into games it launched.
+        // Whether Steam hooked the game only goes to the events log: Steam hooks its overlay only into games it
+        // launched. A helper that couldn't start means no overlay even then.
+        if (e.reason) {
+          add(
+            warnings,
+            gsError(
+              'STEAM_OVERLAY_FAILED',
+              `Steam's overlay (Shift+Tab) couldn't be set up: ${e.reason}`,
+              'The game runs without the overlay. Try steam.overlay "repaint" in gameshipper.json (or "off" to stop trying); the run log has steamworks-ffi-node\'s own messages.',
+            ),
+          );
+        }
         break;
       case 'plugin-error':
         add(errors, gsError('PLUGIN_LOAD_FAILED', `Plugin ${e.plugin} failed to load in the game: ${e.message}`, 'Fix the plugin, then run `npx gameshipper play --smoke` again.'));
