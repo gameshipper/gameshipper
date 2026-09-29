@@ -114,6 +114,20 @@ describe('runBuild', () => {
     expect(r.errors[0].code).toBe('ASSET_MISSING');
   });
 
+  it('an icon that is too small, not square or not a PNG stops the build', async () => {
+    const { dir, shellDir } = project();
+    writeFiles(dir, { 'small.png': makeSolidPng(512, 512), 'wide.png': makeSolidPng(2048, 1024), 'fake.png': 'GIF89a' });
+    for (const [icon, code] of [
+      ['small.png', 'ICON_TOO_SMALL'],
+      ['wide.png', 'ICON_NOT_SQUARE'],
+      ['fake.png', 'ICON_INVALID'],
+    ]) {
+      const r = await runBuild(testCtx(dir), config({ icon, targets: ['linux'] }), { shellDir, host: 'linux', pack: fakePack });
+      expect([r.ok, r.errors.map((e) => e.code)]).toEqual([false, [code]]);
+      expect(r.errors[0].message).toMatch(new RegExp(`^${icon.replace('.', '\\.')} `));
+    }
+  });
+
   it('frozenLock reaches CDN bundling', async () => {
     const { dir, shellDir } = project();
     writeFiles(dir, { 'index.html': '<script src="https://cdn.example.invalid/lib.js"></script>' });

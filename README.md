@@ -18,7 +18,7 @@ Needs Node.js 22.12 or newer. The first build for each OS downloads Electron (12
 
 ### `init`
 
-Detects the game and writes `gameshipper.json`. It finds `index.html` (or the first `.html` file) and an icon at `icon.png`, `art/icon.png`, `assets/icon.png` or `public/icon.png`. If `package.json` has a `build` script and a bundler (Vite, Parcel, webpack, esbuild, Rollup), Gameshipper runs `npm run build` before every `play` and `build` and packages `dist/`. It also adds `.gameshipper/` and `out/` to an existing `.gitignore`.
+Detects the game and writes `gameshipper.json`. It finds `index.html` (or the first `.html` file) and an icon at `icon.png`, `art/icon.png`, `assets/icon.png` or `public/icon.png`. Steam needs a square PNG of at least 1024x1024, so an icon that isn't one is left out with an `ICON_UNSUITABLE` warning. If `package.json` has a `build` script and a bundler (Vite, Parcel, webpack, esbuild, Rollup), Gameshipper runs `npm run build` before every `play` and `build` and packages `dist/`. It also adds `.gameshipper/` and `out/` to an existing `.gitignore`.
 
 | Flag | |
 |---|---|
@@ -99,7 +99,7 @@ The loop: `status --json`, `init --yes --json`, then `play --smoke --json` until
 
 Each code lists at most 10 issues, then one more issue counting the rest. `data.smoke.summary.events` holds the first 100 diagnostic events; `data.smoke.eventsLog` names a JSON-lines file with all of them, including everything the game logged.
 
-Other problems have codes too, such as `CDN_FETCH_FAILED`, `CDN_CHANGED`, `ENTRY_MISSING`, `CONFIG_INVALID`, `ICON_TOO_SMALL` and `PACKAGE_FAILED` from a build, or `GAME_EXITED` when a game quits with an error during `play`, each with its fix.
+Other problems have codes too, such as `CDN_FETCH_FAILED`, `CDN_CHANGED`, `ENTRY_MISSING`, `CONFIG_INVALID`, `ICON_TOO_SMALL`, `ICON_NOT_SQUARE` and `PACKAGE_FAILED` from a build, or `GAME_EXITED` when a game quits with an error during `play`, each with its fix. An icon problem only stops `build`: `play` warns with the same code and uses the default icon.
 
 ### Files
 

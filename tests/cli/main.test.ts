@@ -3,6 +3,7 @@ import * as path from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import { divertStdout, main, type CliIO } from '../../src/cli/main.js';
 import type { Prompter } from '../../src/cli/prompt.js';
+import { makeSolidPng } from '../helpers/png.js';
 import { makeTmpDir, readText, writeFiles } from '../helpers/tmp.js';
 
 async function run(
@@ -119,6 +120,26 @@ describe('gameshipper CLI', () => {
     const again = await run(['init', '--dir', dir], true, { ask });
     expect([again.code, ask.mock.calls.length]).toEqual([2, 0]);
     expect(again.out).toContain('CONFIG_EXISTS');
+  });
+
+  it('init reports a wrong --entry or --icon straight away instead of asking questions first', async () => {
+    const dir = makeTmpDir();
+    writeFiles(dir, { 'index.html': '' });
+    const ask = vi.fn(async (_q: string, fallback: string) => fallback);
+    const entry = await run(['init', '--dir', dir, '--entry', 'nope.html'], true, { ask });
+    expect([entry.code, ask.mock.calls.length]).toEqual([2, 0]);
+    expect(entry.out).toContain("✗ ENTRY_MISSING: Can't find nope.html.");
+    const icon = await run(['init', '--dir', dir, '--icon', 'nope.png'], true, { ask });
+    expect([icon.code, ask.mock.calls.length]).toEqual([2, 0]);
+    expect(icon.out).toContain("✗ ASSET_MISSING: icon: nope.png doesn't exist.");
+    expect(fs.existsSync(path.join(dir, 'gameshipper.json'))).toBe(false);
+  });
+
+  it('init --icon none writes no icon, even with one in the folder', async () => {
+    const dir = makeTmpDir();
+    writeFiles(dir, { 'index.html': '', 'icon.png': makeSolidPng(1024, 1024) });
+    const r = await run(['init', '--json', '--dir', dir, '--icon', 'none']);
+    expect([r.code, r.json().data.config.icon]).toEqual([0, null]);
   });
 
   it('init reports INPUT_REQUIRED instead of prompting when nothing is detectable', async () => {

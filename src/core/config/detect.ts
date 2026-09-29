@@ -1,5 +1,6 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
+import { iconFileProblem } from '../desktop/icons.js';
 import { readJsonFile } from '../fsutil.js';
 import { titleCase } from '../names.js';
 
@@ -8,7 +9,10 @@ export interface Detected {
   entry: string | null;
   buildCommand: string | null;
   outputDir: string | null;
+  /** The first icon candidate that is a square PNG of at least 1024x1024. */
   icon: string | null;
+  /** When no candidate qualifies, the first one found and what it is instead ("is 512x512"). */
+  unsuitableIcon: { path: string; found: string } | null;
 }
 
 const BUNDLER_OUTPUT: Record<string, string> = { vite: 'dist', parcel: 'dist', webpack: 'dist', esbuild: 'dist', rollup: 'dist' };
@@ -28,6 +32,18 @@ function readPackageJson(dir: string): PackageJson | null {
   } catch {
     return null;
   }
+}
+
+function findIcon(dir: string): Pick<Detected, 'icon' | 'unsuitableIcon'> {
+  let unsuitableIcon: Detected['unsuitableIcon'] = null;
+  for (const candidate of ICON_CANDIDATES) {
+    const file = path.join(dir, candidate);
+    if (!fs.existsSync(file)) continue;
+    const problem = iconFileProblem(file);
+    if (!problem) return { icon: candidate, unsuitableIcon: null };
+    unsuitableIcon ??= { path: candidate, found: problem.found };
+  }
+  return { icon: null, unsuitableIcon };
 }
 
 function findEntry(dir: string): string | null {
@@ -62,6 +78,6 @@ export function detectProject(dir: string): Detected {
     entry: buildCommand ? 'index.html' : findEntry(dir),
     buildCommand,
     outputDir,
-    icon: ICON_CANDIDATES.find((c) => fs.existsSync(path.join(dir, c))) ?? null,
+    ...findIcon(dir),
   };
 }

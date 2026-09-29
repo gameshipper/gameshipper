@@ -1,12 +1,11 @@
-import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseArgs, type ParseArgsOptionsConfig } from 'node:util';
 import { runBuild } from '../core/build.js';
 import { detectProject } from '../core/config/detect.js';
-import { initProject } from '../core/config/init.js';
-import { CONFIG_FILE, loadConfig } from '../core/config/load.js';
+import { initErrors, initProject, type InitAnswers } from '../core/config/init.js';
+import { loadConfig } from '../core/config/load.js';
 import { TARGETS, type Target } from '../core/config/schema.js';
 import { createCtx, type Ctx } from '../core/context.js';
 import { checkProjectDir } from '../core/fsutil.js';
@@ -174,8 +173,16 @@ function emit(io: CliIO, run: RunState, { result, human }: Outcome): number {
 
 async function initCommand(projectDir: string, values: Values, io: CliIO, run: RunState): Promise<Outcome> {
   const detected = detectProject(projectDir);
-  // Asking questions only to then fail on an existing config or a missing HTML file would waste a person's time.
-  const willFail = (values.force !== true && fs.existsSync(path.join(projectDir, CONFIG_FILE))) || !(str(values.entry) ?? detected.entry);
+  const iconFlag = str(values.icon);
+  const flags: InitAnswers = {
+    icon: iconFlag === undefined ? undefined : iconFlag === 'none' ? null : iconFlag,
+    entry: str(values.entry),
+    buildCommand: str(values['build-command']),
+    outputDir: str(values['output-dir']),
+    force: values.force === true,
+  };
+  // Asking questions only to then fail (an existing config, a missing HTML file or icon) would waste a person's time.
+  const willFail = initErrors(projectDir, flags, detected).length > 0;
   const interactive = io.stdinIsTTY && !run.json && !values.yes && !willFail;
   const prompt = io.prompter ?? createPrompter(interactive);
 
@@ -188,15 +195,13 @@ async function initCommand(projectDir: string, values: Values, io: CliIO, run: R
       return usage(`--app-id must be a whole number, like 1234567 (got "${appIdRaw}").`, 'Find it in the Steamworks dashboard URL.');
     }
   }
-  const iconRaw = str(values.icon) ?? (interactive ? await prompt.ask('Icon PNG, 1024x1024 ("none" to skip)', detected.icon ?? 'none') : undefined);
+  const iconAnswer =
+    flags.icon !== undefined || !interactive ? undefined : await prompt.ask('Icon PNG, 1024x1024 ("none" to skip)', detected.icon ?? 'none');
   const result = initProject(projectDir, {
+    ...flags,
     name,
     appId,
-    icon: iconRaw === undefined ? undefined : iconRaw === 'none' ? null : iconRaw,
-    entry: str(values.entry),
-    buildCommand: str(values['build-command']),
-    outputDir: str(values['output-dir']),
-    force: values.force === true,
+    ...(iconAnswer === undefined ? {} : { icon: iconAnswer === 'none' ? null : iconAnswer }),
   });
   if (result.ok) recordRun(projectDir, 'init', result);
   return { result, human: initSummary(result) };

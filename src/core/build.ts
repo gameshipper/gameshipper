@@ -45,8 +45,14 @@ export interface PreparedApp {
   warnings: GsError[];
 }
 
-/** Shared by build and play: build step → stage → bundle CDN files → icons → app folder. Throws GsFailure. */
-export async function prepareApp(ctx: Ctx, config: Config, opts: PrepareOptions): Promise<PreparedApp> {
+/** Icon problems that stop a build but only earn a warning in `play`, which then uses the default icon. */
+const PLAY_ICON_WARNINGS = new Set(['ICON_INVALID', 'ICON_NOT_SQUARE', 'ICON_TOO_SMALL', 'ICON_CONVERT_FAILED']);
+
+/**
+ * Shared by build and play: build step → stage → bundle CDN files → icons → app folder. Throws GsFailure.
+ * For `play`, an unusable icon is a warning and the app gets the default icon: it mustn't stop anyone testing the game.
+ */
+export async function prepareApp(ctx: Ctx, config: Config, opts: PrepareOptions, purpose: 'build' | 'play' = 'build'): Promise<PreparedApp> {
   await runBuildCommand(ctx, config);
   const staged = await stageGame(ctx, config);
   const bundled = await bundleCdn(ctx, staged.stageDir, { frozenLock: opts.frozenLock });
@@ -57,7 +63,13 @@ export async function prepareApp(ctx: Ctx, config: Config, opts: PrepareOptions)
     if (!fs.existsSync(iconPath)) {
       throw new GsFailure('ASSET_MISSING', `icon: ${config.icon} doesn't exist.`, 'Fix the icon path in gameshipper.json or set it to null.');
     }
-    iconBase = makeIcons(iconPath, path.join(ctx.projectDir, '.gameshipper', 'icons'));
+    try {
+      iconBase = makeIcons(iconPath, path.join(ctx.projectDir, '.gameshipper', 'icons'), config.icon);
+    } catch (e) {
+      if (!(purpose === 'play' && e instanceof GsFailure && PLAY_ICON_WARNINGS.has(e.error.code))) throw e;
+      const { code, message, fix } = e.error;
+      warnings.push(gsError(code, `${message} Playing with the default icon; \`build\` fails until it's fixed.`, fix));
+    }
   } else {
     warnings.push(
       gsError('ICON_MISSING', 'No icon set, so builds use the default Electron icon.', 'Add a square PNG (1024x1024 or larger) and set "icon" in gameshipper.json.'),

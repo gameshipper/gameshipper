@@ -29,7 +29,7 @@ export interface PlayData {
 export async function runPlay(ctx: Ctx, config: Config, opts: PlayOptions): Promise<Result<PlayData>> {
   let prepared: PreparedApp;
   try {
-    prepared = await prepareApp(ctx, config, opts);
+    prepared = await prepareApp(ctx, config, opts, 'play');
   } catch (e) {
     if (e instanceof GsFailure) return fail(e.error);
     throw e;

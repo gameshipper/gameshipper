@@ -6,6 +6,7 @@ import { runPlay } from '../../src/core/play.js';
 import { eventsLogPath, runSmoke, summaryToIssues, truncateSummary } from '../../src/core/smoke.js';
 import { LOAD_TIMEOUT_DESCRIPTION, type DiagEvent, type DiagSummary } from '../../src/shell/diagnostics.js';
 import { testCtx } from '../helpers/ctx.js';
+import { makeSolidPng } from '../helpers/png.js';
 import { makeTmpDir, writeFiles } from '../helpers/tmp.js';
 
 const alive = (pid: number): boolean => {
@@ -167,6 +168,22 @@ describe('runPlay --smoke', () => {
     const r = await runPlay(testCtx(dir), config, { shellDir, smokeSeconds: 1, electronPath: path.join(dir, 'no-electron') });
     expect(r.errors[0].code).toBe('LAUNCH_FAILED');
     expect(r.warnings.map((w) => w.code)).toEqual(['ICON_MISSING']);
+  });
+
+  it('an unusable icon is only a warning: the game runs with the default icon', async () => {
+    const { dir, shellDir } = project(`require('fs').writeFileSync(process.env.GAMESHIPPER_SMOKE_OUT, JSON.stringify({ droppedInfo: 0, events: [] }));`);
+    writeFiles(dir, { 'small.png': makeSolidPng(512, 512), 'wide.png': makeSolidPng(2048, 1024), 'fake.png': 'GIF89a' });
+    for (const [icon, code] of [
+      ['small.png', 'ICON_TOO_SMALL'],
+      ['wide.png', 'ICON_NOT_SQUARE'],
+      ['fake.png', 'ICON_INVALID'],
+    ]) {
+      const withIcon = parseConfig({ name: 'x', version: '1.0.0', icon }).data!;
+      const r = await runPlay(testCtx(dir), withIcon, { shellDir, smokeSeconds: 1, electronPath: process.execPath });
+      expect([r.ok, r.errors]).toEqual([true, []]);
+      expect(r.warnings).toEqual([{ code, message: expect.stringMatching(new RegExp(`^${icon.replace('.', '\\.')} .+ Playing with the default icon; \`build\` fails until it's fixed\.$`)), fix: expect.stringContaining('gameshipper.json') }]);
+      expect(fs.existsSync(path.join(r.data!.appDir, 'shell', 'icon.png'))).toBe(false);
+    }
   });
 
   it('frozenLock reaches CDN bundling', async () => {

@@ -21,7 +21,7 @@ describe('exitCodeFor', () => {
   });
 
   it('treats a bad icon or game folder as a config fix', () => {
-    for (const code of ['ICON_TOO_SMALL', 'ICON_INVALID', 'GAME_DIR_MISSING', 'GAME_DIR_INVALID']) {
+    for (const code of ['ICON_TOO_SMALL', 'ICON_NOT_SQUARE', 'ICON_INVALID', 'GAME_DIR_MISSING', 'GAME_DIR_INVALID']) {
       expect(exitCodeFor(fail(gsError(code, 'x')))).toBe(2);
     }
   });
