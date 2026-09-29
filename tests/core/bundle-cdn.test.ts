@@ -362,6 +362,73 @@ describe('bundleCdn', () => {
     expect(messages).toContain(`${server.base}/opt/style.css`); // what referred to it
     expect(server.hits).not.toContain('/opt/about:blank');
     expect(readText(stageDir, `${V.slice(1)}/opt/style.css`)).toContain('url(about:blank)');
+    // What was left out still loads from the internet, instead of a local path that doesn't exist.
+    const mod = readText(stageDir, `${V.slice(1)}/opt/mod.js`);
+    expect(mod).toContain(`import(${JSON.stringify(`${server.base}/opt/missing.js`)})`);
+    expect(mod).toContain(`import(${JSON.stringify(`${server.base}/opt/slow.js`)})`);
+    expect(readText(stageDir, `${V.slice(1)}/opt/style.css`)).toContain(`url(${server.base}/opt/gone.png)`);
+  });
+
+  describe('static imports inside downloaded modules', () => {
+    const game = (stageDir: string) => writeFiles(stageDir, { 'index.html': `<script type="module" src="${server.base}/net/mod.js"></script>` });
+    beforeEach(() => {
+      server.routes['/net/mod.js'] = { body: "import { dep } from './dep.js';\nexport const load = () => import('./later.js');\nexport const m = dep;", type: JS };
+    });
+
+    it('retries a network error once', async () => {
+      server.routes['/net/dep.js'] = { body: 'export const dep = 1;', type: JS, reset: 1 };
+      server.routes['/net/later.js'] = { body: 'export const later = 1;', type: JS };
+      const projectDir = makeTmpDir();
+      const stageDir = path.join(projectDir, 'stage');
+      game(stageDir);
+
+      const result = await bundleCdn(testCtx(projectDir), stageDir);
+
+      expect(result.warnings).toEqual([]);
+      expect(server.hits.filter((h) => h === '/net/dep.js')).toHaveLength(2);
+      expect(readText(stageDir, `${V.slice(1)}/net/mod.js`)).toContain(`from '${V}/net/dep.js'`);
+    });
+
+    it('CDN_FETCH_FAILED when the retry fails too: the module cannot load without it', async () => {
+      server.routes['/net/dep.js'] = { body: 'export const dep = 1;', type: JS, reset: 2 };
+      const projectDir = makeTmpDir();
+      const stageDir = path.join(projectDir, 'stage');
+      game(stageDir);
+
+      const failure = await bundleCdn(testCtx(projectDir), stageDir).catch((e) => e);
+
+      expect(failure).toMatchObject({ error: { code: 'CDN_FETCH_FAILED' } });
+      expect(failure.error.message).toContain(`${server.base}/net/dep.js`);
+      expect(failure.error.message).toContain(`${server.base}/net/mod.js`); // what imports it
+      expect(server.hits.filter((h) => h === '/net/dep.js')).toHaveLength(2);
+    });
+
+    it('CDN_OPTIONAL_MISSING, without a retry, when the server answers with an HTTP error', async () => {
+      server.routes['/net/later.js'] = { body: 'export const later = 1;', type: JS };
+      const projectDir = makeTmpDir();
+      const stageDir = path.join(projectDir, 'stage');
+      game(stageDir);
+
+      const result = await bundleCdn(testCtx(projectDir), stageDir);
+
+      expect(result.warnings.map((w) => [w.code, w.message])).toEqual([['CDN_OPTIONAL_MISSING', expect.stringContaining(`${server.base}/net/dep.js`)]]);
+      expect(server.hits.filter((h) => h === '/net/dep.js')).toHaveLength(1);
+      expect(readText(stageDir, `${V.slice(1)}/net/mod.js`)).toContain(`from '${server.base}/net/dep.js'`);
+    });
+
+    it('dynamic imports stay optional on a network error', async () => {
+      server.routes['/net/dep.js'] = { body: 'export const dep = 1;', type: JS };
+      server.routes['/net/later.js'] = { body: 'export const later = 1;', type: JS, reset: 2 };
+      const projectDir = makeTmpDir();
+      const stageDir = path.join(projectDir, 'stage');
+      game(stageDir);
+
+      const result = await bundleCdn(testCtx(projectDir), stageDir);
+
+      expect(result.warnings.map((w) => w.code)).toEqual(['CDN_OPTIONAL_MISSING']);
+      expect(result.warnings[0].message).toContain(`${server.base}/net/later.js`);
+      expect(server.hits.filter((h) => h === '/net/later.js')).toHaveLength(1);
+    });
   });
 
   it('CDN_FETCH_FAILED when a file the game refers to directly is missing', async () => {

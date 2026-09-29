@@ -200,6 +200,18 @@ describe('css', () => {
     expect(findCssUrls(css)).toEqual(['https://x/b.png']);
   });
 
+  it('reads escaped quotes inside a quoted URL as part of it', () => {
+    const svg = String.raw`data:image/svg+xml,%3Csvg%3E%3Crect fill=\"url(%23g)\"/%3E%3C/svg%3E`;
+    const css = String.raw`.a { background: url("${svg}") } .b { background: url('https://x/it\'s.png') } .c { background: url(https://x/c.png) }`;
+    expect(findCssUrls(css)).toEqual([String.raw`https://x/it\'s.png`, 'https://x/c.png']);
+    expect(rewriteCss(css, (u) => (u === 'https://x/c.png' ? '/v/c.png' : null))).toBe(css.replace('https://x/c.png', '/v/c.png'));
+  });
+
+  it('ignores url( and @import inside other strings', () => {
+    const css = `.a::before { content: "url(https://x/not.png) @import 'https://x/not.css'"; } .b { background: url(https://x/b.png) }`;
+    expect(findCssUrls(css)).toEqual(['https://x/b.png']);
+  });
+
   it('skips data: URLs and fragment-only references', () => {
     const css = `.a { fill: url(#grad); background: url("DATA:image/png;base64,AA=="), url(https://x/a.png) }`;
     expect(findCssUrls(css)).toEqual(['https://x/a.png']);

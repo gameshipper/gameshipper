@@ -1,9 +1,24 @@
-/** url("…"), url('…') or url(…); the URL is in group 1, 2 or 3. */
-const URL_RE = /url\(\s*(?:"([^"]*)"|'([^']*)'|([^\s'"()]*))\s*\)/dgi;
-/** @import "…" or @import '…'; the URL is in group 1 or 2. (@import url(…) is matched by URL_RE.) */
-const IMPORT_RE = /@import\s+(?:"([^"]*)"|'([^']*)')/dgi;
-/** Comments (possibly unterminated) and strings, so a "/*" inside a string isn't taken for a comment. */
-const COMMENT_OR_STRING = /\/\*[\s\S]*?(?:\*\/|$)|"(?:[^"\\\n]|\\[\s\S])*"?|'(?:[^'\\\n]|\\[\s\S])*'?/g;
+/** A quoted string's contents, where a backslash escapes the next character (so \" doesn't end it). */
+const DOUBLE_QUOTED = String.raw`"((?:[^"\\\n]|\\[\s\S])*)"`;
+const SINGLE_QUOTED = String.raw`'((?:[^'\\\n]|\\[\s\S])*)'`;
+
+/**
+ * One left-to-right scan over the CSS. Whatever starts first wins, so url( inside a comment or a string
+ * (including an escaped one, like fill=\"url(%23g)\" in a data: URI) is never taken for a reference.
+ * - a comment, possibly unterminated
+ * - url("…"), url('…') or url(…): the URL is in group 1, 2 or 3
+ * - @import "…" or @import '…': the URL is in group 4 or 5 (@import url(…) is a url() token)
+ * - any other string, possibly unterminated
+ */
+const TOKENS = new RegExp(
+  [
+    String.raw`\/\*[\s\S]*?(?:\*\/|$)`,
+    String.raw`url\(\s*(?:${DOUBLE_QUOTED}|${SINGLE_QUOTED}|([^\s'"()]*))\s*\)`,
+    String.raw`@import\s+(?:${DOUBLE_QUOTED}|${SINGLE_QUOTED})`,
+    String.raw`"(?:[^"\\\n]|\\[\s\S])*"?|'(?:[^'\\\n]|\\[\s\S])*'?`,
+  ].join('|'),
+  'dgi',
+);
 
 interface CssRef {
   url: string;
@@ -11,26 +26,20 @@ interface CssRef {
   end: number;
 }
 
-/** Blank out comments with spaces, keeping every offset the same. */
-const maskComments = (css: string): string =>
-  css.replace(COMMENT_OR_STRING, (m) => (m.startsWith('/*') ? ' '.repeat(m.length) : m));
-
 /** Nothing to fetch: inline data, or a reference to an element in the same document (url(#grad)). */
 const isLocalOnly = (url: string): boolean => /^data:/i.test(url) || url.startsWith('#');
 
 function cssRefs(css: string): CssRef[] {
-  const masked = maskComments(css);
   const refs: CssRef[] = [];
-  for (const re of [IMPORT_RE, URL_RE]) {
-    for (const m of masked.matchAll(re)) {
-      const group = m.findIndex((g, i) => i > 0 && g !== undefined);
-      const span = m.indices?.[group];
-      const url = m[group];
-      if (group === -1 || !span || !url || isLocalOnly(url)) continue;
-      refs.push({ url, start: span[0], end: span[1] });
-    }
+  for (const m of css.matchAll(TOKENS)) {
+    const group = m.findIndex((g, i) => i > 0 && g !== undefined);
+    if (group === -1) continue; // a comment or another string
+    const span = m.indices?.[group];
+    const url = m[group];
+    if (!span || !url || isLocalOnly(url)) continue;
+    refs.push({ url, start: span[0], end: span[1] });
   }
-  return refs.sort((a, b) => a.start - b.start);
+  return refs;
 }
 
 export function findCssUrls(css: string): string[] {

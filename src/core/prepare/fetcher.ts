@@ -50,11 +50,24 @@ export interface FetchOptions {
   timeoutMs?: number;
 }
 
-function downloadFailed(url: string, e: unknown, timeoutMs: number): GsFailure {
+/** CDN_FETCH_FAILED, with the HTTP status when the server answered and null when the download itself failed. */
+export class FetchFailure extends GsFailure {
+  readonly status: number | null;
+
+  constructor(message: string, status: number | null) {
+    super('CDN_FETCH_FAILED', message, FETCH_FIX);
+    this.status = status;
+  }
+}
+
+function downloadFailed(url: string, e: unknown, timeoutMs: number): FetchFailure {
   const err = e as (Error & { cause?: unknown }) | undefined;
-  const timedOut = err?.name === 'TimeoutError' || (err?.cause as Error | undefined)?.name === 'TimeoutError';
-  const reason = timedOut ? `timed out after ${timeoutMs / 1000}s` : (err?.message ?? String(e));
-  return new GsFailure('CDN_FETCH_FAILED', `Couldn't download ${url}: ${reason}`, FETCH_FIX);
+  const cause = err?.cause as (Error & { code?: unknown }) | undefined;
+  const timedOut = err?.name === 'TimeoutError' || cause?.name === 'TimeoutError';
+  let reason = timedOut ? `timed out after ${timeoutMs / 1000}s` : (err?.message ?? String(e));
+  // fetch only says "fetch failed"; the cause says why (ENOTFOUND, ECONNREFUSED, ECONNRESET, ...).
+  if (!timedOut && typeof cause?.code === 'string') reason += ` (${cause.code})`;
+  return new FetchFailure(`Couldn't download ${url}: ${reason}`, null);
 }
 
 /**
@@ -75,7 +88,7 @@ export async function fetchRemote(ctx: Ctx, url: string, expectedSha: string | n
   } catch (e) {
     throw downloadFailed(url, e, timeoutMs);
   }
-  if (!res.ok) throw new GsFailure('CDN_FETCH_FAILED', `Couldn't download ${url} (HTTP ${res.status}).`, FETCH_FIX);
+  if (!res.ok) throw new FetchFailure(`Couldn't download ${url} (HTTP ${res.status}).`, res.status);
   let body: Buffer;
   try {
     body = Buffer.from(await res.arrayBuffer());

@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { fetchRemote } from '../../src/core/prepare/fetcher.js';
+import { FetchFailure, fetchRemote } from '../../src/core/prepare/fetcher.js';
 import { testCtx } from '../helpers/ctx.js';
 import { startServer, type TestServer } from '../helpers/server.js';
 import { makeTmpDir } from '../helpers/tmp.js';
@@ -50,9 +50,25 @@ describe('fetchRemote', () => {
 
   it('CDN_FETCH_FAILED on HTTP errors', async () => {
     server = await startServer({});
-    await expect(fetchRemote(testCtx(makeTmpDir()), `${server.base}/missing.js`, null)).rejects.toMatchObject({
-      error: { code: 'CDN_FETCH_FAILED' },
-    });
+    const failure = await fetchRemote(testCtx(makeTmpDir()), `${server.base}/missing.js`, null).catch((e) => e);
+    expect(failure).toBeInstanceOf(FetchFailure);
+    expect(failure).toMatchObject({ status: 404, error: { code: 'CDN_FETCH_FAILED', message: expect.stringContaining('HTTP 404') } });
+  });
+
+  it("CDN_FETCH_FAILED names the network error's code", async () => {
+    server = await startServer({});
+    const url = `${server.base}/a.js`;
+    await server.close();
+    server = undefined;
+    const failure = await fetchRemote(testCtx(makeTmpDir()), url, null).catch((e) => e);
+    expect(failure).toBeInstanceOf(FetchFailure);
+    expect(failure).toMatchObject({ status: null, error: { code: 'CDN_FETCH_FAILED', message: `Couldn't download ${url}: fetch failed (ECONNREFUSED)` } });
+  });
+
+  it('CDN_FETCH_FAILED when the server drops the connection', async () => {
+    server = await startServer({ '/a.js': { reset: 1 } });
+    const failure = await fetchRemote(testCtx(makeTmpDir()), `${server.base}/a.js`, null).catch((e) => e);
+    expect(failure).toMatchObject({ status: null, error: { code: 'CDN_FETCH_FAILED', message: expect.stringMatching(/fetch failed \([A-Z_]+\)$/) } });
   });
 
   it('uses the cache only when it matches the expected hash', async () => {
@@ -72,6 +88,7 @@ describe('fetchRemote', () => {
     server = await startServer({ '/slow.js': { hang: true } });
     const started = Date.now();
     await expect(fetchRemote(testCtx(makeTmpDir()), `${server.base}/slow.js`, null, { timeoutMs: 100 })).rejects.toMatchObject({
+      status: null,
       error: { code: 'CDN_FETCH_FAILED', message: expect.stringContaining('timed out after 0.1s') },
     });
     expect(Date.now() - started).toBeLessThan(5_000);

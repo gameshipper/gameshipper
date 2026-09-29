@@ -8,6 +8,8 @@ export interface Route {
   redirect?: string;
   /** Accept the request and never answer (for timeout tests). */
   hang?: boolean;
+  /** Close the connection without answering this many times (a network error), then answer normally. */
+  reset?: number;
 }
 
 export interface TestServer {
@@ -32,6 +34,11 @@ export async function startServer(routes: Record<string, Route>): Promise<TestSe
       return;
     }
     if (route.hang) return;
+    if (route.reset) {
+      route.reset--;
+      req.socket.destroy();
+      return;
+    }
     if (route.redirect) {
       res.writeHead(302, { location: route.redirect });
       res.end();

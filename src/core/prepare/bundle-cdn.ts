@@ -4,7 +4,7 @@ import * as path from 'node:path';
 import type { Ctx } from '../context.js';
 import { listFiles } from '../fsutil.js';
 import { GsFailure, gsError, type GsError } from '../result.js';
-import { fetchRemote, type Fetched } from './fetcher.js';
+import { FetchFailure, fetchRemote, type Fetched } from './fetcher.js';
 import { byCodeUnit, lockExists, readLock, writeLock } from './lockfile.js';
 import { findCssUrls, rewriteCss } from './rewrite-css.js';
 import { rewriteHtml, scanHtml, type HtmlScan } from './rewrite-html.js';
@@ -41,12 +41,21 @@ export interface BundleOptions {
   timeoutMs?: number;
 }
 
+/**
+ * How much the game needs a file:
+ * - direct: the game refers to it itself, so it must download.
+ * - static: a downloaded module imports it statically, so that module can't load without it. A network
+ *   error is retried once, then fails the build; an HTTP error (the CDN doesn't have it) is only a warning.
+ * - optional: anything else found inside downloads (dynamic imports, CSS url()s). Failures are warnings.
+ */
+type Need = 'direct' | 'static' | 'optional';
+const NEED_RANK: Record<Need, number> = { optional: 0, static: 1, direct: 2 };
+
 interface Pending {
   url: string;
   /** The game file or downloaded URL that refers to `url`. */
   from: string;
-  /** Referenced by the game itself. Only these must download; files found inside downloads are optional. */
-  direct: boolean;
+  need: Need;
 }
 
 interface Page {
@@ -176,12 +185,18 @@ export async function bundleCdn(ctx: Ctx, stageDir: string, opts: BundleOptions 
   const allMaps = [...pages.values()].map((p) => p.map).filter((m) => Object.keys(m).length > 0);
 
   const queue: Pending[] = [];
-  const queued = new Set<string>();
-  const enqueue = (url: string, from: string, direct: boolean): void => {
+  const queued = new Map<string, Pending>();
+  const enqueue = (url: string, from: string, need: Need): void => {
     const [u] = splitHash(normalizeRemote(url));
-    if (queued.has(u)) return;
-    queued.add(u);
-    queue.push({ url: u, from, direct });
+    const known = queued.get(u);
+    if (!known) {
+      const pending: Pending = { url: u, from, need };
+      queued.set(u, pending);
+      queue.push(pending);
+    } else if (NEED_RANK[need] > NEED_RANK[known.need]) {
+      // Still waiting in the queue: a module that can't load without it outranks a dynamic import.
+      Object.assign(known, { from, need });
+    }
   };
   // Bare specifiers that resolve through a prefix key ("react-dom/" + "client"). Their vendored file may be
   // named differently from what the prefix implies (".js" added, query hashed), so each gets an exact entry.
@@ -208,10 +223,10 @@ export async function bundleCdn(ctx: Ctx, stageDir: string, opts: BundleOptions 
     );
   const seedFromGameJs = (specs: JsSpecifier[], where: string, maps: ImportMap[]): void => {
     for (const { specifier } of specs) {
-      if (isRemote(specifier)) enqueue(specifier, where, true);
+      if (isRemote(specifier)) enqueue(specifier, where, 'direct');
       else if (isBare(specifier)) {
         const { urls, defined } = resolveBareIn(specifier, maps);
-        for (const u of urls) enqueue(u, where, true);
+        for (const u of urls) enqueue(u, where, 'direct');
         if (!defined) warnings.push(unresolvedBare(specifier, where));
       }
     }
@@ -219,14 +234,14 @@ export async function bundleCdn(ctx: Ctx, stageDir: string, opts: BundleOptions 
 
   // 1. Seed from the game's own files.
   for (const [rel, { scan, map }] of pages) {
-    for (const [key, value] of Object.entries(map)) if (!key.endsWith('/') && isRemote(value)) enqueue(value, rel, true);
-    for (const u of scan.urls) if (isRemote(u)) enqueue(u, rel, true);
+    for (const [key, value] of Object.entries(map)) if (!key.endsWith('/') && isRemote(value)) enqueue(value, rel, 'direct');
+    for (const u of scan.urls) if (isRemote(u)) enqueue(u, rel, 'direct');
     for (const code of scan.moduleScripts) seedFromGameJs(await specifiers(code, rel), rel, [map]);
-    for (const css of scan.styles) for (const u of findCssUrls(css)) if (isRemote(u)) enqueue(u, rel, true);
+    for (const css of scan.styles) for (const u of findCssUrls(css)) if (isRemote(u)) enqueue(u, rel, 'direct');
   }
   for (const rel of gameFiles.filter((f) => IS_JS.test(f))) seedFromGameJs(await specifiers(read(rel), rel), rel, allMaps);
   for (const rel of gameFiles.filter((f) => IS_CSS.test(f))) {
-    for (const u of findCssUrls(read(rel))) if (isRemote(u)) enqueue(u, rel, true);
+    for (const u of findCssUrls(read(rel))) if (isRemote(u)) enqueue(u, rel, 'direct');
   }
 
   const notLocked = (url: string, from: string): GsFailure =>
@@ -239,22 +254,33 @@ export async function bundleCdn(ctx: Ctx, stageDir: string, opts: BundleOptions 
   // 2. Download everything reachable. References resolve against the URL a file was served from (after redirects).
   const fetched = new Map<string, Fetched>();
   const wantedPaths = new Map<string, string>();
+  const download = (url: string, expected: string | null) => fetchRemote(ctx, url, expected, { timeoutMs: opts.timeoutMs });
   while (queue.length) {
-    const { url, from, direct } = queue.shift() as Pending;
+    const { url, from, need } = queue.shift() as Pending;
     const expected = lock.files[url]?.sha256 ?? null;
-    // Optional files are tried first: one the last build left out because it failed to download
-    // isn't in the lock either, and leaving it out again is still the locked build.
-    if (opts.frozenLock && expected === null && direct) throw notLocked(url, from);
+    // Files found inside downloads are tried first: one the last build left out because it failed to
+    // download isn't in the lock either, and leaving it out again is still the locked build.
+    if (opts.frozenLock && expected === null && need === 'direct') throw notLocked(url, from);
     let got: Fetched;
     try {
-      got = await fetchRemote(ctx, url, expected, { timeoutMs: opts.timeoutMs });
+      got = await download(url, expected).catch((e: unknown) => {
+        // A dropped connection or a timeout may pass; a module missing a static import is broken.
+        if (need === 'static' && e instanceof FetchFailure && e.status === null) {
+          ctx.log(`retrying ${url}: ${e.error.message}`);
+          return download(url, expected);
+        }
+        throw e;
+      });
     } catch (e) {
-      if (direct || !(e instanceof GsFailure) || e.error.code !== 'CDN_FETCH_FAILED') throw e;
+      if (!(e instanceof FetchFailure) || need === 'direct') throw e;
+      if (need === 'static' && e.status === null) {
+        throw new GsFailure('CDN_FETCH_FAILED', `${from} imports ${url} and can't load without it. ${e.error.message}`, e.error.fix);
+      }
       warnings.push(
         gsError(
           'CDN_OPTIONAL_MISSING',
           `Left out ${url}, which ${from} refers to. ${e.error.message}`,
-          "The game only breaks if it actually loads this file. Run `npx gameshipper play --smoke` to check; if it's needed, download it into your game folder and load it from there.",
+          "The game only breaks if it loads this file; the reference points at the original URL, so it can still load while the player is online. Run `npx gameshipper play --smoke` to check; if it's needed, download it into your game folder and load it from there.",
         ),
       );
       continue;
@@ -276,20 +302,22 @@ export async function bundleCdn(ctx: Ctx, stageDir: string, opts: BundleOptions 
     fetched.set(url, got);
     wantedPaths.set(url, vendorPathFor(url, got.contentType));
     if (IS_JS.test(wantedPaths.get(url) as string)) {
-      for (const { specifier } of await specifiers(got.body.toString('utf8'), url)) {
+      for (const { specifier, quoted } of await specifiers(got.body.toString('utf8'), url)) {
+        // Unquoted specifiers are static imports and re-exports; quoted ones are dynamic import()s.
+        const importNeed: Need = quoted ? 'optional' : 'static';
         if (isBare(specifier)) {
           const { urls, defined } = resolveBareIn(specifier, allMaps);
-          for (const u of urls) enqueue(u, url, false);
+          for (const u of urls) enqueue(u, url, importNeed);
           if (!defined) warnings.push(unresolvedBare(specifier, url));
         } else {
           const r = resolveRef(specifier, got.finalUrl);
-          if (r) enqueue(r, url, false);
+          if (r) enqueue(r, url, importNeed);
         }
       }
     } else if (IS_CSS.test(wantedPaths.get(url) as string)) {
       for (const u of findCssUrls(got.body.toString('utf8'))) {
         const r = resolveRef(u, got.finalUrl);
-        if (r) enqueue(r, url, false);
+        if (r) enqueue(r, url, 'optional');
       }
     }
   }
@@ -306,6 +334,14 @@ export async function bundleCdn(ctx: Ctx, stageDir: string, opts: BundleOptions 
     return v ? `/${v.path}${hash}` : null;
   };
   const gameUrl = (u: string): string | null => (isRemote(u) ? local(u) : null);
+  /**
+   * A reference inside a downloaded file: its local copy, or for a file that was left out, its absolute
+   * URL, which still loads online (a relative path would point at a local file that doesn't exist).
+   */
+  const vendoredRef = (ref: string, base: string): string | null => {
+    const r = resolveRef(ref, base);
+    return r ? (local(r) ?? r) : null;
+  };
 
   // 3. Write downloaded files with their references pointed at local copies.
   for (const [url, v] of vendored) {
@@ -313,20 +349,14 @@ export async function bundleCdn(ctx: Ctx, stageDir: string, opts: BundleOptions 
     fs.mkdirSync(path.dirname(dest), { recursive: true });
     if (IS_JS.test(v.path)) {
       const code = v.body.toString('utf8');
-      const rewritten = rewriteJs(code, await quietSpecifiers(code), (spec) => {
-        if (isBare(spec)) return null; // the page's import map resolves these
-        const r = resolveRef(spec, v.finalUrl);
-        return r ? local(r) : null;
-      });
+      // Bare imports are left to the page's import map.
+      const rewritten = rewriteJs(code, await quietSpecifiers(code), (spec) => (isBare(spec) ? null : vendoredRef(spec, v.finalUrl)));
       fs.writeFileSync(dest, rewritten);
     } else if (IS_CSS.test(v.path)) {
       const css = v.body.toString('utf8');
       fs.writeFileSync(
         dest,
-        rewriteCss(css, (u) => {
-          const r = resolveRef(u, v.finalUrl);
-          return r ? local(r) : null;
-        }),
+        rewriteCss(css, (u) => vendoredRef(u, v.finalUrl)),
       );
     } else {
       fs.writeFileSync(dest, v.body);
