@@ -41,7 +41,7 @@ describe('store art in init', () => {
       ['ASSET_MISSING', "keyArt: nope.png doesn't exist."],
       ['ASSET_MISSING', "logo: gone.png doesn't exist."],
     ]);
-    expect(r.errors[0].fix).toBe('Pass --key-art with a path relative to your game folder, or --key-art none.');
+    expect(r.errors[0].fix).toBe('Pass --key-art with a path relative to your project folder, or --key-art none.');
   });
 
   it('init --key-art and --logo set the paths without prompting', async () => {

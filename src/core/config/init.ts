@@ -11,7 +11,7 @@ export interface InitAnswers {
   name?: string;
   appId?: number;
   icon?: string | null;
-  /** Key art and logo for the store images: a path relative to the game folder, or null for none. Left out: what was detected. */
+  /** Key art and logo for the store images: a path relative to the project folder, or null for none. Left out: what was detected. */
   keyArt?: string | null;
   logo?: string | null;
   entry?: string;
@@ -110,7 +110,7 @@ function planInit(dir: string, answers: InitAnswers, detected: Detected): InitPl
   ] as const;
   for (const [key, flag, value] of art) {
     if (value && !fs.existsSync(path.join(dir, value))) {
-      errors.push(gsError('ASSET_MISSING', `${key}: ${value} doesn't exist.`, `Pass ${flag} with a path relative to your game folder, or ${flag} none.`));
+      errors.push(gsError('ASSET_MISSING', `${key}: ${value} doesn't exist.`, `Pass ${flag} with a path relative to your project folder, or ${flag} none.`));
     }
   }
   const keyArt = answers.keyArt !== undefined ? answers.keyArt : detected.keyArt;
