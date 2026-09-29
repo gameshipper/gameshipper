@@ -42,7 +42,7 @@ describe('smoke detectors in real Electron', () => {
     const play = cli(['play', '--smoke', '--seconds', '3'], dir);
     expect(play.code).toBe(1);
     checkBrokenGame(play.result, 'play --smoke');
-    expect(codes(play.result.warnings).filter((c) => !c.startsWith('GAME_'))).toEqual(['ICON_MISSING']);
+    expect(codes(play.result.warnings).filter((c) => !c.startsWith('GAME_'))).toEqual(['ICON_MISSING', 'STEAM_SDK_MISSING']);
 
     // A game's own errors don't stop a build.
     const build = cli(['build', '--target', HOST_TARGET], dir);

@@ -132,7 +132,7 @@ describe('runPlay --smoke', () => {
     expect(r.errors.map((e) => e.code)).toEqual(['GAME_CONSOLE_ERROR']);
     expect(r.data!.smoke!.summary.events).toHaveLength(1);
     expect(r.data!.smoke!.eventsLog.startsWith(path.join(dir, '.gameshipper', 'logs'))).toBe(true);
-    expect(r.warnings.map((w) => w.code)).toEqual(['ICON_MISSING']);
+    expect(r.warnings.map((w) => w.code)).toEqual(['ICON_MISSING', 'STEAM_SDK_MISSING']);
   });
 
   it('passes the smoke settings to the game process', async () => {
@@ -174,7 +174,7 @@ describe('runPlay --smoke', () => {
     const r = await runPlay(testCtx(dir), config, { shellDir, smokeSeconds: 1, electronPath: path.join(dir, 'no-electron') });
     expect(r.errors[0].code).toBe('LAUNCH_FAILED');
     expect(r.errors[0].fix).toBe('Reinstall Gameshipper (e.g. `npx gameshipper@latest`), or check the build exists.');
-    expect(r.warnings.map((w) => w.code)).toEqual(['ICON_MISSING']);
+    expect(r.warnings.map((w) => w.code)).toEqual(['ICON_MISSING', 'STEAM_SDK_MISSING']);
   });
 
   it('an unusable icon is only a warning: the game runs with the default icon', async () => {
@@ -188,7 +188,10 @@ describe('runPlay --smoke', () => {
       const withIcon = parseConfig({ name: 'x', version: '1.0.0', icon }).data!;
       const r = await runPlay(testCtx(dir), withIcon, { shellDir, smokeSeconds: 1, electronPath: process.execPath });
       expect([r.ok, r.errors]).toEqual([true, []]);
-      expect(r.warnings).toEqual([{ code, message: expect.stringMatching(new RegExp(`^${icon.replace('.', '\\.')} .+ Playing with the default icon; \`build\` fails until it's fixed\.$`)), fix: expect.stringContaining('gameshipper.json') }]);
+      expect(r.warnings).toEqual([
+        { code, message: expect.stringMatching(new RegExp(`^${icon.replace('.', '\\.')} .+ Playing with the default icon; \`build\` fails until it's fixed\.$`)), fix: expect.stringContaining('gameshipper.json') },
+        expect.objectContaining({ code: 'STEAM_SDK_MISSING' }),
+      ]);
       expect(fs.existsSync(path.join(r.data!.appDir, 'shell', 'icon.png'))).toBe(false);
     }
   });
@@ -293,7 +296,7 @@ describe('runPlay when the game dies', () => {
     expect(r.errors[0].fix).toContain(ctx.logPath);
     expect(r.errors[0].fix).toContain('npx gameshipper play --smoke --json');
     expect(r.data!.eventsLog!.startsWith(path.join(dir, '.gameshipper', 'logs'))).toBe(true);
-    expect(r.warnings.map((w) => w.code)).toEqual(['ICON_MISSING']);
+    expect(r.warnings.map((w) => w.code)).toEqual(['ICON_MISSING', 'STEAM_SDK_MISSING']);
   });
 
   it('GAME_EXITED keeps only the last 20 lines of output', async () => {

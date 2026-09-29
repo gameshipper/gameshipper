@@ -160,10 +160,10 @@ describe.skipIf(process.platform === 'win32' || !canRunTs)('the CLI process', ()
       expect(result).toMatchObject({
         ok: true,
         errors: [],
-        warnings: [{ code: 'ICON_MISSING' }, { code: 'PLAY_STOPPED', message: 'Stopped by Ctrl+C.' }],
+        warnings: [{ code: 'ICON_MISSING' }, { code: 'STEAM_SDK_MISSING' }, { code: 'PLAY_STOPPED', message: 'Stopped by Ctrl+C.' }],
         data: { appDir: path.join(dir, '.gameshipper', 'app'), eventsLog: expect.stringMatching(/events-.+\.jsonl$/) },
       });
-      expect(result.warnings).toHaveLength(2);
+      expect(result.warnings).toHaveLength(3);
       expect(fs.existsSync(result.data.eventsLog)).toBe(true);
       expect(result.logPath).toMatch(/play-.+\.log$/);
       // The game finished saving before Gameshipper exited.

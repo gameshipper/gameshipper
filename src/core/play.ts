@@ -29,7 +29,8 @@ export interface PlayData {
 export async function runPlay(ctx: Ctx, config: Config, opts: PlayOptions): Promise<Result<PlayData>> {
   let prepared: PreparedApp;
   try {
-    prepared = await prepareApp(ctx, config, opts, 'play');
+    // Steam support for this computer only: play runs the unpackaged app here.
+    prepared = await prepareApp(ctx, config, opts, 'play', [{ platform: process.platform, arch: process.arch }]);
   } catch (e) {
     if (e instanceof GsFailure) return fail(e.error);
     throw e;

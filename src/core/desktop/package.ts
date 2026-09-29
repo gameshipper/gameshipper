@@ -8,9 +8,16 @@ import type { Ctx } from '../context.js';
 import { ELECTRON_VERSION } from '../electron.js';
 import { defaultBundleId, fileSafeName, slugify } from '../names.js';
 import { GsFailure, gsError, type GsError } from '../result.js';
+import { packageIgnore } from '../steam/natives.js';
 import type { DesktopJob, PackagerPlatform } from './targets.js';
 
 const run = promisify(execFile);
+
+/**
+ * Native files must be real files on disk: koffi and the overlay helper (.node) and Steam's library
+ * (.dll/.dylib/.so) are unpacked to app.asar.unpacked.
+ */
+export const ASAR_UNPACK = '*.{node,dll,dylib,so}';
 
 export interface DesktopOutput {
   target: DesktopTarget;
@@ -45,7 +52,10 @@ export function packagerOptions(
     appVersion: config.version,
     appBundleId: config.mobile.bundleId ?? defaultBundleId(config.name),
     icon: iconBase ?? undefined,
-    asar: true,
+    asar: { unpack: ASAR_UNPACK },
+    // koffi's and the overlay helper's per-arch .node files are the same in both halves of a universal Mac
+    // build; @electron/universal must keep them as they are instead of stopping.
+    osxUniversal: { x64ArchFiles: '*.node' },
     overwrite: true,
     prune: false,
     quiet: true,
@@ -54,8 +64,9 @@ export function packagerOptions(
     // Without this, the Windows .exe's copyright still names Electron's authors.
     appCopyright: `Copyright © ${new Date().getFullYear()} ${config.name}`,
     // The app folder is already exactly what should ship (staging filtered it). Packager's default
-    // ignore list would silently drop game files such as .obj 3D models.
-    ignore: () => false,
+    // ignore list would silently drop game files such as .obj 3D models. The one thing left out is
+    // other OSes' Steam files: the app folder holds them for every target being built.
+    ignore: packageIgnore(job),
     win32metadata: { ProductName: config.name, FileDescription: config.name, CompanyName: config.name },
   };
 }
