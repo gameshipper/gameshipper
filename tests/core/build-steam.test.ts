@@ -6,6 +6,7 @@ import { parseConfig } from '../../src/core/config/load.js';
 import type { packageDesktop } from '../../src/core/desktop/package.js';
 import { listFiles } from '../../src/core/fsutil.js';
 import { runPlay } from '../../src/core/play.js';
+import type { finishMacApp } from '../../src/core/sign/mac.js';
 import { testCtx } from '../helpers/ctx.js';
 import { makeTmpDir, readText, writeFiles } from '../helpers/tmp.js';
 import { makeZip } from '../helpers/zip.js';
@@ -28,6 +29,8 @@ const koffi = {
 };
 /** Keeps darwin-host tests from probing this machine for Xcode's tools. */
 const tools = { lipo: true };
+/** Stands in for signing the (fake) Mac app. */
+const finishMac: typeof finishMacApp = async () => ({ signing: 'adhoc', notarized: false, warnings: [] });
 
 const RECORDER = `import * as fs from 'node:fs';
 import * as path from 'node:path';
@@ -60,7 +63,7 @@ const config = (extra: object = {}) => parseConfig({ name: 'x', version: '1.0.0'
 describe('runBuild with Steam and plugins', () => {
   it('bundles Steam for every target and runs plugin hooks around packaging', async () => {
     const { dir, shellDir } = project({ 'recorder.mjs': RECORDER });
-    const r = await runBuild(testCtx(dir), config({ plugins: ['recorder.mjs'] }), { shellDir, host: 'darwin', tools, pack: fakePack, env: {}, koffi });
+    const r = await runBuild(testCtx(dir), config({ plugins: ['recorder.mjs'] }), { shellDir, host: 'darwin', tools, pack: fakePack, env: {}, koffi, finishMac });
     expect(r.data!.targets.map((t) => [t.target, t.status])).toEqual([
       ['windows', 'built'],
       ['mac', 'built'],

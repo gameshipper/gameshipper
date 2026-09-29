@@ -21,6 +21,9 @@ const USAGE_CODES = new Set([
   // An error only under --frozen-lock (otherwise a warning).
   'CDN_CHANGED',
   'BUNDLE_ID_REQUIRED',
+  // The Apple signing variables are half-set, or name a certificate that isn't in the keychain.
+  'APPLE_CREDENTIALS_INVALID',
+  'MAC_IDENTITY_NOT_FOUND',
   'ICON_TOO_SMALL',
   'ICON_NOT_SQUARE',
   'ICON_INVALID',

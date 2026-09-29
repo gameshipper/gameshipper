@@ -1,17 +1,14 @@
-import { execFile } from 'node:child_process';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { promisify } from 'node:util';
 import { packager, type Options } from '@electron/packager';
 import type { Config, DesktopTarget } from '../config/schema.js';
 import type { Ctx } from '../context.js';
 import { ELECTRON_VERSION } from '../electron.js';
 import { defaultBundleId, fileSafeName, slugify } from '../names.js';
-import { GsFailure, gsError, type GsError } from '../result.js';
+import { GsFailure, type GsError } from '../result.js';
+import type { MacSigningInfo } from '../sign/mac.js';
 import { packageIgnore } from '../steam/natives.js';
 import type { DesktopJob, PackagerPlatform } from './targets.js';
-
-const run = promisify(execFile);
 
 /**
  * Native files must be real files on disk: koffi and the overlay helper (.node) and Steam's library
@@ -26,6 +23,8 @@ export interface DesktopOutput {
   /** The file to launch: .exe, Linux binary, or the binary inside the .app bundle. */
   executable: string;
   warnings: GsError[];
+  /** Mac only: how build signed the app, after its afterPackage hooks (spec §7.3 step 6). */
+  mac?: MacSigningInfo;
 }
 
 /**
@@ -74,8 +73,12 @@ export function packagerOptions(
 export function executableFor(config: Config, target: DesktopTarget, dir: string): string {
   if (target === 'windows') return path.join(dir, `${fileSafeName(config.name)}.exe`);
   if (target === 'linux') return path.join(dir, slugify(config.name));
-  const name = fileSafeName(config.name);
-  return path.join(dir, `${name}.app`, 'Contents', 'MacOS', name);
+  return path.join(macAppFor(config, dir), 'Contents', 'MacOS', fileSafeName(config.name));
+}
+
+/** The .app bundle in a Mac target's folder: out/mac/<Name>.app */
+export function macAppFor(config: Config, dir: string): string {
+  return path.join(dir, `${fileSafeName(config.name)}.app`);
 }
 
 /**
@@ -142,18 +145,8 @@ export async function packageDesktop(
     throw packageFailed(ctx, job, e);
   }
 
-  const warnings = [...job.warnings];
-  if (job.platform === 'darwin' && process.platform === 'darwin') {
-    const bundle = path.join(outDir, `${fileSafeName(config.name)}.app`);
-    try {
-      await run('codesign', ['--force', '--deep', '--sign', '-', bundle]);
-    } catch (e) {
-      warnings.push(
-        gsError('MAC_ADHOC_SIGN_FAILED', `Couldn't ad-hoc sign the Mac app: ${(e as Error).message}`, 'The app may show as damaged when opened from Finder; it still launches from Steam.'),
-      );
-    }
-  }
-  const output: DesktopOutput = { target: job.target, dir: outDir, executable: executableFor(config, job.target, outDir), warnings };
+  // The Mac app's signature is broken here (packager renamed it): runBuild signs it after the afterPackage hooks.
+  const output: DesktopOutput = { target: job.target, dir: outDir, executable: executableFor(config, job.target, outDir), warnings: [...job.warnings] };
   ctx.log(`packaged ${job.target} → ${outDir}`);
   return output;
 }

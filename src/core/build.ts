@@ -5,12 +5,13 @@ import { TARGETS, type Config, type Target } from './config/schema.js';
 import type { Ctx } from './context.js';
 import { assembleApp } from './desktop/assemble.js';
 import { makeIcons } from './desktop/icons.js';
-import { packageDesktop, type DesktopOutput } from './desktop/package.js';
+import { macAppFor, packageDesktop, type DesktopOutput } from './desktop/package.js';
 import { planDesktopJobs, type HostTools } from './desktop/targets.js';
 import { loadPlugins, runPluginHook, type LoadedPlugin, type PluginHookContext } from './plugins.js';
 import { bundleCdn } from './prepare/bundle-cdn.js';
 import { runBuildCommand, stageGame } from './prepare/stage.js';
 import { fail, GsFailure, gsError, ok, type GsError, type Result } from './result.js';
+import { finishMacApp, planMacSigning, type MacSigningPlan } from './sign/mac.js';
 import { bundleSteam, type SteamBundle } from './steam/bundle.js';
 import type { KoffiNativeOptions, NativeTarget } from './steam/natives.js';
 import { ensureSteamSdk, findSteamSdk, sdkMissingWarning, steamSdkPaths } from './steam/sdk.js';
@@ -37,7 +38,7 @@ export interface PrepareOptions {
   frozenLock?: boolean;
   /** `--steam-sdk`: a Steamworks SDK zip or folder, used before steam.sdk and GAMESHIPPER_STEAM_SDK. */
   steamSdk?: string;
-  /** Where GAMESHIPPER_STEAM_SDK is read (default process.env; tests pass {}). */
+  /** Where GAMESHIPPER_STEAM_SDK and the Apple signing variables are read (default process.env; tests pass {}). */
   env?: NodeJS.ProcessEnv;
   /** Injectable for tests: where koffi's native packages come from (see steam/natives.ts). */
   koffi?: KoffiNativeOptions;
@@ -50,6 +51,8 @@ export interface BuildOptions extends PrepareOptions {
   tools?: HostTools;
   /** Injectable for tests; defaults to the real packager. */
   pack?: typeof packageDesktop;
+  /** Injectable for tests; defaults to signing (and notarizing) the Mac app. */
+  finishMac?: typeof finishMacApp;
 }
 
 export interface PreparedApp {
@@ -138,7 +141,10 @@ export async function runBuild(ctx: Ctx, config: Config, opts: BuildOptions): Pr
 
   let prepared: PreparedApp;
   let hookBase: PluginHookContext;
+  let macSigning: MacSigningPlan | null = null;
   try {
+    // Before the game build: half-set Apple variables or a missing certificate would otherwise only show after packaging.
+    if (plan.jobs.some((j) => j.target === 'mac')) macSigning = await planMacSigning(opts.host ?? process.platform, opts.env ?? process.env);
     const natives = plan.jobs.map((j) => ({ platform: j.platform, arch: j.arch }));
     prepared = await prepareApp(ctx, config, opts, 'build', natives);
     hookBase = { projectDir: ctx.projectDir, appDir: prepared.appDir, config, log: (m) => ctx.log(m) };
@@ -153,9 +159,15 @@ export async function runBuild(ctx: Ctx, config: Config, opts: BuildOptions): Pr
   const targets: TargetResult[] = [];
   for (const job of plan.jobs) {
     try {
-      const output = await pack(ctx, config, prepared.appDir, prepared.iconBase, job);
+      const packaged = await pack(ctx, config, prepared.appDir, prepared.iconBase, job);
       // A failing afterPackage fails this target only.
-      await runPluginHook(prepared.plugins, 'afterPackage', { ...hookBase, target: job.target, outDir: output.dir, executable: output.executable });
+      await runPluginHook(prepared.plugins, 'afterPackage', { ...hookBase, target: job.target, outDir: packaged.dir, executable: packaged.executable });
+      let output = packaged;
+      // Signing comes last: the hooks may still change the .app, and any change after signing breaks the signature.
+      if (job.target === 'mac' && macSigning) {
+        const signed = await (opts.finishMac ?? finishMacApp)(ctx, config, macAppFor(config, packaged.dir), macSigning);
+        output = { ...packaged, mac: { signing: signed.signing, notarized: signed.notarized }, warnings: [...packaged.warnings, ...signed.warnings] };
+      }
       targets.push({ target: job.target, status: 'built', output, errors: [], warnings: output.warnings });
     } catch (e) {
       const error =
