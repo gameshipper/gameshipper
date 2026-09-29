@@ -264,3 +264,37 @@ describe.skipIf(process.platform === 'win32' || !canRunTs)('the CLI process', ()
     }
   });
 });
+
+describe.skipIf(process.platform === 'win32' || !canRunTs)('check in the CLI process', () => {
+  it('Ctrl+C during a check prints INTERRUPTED, stops the game and records the run', async () => {
+    const dir = makeTmpDir();
+    const target = process.platform === 'darwin' ? 'mac' : 'linux';
+    const exe = target === 'mac' ? 'out/mac/x.app/Contents/MacOS/x' : 'out/linux/x';
+    // A stand-in for the packaged game: it says it's running (its pid, in its save folder), then never ends.
+    const game = `#!${process.execPath}
+const fs = require('fs');
+const dir = process.env.GAMESHIPPER_USER_DATA;
+fs.mkdirSync(dir, { recursive: true });
+fs.writeFileSync(require('path').join(dir, 'pid.txt'), String(process.pid));
+setInterval(() => {}, 1000);
+`;
+    writeFiles(dir, { 'gameshipper.json': JSON.stringify({ name: 'x', version: '1.0.0', targets: [target] }), 'index.html': '', [exe]: game });
+    fs.chmodSync(path.join(dir, exe), 0o755);
+    const saves = path.join(dir, '.gameshipper', 'check', 'data');
+    const cli = startCli(['check', '--json', '--dir', dir]);
+    try {
+      expect(await waitFor(() => readPid(saves) !== null, 20_000)).toBe(true);
+      cli.child.kill('SIGINT');
+      expect(await cli.closed).toEqual({ code: 130, signal: null });
+      const result = JSON.parse(cli.stdout());
+      expect(result).toMatchObject({ ok: false, errors: [{ code: 'INTERRUPTED' }] });
+      expect(result.logPath).toMatch(/check-.+\.log$/);
+      expect(await waitFor(() => !alive(readPid(saves)!))).toBe(true);
+      expect(JSON.parse(readText(dir, '.gameshipper/last/check.json'))).toMatchObject({ ok: false, errors: [{ code: 'INTERRUPTED' }] });
+    } finally {
+      cli.child.kill('SIGKILL');
+      const pid = readPid(saves);
+      if (pid !== null && alive(pid)) process.kill(pid, 'SIGKILL');
+    }
+  });
+});

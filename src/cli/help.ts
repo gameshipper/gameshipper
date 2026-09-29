@@ -79,6 +79,12 @@ export const COMMANDS: CommandHelp[] = [
     flags: [{ name: 'target', value: '<list>', description: 'Comma-separated subset of the configured targets.' }, FROZEN_LOCK, STEAM_SDK],
   },
   {
+    name: 'check',
+    summary: 'Launch the build for this computer and check it against Steam, Steam Deck and store requirements.',
+    usage: 'npx gameshipper check [--seconds <n>]',
+    flags: [{ name: 'seconds', value: '<n>', description: 'How long the game runs with the network blocked (default 15).' }],
+  },
+  {
     name: 'status',
     summary: 'Show config, what this computer can build, outputs and the last result of each command.',
     usage: 'npx gameshipper status',
@@ -96,12 +102,13 @@ export function helpData() {
     globalFlags: GLOBAL_FLAGS,
     exitCodes: EXIT_CODES,
     resultShape:
-      'Every command prints { ok, data, errors[], warnings[], logPath }. logPath (the run log) is present for build and play, unless gameshipper.json is missing or invalid. Each error has code, message and fix; fix may be absent on warnings.',
+      'Every command prints { ok, data, errors[], warnings[], logPath }. logPath (the run log) is present for build, play and check, unless gameshipper.json is missing or invalid. Each error has code, message and fix; fix may be absent on warnings.',
     agentLoop: [
       'npx gameshipper status --json',
       'npx gameshipper init --yes --json',
       'npx gameshipper play --smoke --json   (fix errors, repeat until ok is true)',
       'npx gameshipper build --json',
+      'npx gameshipper check --json   (fix what failed, build again, repeat)',
     ],
     /** Every gameshipper.json field; fields with defaults are optional. */
     configSchema: z.toJSONSchema(ConfigSchema, { io: 'input' }),
@@ -135,6 +142,7 @@ export function helpText(): string {
     '  npx gameshipper init',
     '  npx gameshipper play --smoke',
     '  npx gameshipper build',
+    '  npx gameshipper check',
     '',
     'AI agents: add --json to any command; nothing prompts when --json or --yes is set.',
     'Run `npx gameshipper <command> --help` for its flags, or `npx gameshipper help --json` for',

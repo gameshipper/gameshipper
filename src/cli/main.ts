@@ -3,6 +3,7 @@ import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseArgs, type ParseArgsOptionsConfig } from 'node:util';
 import { runBuild } from '../core/build.js';
+import { DEFAULT_CHECK_SECONDS, runCheck } from '../core/check/run.js';
 import { detectProject } from '../core/config/detect.js';
 import { initErrors, initProject, type InitAnswers } from '../core/config/init.js';
 import { loadConfig } from '../core/config/load.js';
@@ -18,7 +19,7 @@ import { GAMESHIPPER_VERSION } from '../core/version.js';
 import { COMMANDS, commandHelpText, GLOBAL_FLAGS, helpData, helpText, type CommandHelp } from './help.js';
 import { exitCodeFor, renderHuman, renderJson } from './output.js';
 import { createPrompter, type Prompter } from './prompt.js';
-import { buildSummary, initSummary, playSummary, plural, statusSummary } from './summaries.js';
+import { buildSummary, checkSummary, initSummary, playSummary, plural, statusSummary } from './summaries.js';
 
 /** The compiled shell that gets bundled into every game: dist/cli/main.js → dist/shell/. */
 export const SHELL_DIR = fileURLToPath(new URL('../shell/', import.meta.url));
@@ -228,7 +229,7 @@ async function initCommand(projectDir: string, values: Values, io: CliIO, run: R
 }
 
 /**
- * build and play read gameshipper.json before they write anything: without a valid one the folder isn't a
+ * build, play and check read gameshipper.json before they write anything: without a valid one the folder isn't a
  * Gameshipper project, so it gets no .gameshipper folder, run log or last-run record.
  */
 const notAProject = (loaded: Result<unknown>): Outcome | null => (loaded.data ? null : { result: fail(loaded.errors, loaded.warnings), human: [] });
@@ -302,6 +303,25 @@ function playStartLine(smokeSeconds: number | undefined, screenshotAt: number[] 
   return "Starting the game. Close its window when you're done. F12 saves a 1920x1080 store screenshot.\n";
 }
 
+async function checkCommand(projectDir: string, values: Values, io: CliIO, run: RunState): Promise<Outcome> {
+  const secondsRaw = str(values.seconds);
+  const seconds = secondsRaw === undefined ? DEFAULT_CHECK_SECONDS : Number(secondsRaw);
+  if (!Number.isFinite(seconds) || seconds <= 0) return usage('--seconds must be a positive number.', 'For example: --seconds 20');
+  const loaded = loadConfig(projectDir);
+  const invalid = notAProject(loaded);
+  if (invalid) return invalid;
+  const ctx = startRun(projectDir, 'check', run);
+  let result: Result<unknown>;
+  if (loaded.ok) {
+    if (!run.json) io.write(`Checking the game; the build for this computer runs for ${plural(seconds, 'second')} with the network blocked…\n`);
+    result = await capture(() => runCheck(ctx, loaded.data!, { seconds }), ctx.log);
+  } else {
+    result = fail(loaded.errors, loaded.warnings);
+  }
+  finishRun(ctx, 'check', result, run);
+  return { result, human: checkSummary(result as Parameters<typeof checkSummary>[0]) };
+}
+
 async function dispatch(argv: string[], io: CliIO, run: RunState): Promise<number> {
   let values: Values;
   let positionals: string[];
@@ -359,6 +379,8 @@ async function dispatch(argv: string[], io: CliIO, run: RunState): Promise<numbe
       return emit(io, run, await buildCommand(projectDir, values, run));
     case 'play':
       return emit(io, run, await playCommand(projectDir, values, io, run));
+    case 'check':
+      return emit(io, run, await checkCommand(projectDir, values, io, run));
     default: {
       const result = getStatus(projectDir);
       return emit(io, run, { result, human: statusSummary(result) });

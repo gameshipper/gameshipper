@@ -1,5 +1,6 @@
 import * as path from 'node:path';
 import type { BuildData } from '../core/build.js';
+import type { CheckReport, CheckStatus } from '../core/check/types.js';
 import type { InitData } from '../core/config/init.js';
 import type { PlayData } from '../core/play.js';
 import type { Result } from '../core/result.js';
@@ -44,7 +45,7 @@ export function buildSummary(r: Result<BuildData>, projectDir: string): string[]
     else lines.push(`- ${name} skipped (set keyArt and logo)`);
   }
   if (r.data.targets.some((t) => t.status === 'built')) {
-    lines.push('', 'Next: `npx gameshipper play --smoke` checks the game runs cleanly.');
+    lines.push('', 'Next: `npx gameshipper check` tests the build against Steam and Steam Deck requirements.');
   }
   return lines;
 }
@@ -99,5 +100,19 @@ export function statusSummary(r: Result<StatusData>): string[] {
   for (const run of Object.values(s.lastRuns)) {
     lines.push(`Last ${run.command}: ${run.ok ? '✓' : '✗'} ${run.at}${run.logPath ? ` (${run.logPath})` : ''}`);
   }
+  return lines;
+}
+
+const CHECK_SYMBOL: Record<CheckStatus, string> = { pass: '✓', warn: '!', fail: '✗', info: 'i', skip: '-' };
+
+/** One line per check, the totals, and where the Deck-size frame and the full report are. */
+export function checkSummary(r: Result<CheckReport>): string[] {
+  if (!r.data) return [];
+  const { checks, counts } = r.data;
+  const width = Math.max(...checks.map((c) => c.id.length));
+  const lines = checks.map((c) => `${CHECK_SYMBOL[c.status]} ${c.id.padEnd(width)}  ${c.message}`);
+  lines.push('', `${counts.pass} passed, ${plural(counts.warn, 'warning')}, ${counts.fail} failed, ${plural(counts.info, 'note')}, ${counts.skip} skipped.`);
+  if (r.data.deckScreenshot) lines.push(`Steam Deck screenshot: ${r.data.deckScreenshot}`);
+  lines.push(`Report: ${r.data.reportFile}`);
   return lines;
 }

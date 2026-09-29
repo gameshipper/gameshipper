@@ -71,7 +71,7 @@ describe('createPrompter', () => {
 
 describe('help', () => {
   it('lists every command with its flags, for humans and agents', () => {
-    expect(COMMANDS.map((c) => c.name)).toEqual(['init', 'play', 'build', 'status']);
+    expect(COMMANDS.map((c) => c.name)).toEqual(['init', 'play', 'build', 'check', 'status']);
     const data = helpData();
     expect(data.globalFlags.map((f) => f.name)).toEqual(['json', 'verbose', 'yes', 'dir', 'help', 'version']);
     expect(data.exitCodes).toEqual({ '0': 'success', '1': 'a target or check failed', '2': 'invalid config, usage or missing input' });
@@ -120,7 +120,7 @@ describe('buildSummary', () => {
       '✗ mac      failed (MAC_BUILD_HOST)',
       '- ios      skipped',
       '',
-      'Next: `npx gameshipper play --smoke` checks the game runs cleanly.',
+      'Next: `npx gameshipper check` tests the build against Steam and Steam Deck requirements.',
     ]);
   });
 
