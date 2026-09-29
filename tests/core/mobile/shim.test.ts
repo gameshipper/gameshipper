@@ -63,6 +63,15 @@ describe('mobile shim', () => {
     expect(win.gameshipper).toBe('replaced');
   });
 
+  it('list() only returns valid slot names, like the desktop saves', async () => {
+    for (const withCapacitor of [true, false]) {
+      const { win, store } = runShim(withCapacitor);
+      await savesOf(win).save('slot1', 1);
+      for (const bad of ['', '../evil', 'has space', 'x'.repeat(65), 'dots.in.name']) store.set(`gameshipper.saves.${bad}`, '1');
+      expect(await savesOf(win).list(), String(withCapacitor)).toEqual(['slot1']);
+    }
+  });
+
   it('rejects bad slot names and data like the desktop saves do', async () => {
     const saves = savesOf(runShim(true).win);
     await expect(saves.save('../evil', 1)).rejects.toMatchObject({ message: expect.stringMatching(/save slot/i) });

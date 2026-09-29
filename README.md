@@ -248,7 +248,7 @@ const progress = await saves.load('slot1'); // null when there's no save
 
 Slot names are 1 to 64 letters, numbers, `-` or `_`, and the data must be JSON-serializable. Saves live in the game's folder in the OS app data folder (`~/Library/Application Support/<Name>/saves` on a Mac, `%APPDATA%\<Name>\saves` on Windows, `~/.config/<Name>/saves` on Linux).
 
-In iOS and Android builds `window.gameshipper.saves` works the same way: saves are stored with Capacitor Preferences (UserDefaults / SharedPreferences), which the OS never clears and device backups include. On phones `window.steam` is `undefined` and `gameshipper.plugins` is empty.
+In iOS and Android builds `window.gameshipper.saves` works the same way, on every page of the game: saves are stored with Capacitor Preferences (UserDefaults / SharedPreferences), which the OS never clears and device backups include. On phones `window.steam` is `undefined` and `gameshipper.plugins` is empty.
 
 ## Steam
 

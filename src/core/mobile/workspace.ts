@@ -2,6 +2,7 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import type { Config } from '../config/schema.js';
 import type { Ctx } from '../context.js';
+import { listFiles } from '../fsutil.js';
 import { slugify } from '../names.js';
 import { NATIVE_PACKAGES, packageDir, packageVersion } from './capacitor.js';
 import { injectShim, MOBILE_SHIM_JS, SHIM_FILE } from './shim.js';
@@ -23,10 +24,15 @@ export function capacitorConfig(config: Config): Record<string, unknown> {
   };
 }
 
+const HTML_PAGE = /\.html?$/i;
+/** Files bundled from CDNs (core/prepare/remote.ts VENDOR_ROOT) stay as they were downloaded. */
+const BUNDLED = /^_gameshipper\//;
+
 /**
  * Builds <project>/.gameshipper/mobile: package.json, capacitor.config.json, www/ (a copy of the staged game with
- * the saves shim in its entry page) and node_modules/ with copies of Gameshipper's own Capacitor packages, so the
- * Capacitor CLI finds them wherever npx installed Gameshipper.
+ * the saves shim in every page, so a game of several pages has window.gameshipper on each, as on desktop) and
+ * node_modules/ with copies of Gameshipper's own Capacitor packages, so the Capacitor CLI finds them wherever npx
+ * installed Gameshipper.
  */
 export function prepareMobileWorkspace(ctx: Ctx, config: Config, stageDir: string): string {
   const workDir = mobileWorkDir(ctx.projectDir);
@@ -34,8 +40,11 @@ export function prepareMobileWorkspace(ctx: Ctx, config: Config, stageDir: strin
 
   const www = path.join(workDir, 'www');
   fs.cpSync(stageDir, www, { recursive: true });
-  const entry = path.join(www, ...config.game.entry.split('/'));
-  fs.writeFileSync(entry, injectShim(fs.readFileSync(entry, 'utf8')));
+  const pages = new Set([config.game.entry, ...listFiles(www).filter((f) => HTML_PAGE.test(f) && !BUNDLED.test(f))]);
+  for (const rel of pages) {
+    const page = path.join(www, ...rel.split('/'));
+    fs.writeFileSync(page, injectShim(fs.readFileSync(page, 'utf8')));
+  }
   const shim = path.join(www, ...SHIM_FILE.split('/'));
   fs.mkdirSync(path.dirname(shim), { recursive: true });
   fs.writeFileSync(shim, MOBILE_SHIM_JS);

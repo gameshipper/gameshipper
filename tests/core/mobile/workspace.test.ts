@@ -63,6 +63,22 @@ describe('prepareMobileWorkspace', () => {
     expect(readText(work, 'www/index.html')).toContain('location.replace("play/game.html")');
   });
 
+  it('puts the saves script in every page of the game, not only the entry page', () => {
+    const page = (title: string) => `<!DOCTYPE html><html><head><title>${title}</title></head><body></body></html>`;
+    const { dir, stageDir } = staged({
+      'index.html': page('Menu'),
+      'levels/two.html': page('Two'),
+      'credits.HTM': page('Credits'),
+      '_gameshipper/cdn/example.com/lib/demo.html': page('Bundled'),
+    });
+    const work = prepareMobileWorkspace(testCtx(dir), config(), stageDir);
+    for (const [file, title] of [['index.html', 'Menu'], ['levels/two.html', 'Two'], ['credits.HTM', 'Credits']]) {
+      expect(readText(work, `www/${file}`), file).toContain(`${SHIM_TAG}<title>${title}</title>`);
+    }
+    // Files bundled from CDNs are left as they were downloaded.
+    expect(readText(work, 'www/_gameshipper/cdn/example.com/lib/demo.html')).not.toContain(SHIM_TAG);
+  });
+
   it('runs the bundled Capacitor CLI without touching the network', async () => {
     const { dir, stageDir } = staged();
     const ctx = testCtx(dir);

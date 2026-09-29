@@ -74,6 +74,7 @@ export const MOBILE_SHIM_JS = `(function () {
       return (await kv.keys())
         .filter(function (k) { return k.indexOf(PREFIX) === 0; })
         .map(function (k) { return k.slice(PREFIX.length); })
+        .filter(function (slot) { return SLOT.test(slot); })
         .sort();
     },
     delete: async function (slot) {
