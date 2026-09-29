@@ -31,14 +31,17 @@ export class PageCamera {
     this.fixed = size;
   }
 
-  /** PNG of the page at exactly `size`, briefly laying the page out at that size if it isn't already. */
+  /**
+   * PNG of the page at exactly `size`, briefly laying the page out at that size if it isn't already. Whatever
+   * fails, the page goes back to its own size afterwards.
+   */
   async capture(size: Size): Promise<Buffer> {
     const temporary = this.fixed?.width !== size.width || this.fixed?.height !== size.height;
-    if (temporary) {
-      await this.emulate(size);
-      await this.settle();
-    }
     try {
+      if (temporary) {
+        await this.emulate(size);
+        await this.settle();
+      }
       const shot = (await this.wc.debugger.sendCommand('Page.captureScreenshot', { format: 'png' })) as { data: string };
       return Buffer.from(shot.data, 'base64');
     } finally {
@@ -54,9 +57,21 @@ export class PageCamera {
     await this.wc.debugger.sendCommand('Emulation.setDeviceMetricsOverride', { width: size.width, height: size.height, deviceScaleFactor: 1, mobile: false });
   }
 
-  /** Lets the game handle the resize and draw a frame at the new size (at most about a second). */
+  /**
+   * Lets the game handle the resize and draw a frame at the new size (at most about a second). Never fails: a game
+   * that replaced or broke requestAnimationFrame is captured as it is.
+   */
   private async settle(): Promise<void> {
     await sleep(150);
-    await Promise.race([this.wc.executeJavaScript('new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve(true))))'), sleep(1000)]);
+    let frame: Promise<unknown>;
+    try {
+      frame = this.wc
+        .executeJavaScript('new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve(true))))')
+        // Caught here, so an answer that fails after the wait below is over is never an unhandled rejection.
+        .catch(() => undefined);
+    } catch {
+      return;
+    }
+    await Promise.race([frame, sleep(1000)]);
   }
 }
