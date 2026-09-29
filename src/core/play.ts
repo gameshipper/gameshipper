@@ -4,7 +4,7 @@ import type { Config } from './config/schema.js';
 import type { Ctx } from './context.js';
 import { electronBinary } from './electron.js';
 import { QUIT_GRACE_MS } from './proc.js';
-import { fail, GsFailure, gsError, ok, type Result } from './result.js';
+import { fail, GsFailure, gsError, ok, type GsError, type Result } from './result.js';
 import { eventsLogPath, gameEnv, launch, runSmoke, type SmokeData } from './smoke.js';
 
 export interface PlayOptions extends PrepareOptions {
@@ -13,6 +13,11 @@ export interface PlayOptions extends PrepareOptions {
   fullscreen?: boolean;
   /** Injectable for tests; defaults to the Electron binary installed with Gameshipper. */
   electronPath?: string;
+  /**
+   * Interactive play: called once the game has launched, with the data and warnings its result will
+   * carry. The CLI uses them to report a session a person ends with Ctrl+C.
+   */
+  onGameStarted?: (data: PlayData, warnings: GsError[]) => void;
 }
 
 export interface PlayData {
@@ -40,9 +45,11 @@ export async function runPlay(ctx: Ctx, config: Config, opts: PlayOptions): Prom
     }
     const eventsLog = eventsLogPath(ctx.projectDir);
     ctx.log(`playing: ${electron} ${prepared.appDir}`);
-    // On Ctrl+C the game gets to quit properly, finishing any save in flight; smoke runs are stopped at once.
-    const run = await launch(ctx, electron, [prepared.appDir], { env: gameEnv(eventsLog, userDataDir, windowed), quitGraceMs: QUIT_GRACE_MS });
     const data: PlayData = { appDir: prepared.appDir, eventsLog };
+    // On Ctrl+C the game gets to quit properly, finishing any save in flight; smoke runs are stopped at once.
+    const running = launch(ctx, electron, [prepared.appDir], { env: gameEnv(eventsLog, userDataDir, windowed), quitGraceMs: QUIT_GRACE_MS });
+    opts.onGameStarted?.(data, prepared.warnings);
+    const run = await running;
     // Interactive play has no timeout, so any signal came from outside Gameshipper (a crash or a kill), or
     // from stopping a game that didn't quit after Ctrl+C, which the CLI has already reported.
     if (run.exitCode === 0) return ok(data, prepared.warnings);

@@ -90,10 +90,17 @@ setInterval(() => {}, 1000);
   return file;
 }
 
-function playableGame(): string {
+function playableGame(game: object = {}): string {
   const dir = makeTmpDir();
-  writeFiles(dir, { 'gameshipper.json': JSON.stringify({ name: 'x', version: '1.0.0' }), 'index.html': '<html></html>' });
+  writeFiles(dir, { 'gameshipper.json': JSON.stringify({ name: 'x', version: '1.0.0', game }), 'index.html': '<html></html>' });
   return dir;
+}
+
+/** The newest run log of `command` in the project, or '' if there is none yet. */
+function runLog(dir: string, command: string): string {
+  const logs = path.join(dir, '.gameshipper', 'logs');
+  const file = fs.existsSync(logs) ? fs.readdirSync(logs).filter((f) => f.startsWith(`${command}-`)).sort().pop() : undefined;
+  return file ? readText(logs, file) : '';
 }
 
 describe.skipIf(process.platform === 'win32' || !canRunTs)('the CLI process', () => {
@@ -149,12 +156,33 @@ describe.skipIf(process.platform === 'win32' || !canRunTs)('the CLI process', ()
       cli.child.kill('SIGINT');
       expect(await cli.closed).toEqual({ code: 130, signal: null });
       const result = JSON.parse(cli.stdout());
-      expect(result).toMatchObject({ ok: true, errors: [], warnings: [{ code: 'PLAY_STOPPED', message: 'Stopped by Ctrl+C.' }] });
-      expect(result.warnings).toHaveLength(1);
+      // What the run found before the game started stays in the result.
+      expect(result).toMatchObject({
+        ok: true,
+        errors: [],
+        warnings: [{ code: 'ICON_MISSING' }, { code: 'PLAY_STOPPED', message: 'Stopped by Ctrl+C.' }],
+        data: { appDir: path.join(dir, '.gameshipper', 'app'), eventsLog: expect.stringMatching(/events-.+\.jsonl$/) },
+      });
+      expect(result.warnings).toHaveLength(2);
+      expect(fs.existsSync(result.data.eventsLog)).toBe(true);
       expect(result.logPath).toMatch(/play-.+\.log$/);
       // The game finished saving before Gameshipper exited.
       expect(readText(playData, 'saved.txt')).toBe('yes');
       expect(JSON.parse(readText(dir, '.gameshipper/last/play.json'))).toMatchObject({ ok: true });
+    } finally {
+      cli.child.kill('SIGKILL');
+    }
+  });
+
+  it("Ctrl+C before an interactive game starts (during its build step) is an INTERRUPTED failure", async () => {
+    const dir = playableGame({ buildCommand: 'sleep 30', outputDir: '.' });
+    const cli = startCli(['play', '--json', '--dir', dir], 'none', { GS_TEST_ELECTRON: fakeElectron() });
+    try {
+      expect(await waitFor(() => runLog(dir, 'play').includes('running build command: sleep 30'), 20_000)).toBe(true);
+      cli.child.kill('SIGINT');
+      expect(await cli.closed).toEqual({ code: 130, signal: null });
+      expect(JSON.parse(cli.stdout())).toMatchObject({ ok: false, errors: [{ code: 'INTERRUPTED' }], warnings: [] });
+      expect(JSON.parse(readText(dir, '.gameshipper/last/play.json'))).toMatchObject({ ok: false, errors: [{ code: 'INTERRUPTED' }] });
     } finally {
       cli.child.kill('SIGKILL');
     }

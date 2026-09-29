@@ -10,7 +10,7 @@ import { CONFIG_FILE, loadConfig } from '../core/config/load.js';
 import { TARGETS, type Target } from '../core/config/schema.js';
 import { createCtx, type Ctx } from '../core/context.js';
 import { checkProjectDir } from '../core/fsutil.js';
-import { runPlay } from '../core/play.js';
+import { runPlay, type PlayData } from '../core/play.js';
 import { childrenStopped, QUIT_GRACE_MS } from '../core/proc.js';
 import { capture, errorDetails, fail, gsError, internalError, ok, type GsError, type Result } from '../core/result.js';
 import { saveLastRun } from '../core/runs.js';
@@ -75,8 +75,11 @@ interface RunState {
   /** build and play: the command and its run log, for the last-run record. */
   command?: string;
   ctx?: Ctx;
-  /** An interactive play session, which a person ends with Ctrl+C as often as by closing the window. */
-  interactivePlay?: boolean;
+  /**
+   * Set once an interactive play session's game is running, with what its result would carry. A person
+   * ends such a session with Ctrl+C as often as by closing the window.
+   */
+  playing?: { data: PlayData; warnings: GsError[] };
 }
 
 const str = (v: string | boolean | undefined) => (typeof v === 'string' ? v : undefined);
@@ -218,7 +221,6 @@ async function playCommand(projectDir: string, values: Values, io: CliIO, run: R
   if (!Number.isFinite(seconds) || seconds <= 0) return usage('--seconds must be a positive number.', 'For example: --seconds 10');
   const smoke = values.smoke === true || secondsRaw !== undefined;
   const ctx = startRun(projectDir, 'play', run);
-  run.interactivePlay = !smoke;
   const loaded = loadConfig(projectDir);
   let result: Result<unknown>;
   if (loaded.ok) {
@@ -227,7 +229,14 @@ async function playCommand(projectDir: string, values: Values, io: CliIO, run: R
     }
     const frozenLock = values['frozen-lock'] === true;
     result = await capture(
-      () => runPlay(ctx, loaded.data!, { shellDir: SHELL_DIR, smokeSeconds: smoke ? seconds : undefined, fullscreen: values.fullscreen === true, frozenLock }),
+      () =>
+        runPlay(ctx, loaded.data!, {
+          shellDir: SHELL_DIR,
+          smokeSeconds: smoke ? seconds : undefined,
+          fullscreen: values.fullscreen === true,
+          frozenLock,
+          onGameStarted: (data, warnings) => (run.playing = { data, warnings }),
+        }),
       ctx.log,
     );
   } else {
@@ -377,10 +386,11 @@ function watchProcess(run: RunState): () => void {
     if (run.done) process.exit(run.exitCode ?? code);
     run.done = true;
     run.exitCode = code;
-    // Ctrl+C is one of the ways a person ends an interactive play session, not a failed play.
+    // Ctrl+C is one of the ways a person ends an interactive play session, not a failed play. Before the
+    // game is running (its build step, say), it interrupts the run like any other.
     const outcome =
-      run.interactivePlay && signal === 'SIGINT'
-        ? ok(undefined, [gsError('PLAY_STOPPED', 'Stopped by Ctrl+C.')])
+      run.playing && signal === 'SIGINT'
+        ? ok(run.playing.data, [...run.playing.warnings, gsError('PLAY_STOPPED', 'Stopped by Ctrl+C.')])
         : fail(gsError('INTERRUPTED', `Stopped by ${signal} before finishing.`, "Run the command again when you're ready."));
     const result = abnormalResult(run, outcome, `stopped by ${signal}`);
     exitAfterWriting(run.json ? renderJson(result) : `${renderHuman(result, [])}\n`, code);

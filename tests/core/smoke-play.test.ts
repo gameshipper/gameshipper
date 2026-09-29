@@ -236,6 +236,26 @@ describe.skipIf(process.platform === 'win32')('runPlay on Ctrl+C', () => {
   });
 });
 
+describe('runPlay onGameStarted', () => {
+  it('reports the data and warnings of an interactive run once its game is running', async () => {
+    const { dir, shellDir } = project('');
+    const started = vi.fn();
+    const r = await runPlay(testCtx(dir), config, { shellDir, electronPath: process.execPath, onGameStarted: started });
+    expect(started).toHaveBeenCalledTimes(1);
+    expect(started).toHaveBeenCalledWith(r.data, r.warnings);
+  });
+
+  it('is not called when the game never starts, or for a smoke run', async () => {
+    const started = vi.fn();
+    const missing = project('');
+    fs.rmSync(path.join(missing.dir, 'index.html'));
+    expect((await runPlay(testCtx(missing.dir), config, { shellDir: missing.shellDir, electronPath: process.execPath, onGameStarted: started })).errors[0].code).toBe('ENTRY_MISSING');
+    const smoke = project(`require('fs').writeFileSync(process.env.GAMESHIPPER_SMOKE_OUT, JSON.stringify({ droppedInfo: 0, events: [] }));`);
+    await runPlay(testCtx(smoke.dir), config, { shellDir: smoke.shellDir, smokeSeconds: 1, electronPath: process.execPath, onGameStarted: started });
+    expect(started).not.toHaveBeenCalled();
+  });
+});
+
 describe('runPlay when the game dies', () => {
   it('GAME_EXITED when the game quits with an error, with the last lines of its output', async () => {
     const { dir, shellDir } = project(`console.log('starting'); console.error('Error: save file corrupt'); process.exitCode = 1;`);
