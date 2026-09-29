@@ -35,14 +35,27 @@ export class GsFailure extends Error {
   }
 }
 
-export async function capture<T>(fn: () => Promise<Result<T>>): Promise<Result<T>> {
+/** The error for anything thrown that isn't a GsFailure: a Gameshipper bug. */
+export function internalError(e: unknown): GsError {
+  const message = e instanceof Error ? e.message : String(e);
+  return gsError('INTERNAL_ERROR', `Unexpected error: ${message}`, 'This is a Gameshipper bug. Re-run with --verbose and report the log.');
+}
+
+/** Text for the run log: the stack when there is one, so a reported log shows where it broke. */
+export function errorDetails(e: unknown): string {
+  return e instanceof Error ? (e.stack ?? `${e.name}: ${e.message}`) : String(e);
+}
+
+/**
+ * Runs `fn`, turning a thrown GsFailure into a failed Result and anything else into INTERNAL_ERROR.
+ * `log` receives the stack of unexpected errors (pass `ctx.log`).
+ */
+export async function capture<T>(fn: () => Promise<Result<T>>, log?: (line: string) => void): Promise<Result<T>> {
   try {
     return await fn();
   } catch (e) {
     if (e instanceof GsFailure) return fail(e.error);
-    const message = e instanceof Error ? e.message : String(e);
-    return fail(
-      gsError('INTERNAL_ERROR', `Unexpected error: ${message}`, 'This is a Gameshipper bug. Re-run with --verbose and report the log.'),
-    );
+    log?.(errorDetails(e));
+    return fail(internalError(e));
   }
 }

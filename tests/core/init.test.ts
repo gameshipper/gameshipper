@@ -24,6 +24,11 @@ describe('detectProject', () => {
     expect(detectProject(dir).entry).toBe('b.html');
   });
 
+  it('a missing folder detects nothing instead of throwing', () => {
+    const dir = path.join(makeTmpDir(), 'nope');
+    expect(detectProject(dir)).toEqual({ name: 'Nope', entry: null, buildCommand: null, outputDir: null, icon: null });
+  });
+
   it('Vite project with a build script', () => {
     const dir = makeTmpDir();
     writeFiles(dir, {
@@ -67,5 +72,18 @@ describe('initProject', () => {
     expect(r.errors[0].code).toBe('INPUT_REQUIRED');
     expect(r.errors[0].fix).toContain('--entry');
     expect(fs.existsSync(path.join(dir, 'gameshipper.json'))).toBe(false);
+  });
+
+  it('DIR_MISSING when the folder is missing or is a file, without creating anything', () => {
+    const parent = makeTmpDir();
+    const missing = path.join(parent, 'nope');
+    const r = initProject(missing, { name: 'x', entry: 'index.html' });
+    expect(r.errors).toEqual([
+      { code: 'DIR_MISSING', message: `The folder ${missing} doesn't exist.`, fix: 'Check the path, or run the command from your game folder.' },
+    ]);
+    expect(fs.existsSync(missing)).toBe(false);
+    writeFiles(parent, { 'file.txt': '' });
+    const file = path.join(parent, 'file.txt');
+    expect(initProject(file, { entry: 'index.html' }).errors[0]).toMatchObject({ code: 'DIR_MISSING', message: `${file} isn't a folder.` });
   });
 });

@@ -32,10 +32,14 @@ function readPackageJson(dir: string): PackageJson | null {
 
 function findEntry(dir: string): string | null {
   if (fs.existsSync(path.join(dir, 'index.html'))) return 'index.html';
-  const html = fs
-    .readdirSync(dir)
-    .filter((f) => /\.html?$/i.test(f))
-    .sort();
+  let files: string[];
+  try {
+    files = fs.readdirSync(dir);
+  } catch {
+    // A missing or unreadable folder has nothing to detect; the caller reports the folder itself.
+    return null;
+  }
+  const html = files.filter((f) => /\.html?$/i.test(f)).sort();
   return html[0] ?? null;
 }
 

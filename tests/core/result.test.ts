@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { capture, fail, GsFailure, gsError, ok } from '../../src/core/result.js';
+import { capture, fail, GsFailure, gsError, internalError, ok } from '../../src/core/result.js';
 
 describe('result', () => {
   it('ok wraps data with no errors', () => {
@@ -34,5 +34,31 @@ describe('result', () => {
 
   it('capture passes through a returned Result', async () => {
     expect(await capture(async () => ok(5))).toEqual(ok(5));
+  });
+
+  it('capture hands the stack of an unexpected error to the log, so "report the log" helps', async () => {
+    const lines: string[] = [];
+    const r = await capture(async () => {
+      throw new Error('boom');
+    }, (line) => lines.push(line));
+    expect(r.errors[0].code).toBe('INTERNAL_ERROR');
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toMatch(/^Error: boom\n\s+at /);
+  });
+
+  it('capture does not log expected failures', async () => {
+    const lines: string[] = [];
+    await capture(async () => {
+      throw new GsFailure('X', 'y');
+    }, (line) => lines.push(line));
+    expect(lines).toEqual([]);
+  });
+
+  it('internalError describes anything thrown', () => {
+    expect(internalError('text')).toEqual({
+      code: 'INTERNAL_ERROR',
+      message: 'Unexpected error: text',
+      fix: 'This is a Gameshipper bug. Re-run with --verbose and report the log.',
+    });
   });
 });

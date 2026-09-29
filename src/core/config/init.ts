@@ -1,5 +1,6 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
+import { checkProjectDir } from '../fsutil.js';
 import { fail, gsError, ok, type GsError, type Result } from '../result.js';
 import { detectProject, type Detected } from './detect.js';
 import { CONFIG_FILE, parseConfig } from './load.js';
@@ -37,6 +38,8 @@ function updateGitignore(dir: string): boolean {
 }
 
 export function initProject(dir: string, answers: InitAnswers = {}): Result<InitData> {
+  const dirError = checkProjectDir(dir);
+  if (dirError) return fail(dirError);
   const configPath = path.join(dir, CONFIG_FILE);
   if (fs.existsSync(configPath) && !answers.force) {
     return fail(gsError('CONFIG_EXISTS', 'gameshipper.json already exists.', 'Edit it directly, or pass --force to replace it.'));
