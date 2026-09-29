@@ -3,11 +3,12 @@ import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseArgs, type ParseArgsOptionsConfig } from 'node:util';
 import { runBuild } from '../core/build.js';
-import { DEFAULT_CHECK_SECONDS, runCheck } from '../core/check/run.js';
+import { findBuilds } from '../core/check/review.js';
+import { DEFAULT_CHECK_SECONDS, hostTarget, runCheck } from '../core/check/run.js';
 import { detectProject } from '../core/config/detect.js';
 import { initErrors, initProject, type InitAnswers } from '../core/config/init.js';
 import { loadConfig } from '../core/config/load.js';
-import { TARGETS, type Target } from '../core/config/schema.js';
+import { TARGETS, type Config, type Target } from '../core/config/schema.js';
 import { createCtx, type Ctx } from '../core/context.js';
 import { checkProjectDir } from '../core/fsutil.js';
 import { parseScreenshotTimes, runPlay, screenshotRunSeconds, type PlayData } from '../core/play.js';
@@ -252,10 +253,15 @@ async function buildCommand(projectDir: string, values: Values, run: RunState): 
   return { result, human: buildSummary(result as Parameters<typeof buildSummary>[0], projectDir) };
 }
 
+/** The longest run --seconds asks for, in play and check. */
+export const MAX_SECONDS = 600;
+const badSeconds = (seconds: number) => !Number.isFinite(seconds) || seconds <= 0 || seconds > MAX_SECONDS;
+const secondsUsage = (example: number) => usage(`--seconds must be a positive number of at most ${MAX_SECONDS}.`, `For example: --seconds ${example}`);
+
 async function playCommand(projectDir: string, values: Values, io: CliIO, run: RunState): Promise<Outcome> {
   const secondsRaw = str(values.seconds);
   const seconds = secondsRaw === undefined ? 5 : Number(secondsRaw);
-  if (!Number.isFinite(seconds) || seconds <= 0) return usage('--seconds must be a positive number.', 'For example: --seconds 10');
+  if (badSeconds(seconds)) return secondsUsage(10);
   const smoke = values.smoke === true || secondsRaw !== undefined;
   const screenshotsRaw = str(values.screenshot);
   const screenshotAt = screenshotsRaw === undefined ? undefined : parseScreenshotTimes(screenshotsRaw);
@@ -305,17 +311,24 @@ function playStartLine(smokeSeconds: number | undefined, screenshotAt: number[] 
   return "Starting the game. Close its window when you're done. F12 saves a 1920x1080 store screenshot.\n";
 }
 
+/** What a person sees while `check` runs: how long the game runs, when there is a build for this computer to run. */
+export function checkStartLine(projectDir: string, config: Config, seconds: number): string {
+  const host = hostTarget(process.platform);
+  const runs = findBuilds(projectDir, config).some((b) => b.target === host && b.built);
+  return runs ? `Checking the game; the build for this computer runs for ${plural(seconds, 'second')} with the network blocked…` : 'Checking the game…';
+}
+
 async function checkCommand(projectDir: string, values: Values, io: CliIO, run: RunState): Promise<Outcome> {
   const secondsRaw = str(values.seconds);
   const seconds = secondsRaw === undefined ? DEFAULT_CHECK_SECONDS : Number(secondsRaw);
-  if (!Number.isFinite(seconds) || seconds <= 0) return usage('--seconds must be a positive number.', 'For example: --seconds 20');
+  if (badSeconds(seconds)) return secondsUsage(20);
   const loaded = loadConfig(projectDir);
   const invalid = notAProject(loaded);
   if (invalid) return invalid;
   const ctx = startRun(projectDir, 'check', run);
   let result: Result<unknown>;
   if (loaded.ok) {
-    if (!run.json) io.write(`Checking the game; the build for this computer runs for ${plural(seconds, 'second')} with the network blocked…\n`);
+    if (!run.json) io.write(`${checkStartLine(projectDir, loaded.data!, seconds)}\n`);
     result = await capture(() => runCheck(ctx, loaded.data!, { seconds }), ctx.log);
   } else {
     result = fail(loaded.errors, loaded.warnings);

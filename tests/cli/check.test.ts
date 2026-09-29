@@ -1,9 +1,12 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { main, type CliIO } from '../../src/cli/main.js';
+import { checkStartLine, main, type CliIO } from '../../src/cli/main.js';
 import { checkSummary } from '../../src/cli/summaries.js';
+import { findBuilds } from '../../src/core/check/review.js';
+import { hostTarget } from '../../src/core/check/run.js';
 import type { CheckReport } from '../../src/core/check/types.js';
+import { parseConfig } from '../../src/core/config/load.js';
 import { fail, gsError } from '../../src/core/result.js';
 import { makeTmpDir, readText, writeFiles } from '../helpers/tmp.js';
 
@@ -22,9 +25,13 @@ describe('gameshipper check', () => {
     expect((await run(['check', '--target', 'linux', '--json'])).json().errors[0]).toMatchObject({ code: 'USAGE', message: "check doesn't take --target." });
   });
 
-  it('rejects a bad --seconds', async () => {
+  it('rejects a bad --seconds, and more than 600', async () => {
     const r = await run(['check', '--seconds', '0', '--json', '--dir', makeTmpDir()]);
     expect([r.code, r.json().errors[0].code]).toEqual([2, 'USAGE']);
+    const long = await run(['check', '--seconds', '601', '--json', '--dir', makeTmpDir()]);
+    expect([long.code, long.json().errors[0].code, long.json().errors[0].message]).toEqual([2, 'USAGE', '--seconds must be a positive number of at most 600.']);
+    const play = await run(['play', '--seconds', '601', '--json', '--dir', makeTmpDir()]);
+    expect([play.code, play.json().errors[0].code]).toEqual([2, 'USAGE']);
   });
 
   it('exits 1 with one error per failed check when nothing is built, with a run log and a last-run record', async () => {
@@ -46,8 +53,18 @@ describe('gameshipper check', () => {
     writeFiles(dir, { 'index.html': '', 'gameshipper.json': JSON.stringify({ name: 'x', version: '1.0.0', targets: ['linux'] }) });
     const r = await run(['check', '--seconds', '3', '--dir', dir]);
     const lines = r.out.split('\n');
-    expect(lines[0]).toBe('Checking the game; the build for this computer runs for 3 seconds with the network blocked…');
+    // Nothing is built, so nothing runs.
+    expect(lines[0]).toBe('Checking the game…');
     expect(lines).toContain('✗ review.builds       No build for linux. Steam\'s review launches every OS the store page lists.');
+  });
+
+  it('says how long the build runs when there is one for this computer', () => {
+    const dir = makeTmpDir();
+    const config = parseConfig({ name: 'x', version: '1.0.0', targets: ['windows', 'mac', 'linux'] }).data!;
+    const built = findBuilds(dir, config).find((b) => b.target === hostTarget(process.platform))!;
+    expect(checkStartLine(dir, config, 3)).toBe('Checking the game…');
+    writeFiles(dir, { [path.relative(dir, built.executable).split(path.sep).join('/')]: '' });
+    expect(checkStartLine(dir, config, 3)).toBe('Checking the game; the build for this computer runs for 3 seconds with the network blocked…');
   });
 });
 

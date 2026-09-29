@@ -61,7 +61,7 @@ export const COMMANDS: CommandHelp[] = [
     usage: 'npx gameshipper play [--smoke [--seconds <n>]] [--screenshot <s,s,...>] [--fullscreen] [--frozen-lock] [--steam-sdk <path>]',
     flags: [
       { name: 'smoke', description: 'Run for a few seconds, quit, and report errors, missing files, internet use and crashes.' },
-      { name: 'seconds', value: '<n>', description: 'How long a smoke run lasts after loading (default 5). Implies --smoke.' },
+      { name: 'seconds', value: '<n>', description: 'How long a smoke run lasts after loading (default 5, at most 600). Implies --smoke.' },
       {
         name: 'screenshot',
         value: '<s,s,...>',
@@ -82,7 +82,7 @@ export const COMMANDS: CommandHelp[] = [
     name: 'check',
     summary: 'Launch the build for this computer and check it against Steam, Steam Deck and store requirements.',
     usage: 'npx gameshipper check [--seconds <n>]',
-    flags: [{ name: 'seconds', value: '<n>', description: 'How long the game runs with the network blocked (default 15).' }],
+    flags: [{ name: 'seconds', value: '<n>', description: 'How long the game runs with the network blocked (default 15, at most 600).' }],
   },
   {
     name: 'status',
