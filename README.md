@@ -1,6 +1,6 @@
 # Gameshipper
 
-Turn any web game folder (three.js, Phaser, PixiJS, Babylon.js, plain canvas) into Windows, Mac and Linux desktop builds you can upload to Steam. Free and open source (MIT). Built so an AI agent can run it end to end.
+Turn any web game folder (three.js, Phaser, PixiJS, Babylon.js, plain canvas) into Windows, Mac and Linux desktop builds you can upload to Steam, plus Xcode and Android Studio projects for the App Store and Google Play. Free and open source (MIT). Built so an AI agent can run it end to end.
 
 ```bash
 npx gameshipper init           # detects your game, writes gameshipper.json
@@ -28,12 +28,13 @@ Detects the game and writes `gameshipper.json`. It finds `index.html` (or the fi
 | `--icon <png\|none>` | Square PNG icon, at least 1024x1024. |
 | `--key-art <file\|none>` | Key art for the store images: PNG or JPEG, 3840x2160 recommended. |
 | `--logo <png\|none>` | Game logo on a transparent background, for the store images. |
+| `--bundle-id <id\|none>` | Bundle ID like `com.yourname.yourgame`. Adds the `ios` and `android` targets (see [iOS and Android](#ios-and-android)). It can never change once the game is in a store. |
 | `--entry <file>` | The game's HTML file (default: detected). |
 | `--build-command <cmd>` | Command that builds the game (default: detected). |
 | `--output-dir <dir>` | Folder the build command writes. |
 | `--force` | Overwrite an existing `gameshipper.json`. |
 
-In a terminal, `init` asks for the name, App ID, icon, key art and logo. With `--yes` or `--json`, or when stdin isn't a terminal, it uses the flags and what it detected instead.
+In a terminal, `init` asks for the name, App ID, icon, key art, logo and a bundle ID for iOS and Android. With `--yes` or `--json`, or when stdin isn't a terminal, it uses the flags and what it detected instead.
 
 ### `play`
 
@@ -58,7 +59,7 @@ Builds desktop apps into `out/<target>`. For a game named "Spinning Cube" that's
 | `--frozen-lock` | Fail instead of accepting changed or new CDN files; for CI. |
 | `--steam-sdk <path>` | Your Steamworks SDK zip or folder (see [Steam](#steam)). |
 
-`targets` defaults to `windows`, `mac` and `linux`. `ios` and `android` can be added to it, but this version skips them with a `TARGET_NOT_YET_SUPPORTED` warning.
+`targets` defaults to `windows`, `mac` and `linux`; with `ios` and `android` (which `init --bundle-id` adds) it also writes an Xcode project to `out/ios` and an Android Studio project to `out/android` (see [iOS and Android](#ios-and-android)). On a Mac, the Mac app is signed, and notarized when your Apple credentials are set (see [Mac signing and notarization](#mac-signing-and-notarization)).
 
 Every build also makes the [store images](#store-images-and-screenshots) in `out/store/`, whatever `--target` says.
 
@@ -74,7 +75,7 @@ Launches the latest build for this computer once, for 15 seconds (`--seconds` to
 | Review | a build for every desktop target, no `steam_appid.txt`, the Mac build signed and notarized, a custom icon, your own App ID |
 | Store | all eight images at their exact sizes and newer than the key art and logo, at least five 1920x1080 screenshots, and reminders about the trailer and Steam's AI disclosure |
 
-Run it after `build`: it never builds anything itself. The Deck-size frame is saved as `.gameshipper/check/frame.png` and the full report as `.gameshipper/check/report.json`. Until Gameshipper signs Mac builds, a Mac build made on a Mac is only ad-hoc signed, so on a Mac `review.mac-signing` fails with `CHECK_MAC_NOT_NOTARIZED`.
+Run it after `build`: it never builds anything itself. The Deck-size frame is saved as `.gameshipper/check/frame.png` and the full report as `.gameshipper/check/report.json`. Without Apple credentials a Mac build is only ad-hoc signed, so on a Mac `review.mac-signing` fails with `CHECK_MAC_NOT_NOTARIZED` until you [sign and notarize](#mac-signing-and-notarization) it.
 
 The network block stops the game's requests (each is listed in `offline.requests`) and its WebRTC connections (not listed). It doesn't cover WebTransport, or networking a [plugin](#plugins) does in Electron's main process: `offline.requests` never sees those.
 
@@ -167,6 +168,11 @@ A check that couldn't run here is `skip`, and its message says why.
 | `GAMESHIPPER_CACHE` | Gameshipper's download cache (CDN files, Steamworks SDK libraries, native Steam bridges). Default: the OS's user cache folder. |
 | `GAMESHIPPER_STEAM_SDK` | Your Steamworks SDK zip or folder (see [Steam](#steam)). |
 | `GAMESHIPPER_NPM_REGISTRY` | The npm registry that other OSes' native Steam bridges (`@koromix/koffi-*`) are downloaded from. Default: `npm_config_registry`, then https://registry.npmjs.org. Downloads are checked against pinned hashes. |
+| `GAMESHIPPER_MAC_IDENTITY` | The Developer ID Application identity Mac builds are signed with (see [Mac signing and notarization](#mac-signing-and-notarization)). Unset: ad-hoc signing. |
+| `GAMESHIPPER_NOTARY_PROFILE`, `GAMESHIPPER_NOTARY_KEYCHAIN` | The notarytool keychain profile (and, optionally, the keychain holding it) Mac builds are notarized with. |
+| `GAMESHIPPER_NOTARY_KEY`, `GAMESHIPPER_NOTARY_KEY_ID`, `GAMESHIPPER_NOTARY_ISSUER` | For CI instead of a profile: an App Store Connect API key (`.p8` path), its ID and its issuer ID. |
+
+`help --json` lists them all under `environment`. Apple credentials are only ever read from these variables and your keychain, never from `gameshipper.json`.
 
 ### Files
 
@@ -196,6 +202,7 @@ A check that couldn't run here is `skip`, and its message says why.
   "targets": ["windows", "mac", "linux"],
   "window": { "width": 1280, "height": 720, "fullscreen": true, "resizable": true },
   "steam": { "appId": 480, "sdk": null, "overlay": "auto" },
+  "mobile": { "bundleId": null, "orientation": "landscape" },
   "plugins": []
 }
 ```
@@ -240,6 +247,8 @@ const progress = await saves.load('slot1'); // null when there's no save
 ```
 
 Slot names are 1 to 64 letters, numbers, `-` or `_`, and the data must be JSON-serializable. Saves live in the game's folder in the OS app data folder (`~/Library/Application Support/<Name>/saves` on a Mac, `%APPDATA%\<Name>\saves` on Windows, `~/.config/<Name>/saves` on Linux).
+
+In iOS and Android builds `window.gameshipper.saves` works the same way: saves are stored with Capacitor Preferences (UserDefaults / SharedPreferences), which the OS never clears and device backups include. On phones `window.steam` is `undefined` and `gameshipper.plugins` is empty.
 
 ## Steam
 
@@ -293,7 +302,7 @@ Plugin and function names use letters, digits and `_`, and no two plugins may sh
 - at its top: every dot file and folder (`.npmrc`, `.vscode`, `.github`, ...) and `out/`;
 - every `node_modules/.bin`.
 
-Its `main` must be a packaged file inside the folder, and a link out of the folder (or to nothing, or into a loop) fails the build with `PLUGIN_LOAD_FAILED`. A plugin's files are never copied into the game itself. A failing `beforePackage` stops the build (`PLUGIN_HOOK_FAILED`), as does a hook still running after 5 minutes; a failing `afterPackage` fails that target. Only use plugins you trust: they run with the same rights as the game.
+Its `main` must be a packaged file inside the folder, and a link out of the folder (or to nothing, or into a loop) fails the build with `PLUGIN_LOAD_FAILED`. A plugin's files are never copied into the game itself. A failing `beforePackage` stops the build (`PLUGIN_HOOK_FAILED`), as does a hook still running after 5 minutes; a failing `afterPackage` fails that target. `afterPackage` runs before the Mac app is signed, so it may still change the app. The hooks run for desktop targets only. Only use plugins you trust: they run with the same rights as the game.
 
 Each `build` and `play` loads plugins afresh. A process that stays running (such as an MCP server) picks up an edited ES module plugin's own entry file, but a CommonJS plugin, and any file a plugin imports, keeps its first-loaded code until that process restarts.
 
@@ -307,17 +316,53 @@ This types `window.steam` and `window.gameshipper` (both `undefined` in a normal
 
 ## Building from each OS
 
-| Host | Windows | Linux | Mac |
-|---|---|---|---|
-| macOS | ✓ | ✓ | ✓ universal (Intel and Apple Silicon)¹ |
-| Linux | ✓ | ✓ | Apple Silicon only |
-| Windows | ✓ | ✓ | ✗ (build on a Mac or Linux) |
+| Host | Windows | Linux | Mac | iOS and Android projects |
+|---|---|---|---|---|
+| macOS | ✓ | ✓ | ✓ universal (Intel and Apple Silicon)¹, signed | ✓ |
+| Linux | ✓ | ✓ | Apple Silicon only, unsigned | ✓ (archiving for iOS needs a Mac) |
+| Windows | ✓ | ✓ | ✗ (build on a Mac or Linux) | ✓ (archiving for iOS needs a Mac) |
 
-Windows and Linux builds are x64. ¹ Universal Mac builds need Apple's command-line tools (`xcode-select --install`); without them the Mac build is Apple Silicon only, with a `MAC_NOT_UNIVERSAL` warning. Mac builds made on a Mac are ad-hoc signed, not notarized.
+Windows and Linux builds are x64. ¹ Universal Mac builds need Apple's command-line tools (`xcode-select --install`); without them the Mac build is Apple Silicon only, with a `MAC_NOT_UNIVERSAL` warning. Mac builds made on a Mac are signed: ad-hoc without Apple credentials, with your Developer ID and notarized with them. Mac builds made on Linux are unsigned (`MAC_SIGN_HOST`).
+
+## Mac signing and notarization
+
+Steam only accepts Mac builds that are signed with an Apple Developer ID and notarized. On a Mac, `build` does both when these environment variables are set:
+
+```bash
+# once: a "Developer ID Application" certificate (Xcode → Settings → Accounts → Manage Certificates; needs the paid Apple Developer Program)
+# once: a notarytool login stored in your keychain (it asks for an app-specific password)
+xcrun notarytool store-credentials gameshipper --apple-id you@example.com --team-id ABCDE12345
+
+export GAMESHIPPER_MAC_IDENTITY="Developer ID Application: Your Name (ABCDE12345)"
+export GAMESHIPPER_NOTARY_PROFILE=gameshipper
+npx gameshipper build --target mac      # signs, notarizes (usually a few minutes) and staples
+```
+
+For CI, use an App Store Connect API key instead of the profile: `GAMESHIPPER_NOTARY_KEY` (the `.p8` file's path), `GAMESHIPPER_NOTARY_KEY_ID` and `GAMESHIPPER_NOTARY_ISSUER`. The first signing may ask for keychain access: click "Always Allow". The variables are never read from `gameshipper.json`, because the identity contains your legal name and game repositories are often public.
+
+Without them the Mac app is ad-hoc signed: it runs on your Mac, and `build` warns `MAC_UNSIGNED`. With only `GAMESHIPPER_MAC_IDENTITY` it's signed but not notarized (`MAC_NOT_NOTARIZED`). Every Mac build uses the hardened runtime with the entitlements Steam needs: Steam injects its overlay with `DYLD_INSERT_LIBRARIES` and the game loads Valve-signed libraries, so library validation is off and DYLD variables are allowed in the game's main process; the App Sandbox isn't used. Signing happens after your plugins' `afterPackage` hooks.
+
+| Code | |
+|---|---|
+| `APPLE_CREDENTIALS_INVALID` | The variables are half-set (a notary login without an identity, say). Stops the build before anything is built; exit code 2. |
+| `MAC_IDENTITY_NOT_FOUND` | `GAMESHIPPER_MAC_IDENTITY` isn't in your keychain. The message lists what is; exit code 2. |
+| `MAC_SIGN_FAILED`, `NOTARIZE_FAILED`, `STAPLE_FAILED`, `NOTARIZE_TOOL_MISSING` | Signing or notarizing failed; the Mac target fails. The fix names the log in `.gameshipper/logs/` with codesign's output or Apple's report. |
+| `MAC_UNSIGNED`, `MAC_NOT_NOTARIZED`, `MAC_BUNDLE_ID_DEFAULT`, `MAC_SIGN_HOST`, `MAC_ADHOC_SIGN_FAILED` | Warnings: how far the Mac app got, and what to set to go further. |
+
+## iOS and Android
+
+```bash
+npx gameshipper init --bundle-id com.yourname.yourgame   # or set "mobile": { "bundleId": … } and add "ios", "android" to "targets"
+npx gameshipper build --target ios,android
+```
+
+`out/ios` is an Xcode project (open `out/ios/App/App.xcodeproj`) and `out/android` an Android Studio project, generated with Capacitor 8 from the same game files as the desktop builds, with your icon, a splash screen, `version` (build number: 1.2.3 becomes 1002003) and `mobile.orientation`. Both folders are self-contained, so you can move, zip or commit them, and both can be generated on any computer; archiving for the App Store needs a Mac with Xcode. The iOS project needs iOS 16.4 or newer (for import maps) and downloads Capacitor's Swift package from GitHub the first time Xcode builds it. Signing and uploading are done in Xcode and Android Studio. `build` regenerates both folders, so don't edit them by hand; the signing team you pick in Xcode is kept.
+
+A game whose page has no `<meta name="viewport">` gets one. Without a bundle ID the mobile targets fail with `BUNDLE_ID_REQUIRED` (exit code 2), and with one Android can't use (a Java keyword such as `new`) with `BUNDLE_ID_INVALID`.
 
 ## Coming in later versions
 
-`publish`, Mac signing and notarization, and iOS and Android builds.
+`publish`, and building, signing and uploading the iOS and Android apps themselves (Gameshipper makes the projects; Xcode and Android Studio do the rest).
 
 ## Development
 
