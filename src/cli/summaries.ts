@@ -73,6 +73,12 @@ export function statusSummary(r: Result<StatusData>): string[] {
   if (s.notBuildableHere.length) {
     lines.push(`Can't build here: ${s.notBuildableHere.map((n) => `${n.target} (${n.reason.code})`).join(', ')}`);
   }
+  const sdk = s.steamSdk;
+  lines.push(
+    sdk
+      ? `Steam SDK: ${sdk.version ?? 'unknown version'} from ${sdk.source} (${sdk.path}) for ${sdk.targets.join(', ')}`
+      : 'Steam SDK: none, so builds have no Steam features (see the STEAM_SDK_MISSING fix)',
+  );
   for (const o of s.outputs) lines.push(`out/${o.target}: ${o.exists ? 'built' : '—'}`);
   for (const run of Object.values(s.lastRuns)) {
     lines.push(`Last ${run.command}: ${run.ok ? '✓' : '✗'} ${run.at}${run.logPath ? ` (${run.logPath})` : ''}`);

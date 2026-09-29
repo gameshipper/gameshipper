@@ -15,6 +15,8 @@ const USAGE_CODES = new Set([
   'ASSET_MISSING',
   'TARGET_NOT_CONFIGURED',
   'LOCK_INVALID',
+  // --steam-sdk, steam.sdk, GAMESHIPPER_STEAM_SDK or .sdk/ isn't a usable Steamworks SDK.
+  'STEAM_SDK_INVALID',
   'CDN_NOT_LOCKED',
   // An error only under --frozen-lock (otherwise a warning).
   'CDN_CHANGED',

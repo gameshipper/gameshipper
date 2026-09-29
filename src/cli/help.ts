@@ -32,6 +32,12 @@ const FROZEN_LOCK: FlagHelp = {
   description: 'Fail instead of accepting changed or new CDN files; for CI.',
 };
 
+const STEAM_SDK: FlagHelp = {
+  name: 'steam-sdk',
+  value: '<path>',
+  description: 'Your Steamworks SDK zip or folder (instead of steam.sdk, GAMESHIPPER_STEAM_SDK or .sdk/).',
+};
+
 export const COMMANDS: CommandHelp[] = [
   {
     name: 'init',
@@ -50,19 +56,20 @@ export const COMMANDS: CommandHelp[] = [
   {
     name: 'play',
     summary: 'Run the game in the desktop shell. --smoke runs it briefly and reports problems.',
-    usage: 'npx gameshipper play [--smoke [--seconds <n>]] [--fullscreen] [--frozen-lock]',
+    usage: 'npx gameshipper play [--smoke [--seconds <n>]] [--fullscreen] [--frozen-lock] [--steam-sdk <path>]',
     flags: [
       { name: 'smoke', description: 'Run for a few seconds, quit, and report errors, missing files, internet use and crashes.' },
       { name: 'seconds', value: '<n>', description: 'How long a smoke run lasts after loading (default 5). Implies --smoke.' },
       { name: 'fullscreen', description: 'Honour window.fullscreen (play is windowed by default).' },
       FROZEN_LOCK,
+      STEAM_SDK,
     ],
   },
   {
     name: 'build',
     summary: 'Build desktop apps into out/<target>.',
-    usage: 'npx gameshipper build [--target windows,mac,linux] [--frozen-lock]',
-    flags: [{ name: 'target', value: '<list>', description: 'Comma-separated subset of the configured targets.' }, FROZEN_LOCK],
+    usage: 'npx gameshipper build [--target windows,mac,linux] [--frozen-lock] [--steam-sdk <path>]',
+    flags: [{ name: 'target', value: '<list>', description: 'Comma-separated subset of the configured targets.' }, FROZEN_LOCK, STEAM_SDK],
   },
   {
     name: 'status',

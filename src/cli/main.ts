@@ -82,6 +82,11 @@ interface RunState {
 }
 
 const str = (v: string | boolean | undefined) => (typeof v === 'string' ? v : undefined);
+/** --steam-sdk, as an absolute path: like --dir, it's relative to the current folder, not the game's. */
+const steamSdkFlag = (values: Values) => {
+  const raw = str(values['steam-sdk']);
+  return raw === undefined ? undefined : path.resolve(raw);
+};
 const usage = (message: string, fix: string): Outcome => ({ result: fail(gsError('USAGE', message, fix)), human: [] });
 const flagsFix = (spec: CommandHelp) => {
   const own = spec.flags.map((f) => `--${f.name}`).join(', ') || 'none besides the global flags';
@@ -223,7 +228,10 @@ async function buildCommand(projectDir: string, values: Values, run: RunState): 
   const ctx = startRun(projectDir, 'build', run);
   // A config with a missing file still carries the config as data; that is not a build result.
   const result: Result<unknown> = loaded.ok
-    ? await capture(() => runBuild(ctx, loaded.data!, { shellDir: SHELL_DIR, only, frozenLock: values['frozen-lock'] === true }), ctx.log)
+    ? await capture(
+        () => runBuild(ctx, loaded.data!, { shellDir: SHELL_DIR, only, frozenLock: values['frozen-lock'] === true, steamSdk: steamSdkFlag(values) }),
+        ctx.log,
+      )
     : fail(loaded.errors, loaded.warnings);
   finishRun(ctx, 'build', result, run);
   return { result, human: buildSummary(result as Parameters<typeof buildSummary>[0], projectDir) };
@@ -251,6 +259,7 @@ async function playCommand(projectDir: string, values: Values, io: CliIO, run: R
           smokeSeconds: smoke ? seconds : undefined,
           fullscreen: values.fullscreen === true,
           frozenLock,
+          steamSdk: steamSdkFlag(values),
           onGameStarted: (data, warnings) => (run.playing = { data, warnings }),
         }),
       ctx.log,

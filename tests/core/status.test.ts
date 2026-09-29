@@ -62,7 +62,8 @@ describe('getStatus', () => {
     saveLastRun(dir, 'build', ok({}));
     const r = getStatus(dir, 'win32');
     expect(r.ok).toBe(true);
-    expect(r.warnings).toEqual([]);
+    // The tests' cache holds no Steamworks SDK (vitest.config.ts).
+    expect(r.warnings.map((w) => w.code)).toEqual(['STEAM_SDK_MISSING']);
     const s = r.data!;
     expect(s.projectDir).toBe(dir);
     expect(s.gameshipperVersion).toBe(GAMESHIPPER_VERSION);
@@ -81,6 +82,7 @@ describe('getStatus', () => {
       { target: 'linux', dir: path.join(dir, 'out', 'linux'), exists: true },
     ]);
     expect(Object.keys(s.lastRuns)).toEqual(['build']);
+    expect(s.steamSdk).toBeNull();
   });
 
   it('still answers without a config, passing config errors as warnings', () => {
@@ -96,6 +98,6 @@ describe('getStatus', () => {
     const r = getStatus(dir, 'linux');
     expect(r.ok).toBe(true);
     expect(r.data!.config?.name).toBe('x');
-    expect(r.warnings.map((w) => w.code)).toEqual(['ENTRY_MISSING', 'ASSET_MISSING']);
+    expect(r.warnings.map((w) => w.code)).toEqual(['ENTRY_MISSING', 'ASSET_MISSING', 'STEAM_SDK_MISSING']);
   });
 });
