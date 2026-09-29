@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, Menu, protocol, session, shell } from 'electron';
+import { app, BrowserWindow, ipcMain, Menu, protocol, session, shell, type WebContents, type WebFrameMain } from 'electron';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { Readable } from 'node:stream';
@@ -18,7 +18,9 @@ import {
   CROSS_ORIGIN_ISOLATION_HEADERS,
   isGameUrl,
   isPermissionAllowed,
+  leaveAction,
   navigationAction,
+  newWindowSource,
   returnToGame,
 } from './policy.js';
 import { planFileResponse } from './range.js';
@@ -162,9 +164,30 @@ function restrictPermissions(): void {
   session.defaultSession.setPermissionCheckHandler((_wc, permission) => isPermissionAllowed(permission));
 }
 
-/** The window only ever shows the game; web, mail and Steam links go to the system instead. */
-function leaveGame(url: string): void {
-  const external = navigationAction(url) === 'open-external';
+/** A frame's origin, or null when it's unknown or gone (a WebFrameMain throws once its frame is disposed). */
+function originOf(frame: WebFrameMain | null | undefined): string | null {
+  try {
+    return frame?.origin ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/** The origins of every frame in the window, the main frame included. */
+function frameOrigins(wc: WebContents): string[] {
+  try {
+    return wc.mainFrame.framesInSubtree.map((frame) => frame.origin);
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * The window only ever shows the game. Web, mail and Steam links the game itself asked for (`from` is the
+ * origin of the frame that asked) go to the system instead; everything else is only recorded.
+ */
+function leaveGame(url: string, from: string | null): void {
+  const external = leaveAction(url, from) === 'open-external';
   diagnostics.record({ kind: 'blocked-navigation', url, action: external ? 'opened-externally' : 'blocked' });
   // Smoke runs are automated, so they only note the link.
   if (external && !smoke) {
@@ -185,10 +208,11 @@ function loadGame(win: BrowserWindow): Promise<boolean> {
   );
 }
 
-function keepInGame(details: { url: string; isMainFrame: boolean; preventDefault(): void }): void {
+/** will-navigate and will-redirect: the game window stays on the game. `initiator` is the frame that asked. */
+function keepInGame(details: { url: string; isMainFrame: boolean; initiator?: WebFrameMain | null; preventDefault(): void }): void {
   if (!details.isMainFrame || navigationAction(details.url) === 'allow') return;
   details.preventDefault();
-  leaveGame(details.url);
+  leaveGame(details.url, originOf(details.initiator));
 }
 
 function createWindow(): BrowserWindow {
@@ -254,14 +278,16 @@ function createWindow(): BrowserWindow {
       return;
     }
     lastReturn = now;
-    leaveGame(url);
+    // Nothing says who sent the window here, so nothing is opened outside the game.
+    leaveGame(url, null);
     // Clearing history afterwards keeps Back from leading to the page the game left for.
     void loadGame(win).then((loaded) => {
       if (loaded && !win.isDestroyed()) wc.navigationHistory.clear();
     });
   });
+  // Never a new window: the game's own links open in the system, and other frames' links are blocked.
   wc.setWindowOpenHandler(({ url }) => {
-    leaveGame(url);
+    leaveGame(url, newWindowSource(frameOrigins(wc)));
     return { action: 'deny' };
   });
   win.once('ready-to-show', () => win.show());

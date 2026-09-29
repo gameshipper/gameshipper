@@ -24,6 +24,32 @@ export function navigationAction(url: string): NavigationAction {
   }
 }
 
+/** The origin of the game's own pages and of frames they create (about:blank, srcdoc). */
+export const GAME_ORIGIN = 'app://game';
+
+export type LeaveAction = 'open-external' | 'block';
+
+/**
+ * What to do when something asks to take the player to `url`, which isn't a game page: in a new window, or by
+ * navigating the game window. `from` is the origin of the frame that asked, or null when that isn't known.
+ * Only the game itself may open web, mail and Steam links in the player's browser or app: a link from any
+ * other frame (an embedded site or ad) is blocked, like every other URL.
+ */
+export function leaveAction(url: string, from: string | null | undefined): LeaveAction {
+  return from === GAME_ORIGIN && navigationAction(url) === 'open-external' ? 'open-external' : 'block';
+}
+
+/**
+ * The origin of the frame behind a new-window request (window.open, a target=_blank link), as far as it can be
+ * known. Electron 44's window-open handler doesn't say which frame asked (its details have no frame, and
+ * Chromium sends no referrer from app:// pages), so it's the game only when every frame in the window is the
+ * game's; otherwise null. `frameOrigins` are the origins of all the window's frames, the main frame included.
+ * A frame that failed to load, or a sandboxed one, has the origin "null", so it counts as not the game's.
+ */
+export function newWindowSource(frameOrigins: readonly string[]): string | null {
+  return frameOrigins.length > 0 && frameOrigins.every((origin) => origin === GAME_ORIGIN) ? GAME_ORIGIN : null;
+}
+
 /** Landing off the game again this soon after being sent back counts as a loop. */
 export const RETURN_LOOP_MS = 5000;
 

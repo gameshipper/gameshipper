@@ -2,9 +2,12 @@ import { describe, expect, it } from 'vitest';
 import {
   classifyLoadFailure,
   CROSS_ORIGIN_ISOLATION_HEADERS,
+  GAME_ORIGIN,
   isGameUrl,
   isPermissionAllowed,
+  leaveAction,
   navigationAction,
+  newWindowSource,
   RETURN_LOOP_MS,
   returnToGame,
 } from '../../src/shell/policy.js';
@@ -35,6 +38,41 @@ describe('navigationAction', () => {
     for (const url of ['about:blank', 'about:blank#x', 'about:srcdoc', 'file:///etc/passwd', 'javascript:alert(1)', 'data:text/html,hi', 'app://other/', 'chrome://gpu', 'garbage']) {
       expect(navigationAction(url)).toBe('block');
     }
+  });
+});
+
+describe('leaveAction', () => {
+  const external = ['https://example.com/wiki', 'http://example.com/', 'mailto:help@example.com', 'steam://run/480'];
+
+  it("opens web, mail and Steam links in the system when the game's own frame asked", () => {
+    expect(GAME_ORIGIN).toBe('app://game');
+    for (const url of external) expect(leaveAction(url, 'app://game')).toBe('open-external');
+  });
+
+  it('blocks those links when another frame asked, or when nobody knows who did', () => {
+    for (const from of ['https://ads.example.com', 'app://other', 'null', '', null, undefined]) {
+      for (const url of external) expect(leaveAction(url, from)).toBe('block');
+    }
+  });
+
+  it('blocks everything else, whoever asked', () => {
+    for (const url of ['about:blank', 'file:///etc/passwd', 'javascript:alert(1)', 'data:text/html,hi', 'chrome://gpu', 'garbage']) {
+      expect(leaveAction(url, 'app://game')).toBe('block');
+    }
+  });
+});
+
+describe('newWindowSource', () => {
+  it('is the game when every frame in the window is the game', () => {
+    expect(newWindowSource(['app://game'])).toBe('app://game');
+    // about:blank and srcdoc frames the game creates share its origin.
+    expect(newWindowSource(['app://game', 'app://game', 'app://game'])).toBe('app://game');
+  });
+
+  it('is unknown when any frame belongs to someone else, is sandboxed or failed to load', () => {
+    expect(newWindowSource(['app://game', 'https://www.youtube.com'])).toBeNull();
+    expect(newWindowSource(['app://game', 'null'])).toBeNull();
+    expect(newWindowSource([])).toBeNull();
   });
 });
 

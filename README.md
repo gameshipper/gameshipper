@@ -95,7 +95,7 @@ The loop: `status --json`, `init --yes --json`, then `play --smoke --json` until
 | `SMOKE_NO_RESULT`, `SMOKE_TIMEOUT` | error | The game never reported back, or froze and had to be stopped. |
 | `GAME_USES_INTERNET` | warning | The game loaded something from the internet while running, so it won't work offline. |
 | `GAME_CONSOLE_WARNING` | warning | The game logged a warning. |
-| `GAME_NAVIGATION_BLOCKED` | warning | The game tried to take its window to a page that isn't the game's, like `about:blank` or `file:`. Web, mail and `steam:` links the game opens aren't reported: they open in the player's browser or app. |
+| `GAME_NAVIGATION_BLOCKED` | warning | The game tried to take its window to a page that isn't the game's, like `about:blank` or `file:`, or an embedded site tried to open a link. Web, mail and `steam:` links the game itself opens aren't reported: they open in the player's browser or app. |
 
 Each code lists at most 10 issues, then one more issue counting the rest. `data.smoke.summary.events` holds the first 100 diagnostic events; `data.smoke.eventsLog` names a JSON-lines file with all of them, including everything the game logged.
 
