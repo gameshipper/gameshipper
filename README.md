@@ -219,7 +219,7 @@ Set `keyArt` (PNG or JPEG, 3840x2160 recommended, at least 1280x720) and `logo` 
 
 Crops centre on `keyArtFocus`: `[x, y]` as fractions of the key art's width and height, `[0.5, 0.5]` by default. Transparent parts of the key art come out black. Unusable art fails the build with `KEYART_INVALID` (not a PNG or JPEG), `KEYART_TOO_SMALL`, `LOGO_INVALID` (not a PNG, or fully transparent) or `LOGO_NOT_TRANSPARENT` (exit code 2, like a bad icon); art that had to be enlarged gives `KEYART_LOW_RES` or `LOGO_LOW_RES`; without `keyArt` and `logo`, builds warn `STORE_IMAGES_SKIPPED`. Each build replaces the images in `out/store/`, and one that skips them or fails leaves none there, so `check` never passes old ones.
 
-The key art and logo are left out of the game itself unless one of its HTML, JavaScript or CSS files mentions the file's name (then the game may show it, so it ships).
+The key art and logo are left out of the game itself unless one of its HTML, JavaScript, CSS or JSON files mentions the file's name (then the game may show it, so it ships).
 
 Steam needs at least five 1920x1080 gameplay screenshots. Press **F12** during `npx gameshipper play` to save one to `out/store/screenshots/`. It's always exactly 1920x1080, whatever your screen's scaling. F12 only does this in `play`: in your shipped game it stays Steam's screenshot key.
 

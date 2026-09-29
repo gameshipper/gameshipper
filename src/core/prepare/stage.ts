@@ -23,6 +23,8 @@ const SKIP_TOP_LEVEL = new Set([
   'bun.lock',
 ]);
 const TEXT_FILE = /\.(html?|m?js|css)$/i;
+/** Files that may name the store art the game shows: its code, and asset manifests (a Phaser pack, a Tiled map). */
+const MENTIONS_ART = /\.(html?|m?js|css|json)$/i;
 
 const BUILD_TIMEOUT_MS = 10 * 60 * 1000;
 /** After the command exits, how long to wait for leftover background processes to release its output. */
@@ -280,9 +282,9 @@ export async function stageGame(ctx: Ctx, config: Config, opts: StageOptions = {
   const art = storeArt(ctx.projectDir, config);
   /** Store art the game's own files mention by name, which it may show. */
   const mentioned = new Set<string>();
-  for (const rel of staged.filter((f) => TEXT_FILE.test(f))) {
+  for (const rel of staged.filter((f) => TEXT_FILE.test(f) || (art.length > 0 && MENTIONS_ART.test(f)))) {
     const text = fs.readFileSync(path.join(stageDir, rel), 'utf8');
-    if (text.includes('node_modules/')) {
+    if (TEXT_FILE.test(rel) && text.includes('node_modules/')) {
       warnings.push(
         gsError(
           'NODE_MODULES_REFERENCED',

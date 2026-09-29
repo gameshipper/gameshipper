@@ -330,6 +330,13 @@ describe('stageGame', () => {
     expect([fs.existsSync(path.join(again.stageDir, 'art/key-art.png')), fs.existsSync(path.join(again.stageDir, 'art/title-logo.png'))]).toEqual([true, false]);
   });
 
+  it('keeps store art an asset manifest (JSON) names', async () => {
+    const dir = makeTmpDir();
+    writeFiles(dir, { 'index.html': '<html></html>', 'assets/pack.json': '{"images":[{"key":"title","url":"art/logo.png"}]}', 'art/logo.png': 'logo' });
+    const { stageDir } = await stageGame(testCtx(dir), cfg({ logo: 'art/logo.png' }));
+    expect(fs.existsSync(path.join(stageDir, 'art', 'logo.png'))).toBe(true);
+  });
+
   it('removes a folder that held only the store art', async () => {
     const dir = makeTmpDir();
     writeFiles(dir, { 'index.html': '<html></html>', 'art/store/key-art.png': 'key art', 'art/store/logo.png': 'logo' });
