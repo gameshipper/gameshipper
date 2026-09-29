@@ -32,7 +32,8 @@ describe('screenshot times', () => {
   it('parseScreenshotTimes accepts 1-20 positive seconds up to 600', () => {
     expect(parseScreenshotTimes('5,10, 15')).toEqual([5, 10, 15]);
     expect(parseScreenshotTimes('2.5')).toEqual([2.5]);
-    for (const bad of ['', 'abc', '5,,10', '0', '-1', '601', Array.from({ length: 21 }, () => '1').join(',')]) {
+    expect(parseScreenshotTimes('600')).toEqual([600]);
+    for (const bad of ['', 'abc', '5,,10', '0', '-1', '601', '600.5', '5,1e9', 'Infinity', Array.from({ length: 21 }, () => '1').join(',')]) {
       expect(parseScreenshotTimes(bad), bad).toBeNull();
     }
   });

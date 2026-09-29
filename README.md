@@ -44,7 +44,7 @@ Runs the game in the same shell the builds use. The window stays a window even w
 |---|---|
 | `--smoke` | Run for a few seconds, quit, and report errors, missing files, internet use and crashes. |
 | `--seconds <n>` | How long a smoke run lasts after the page loads (default 5, at most 600). Implies `--smoke`. |
-| `--screenshot <s,s,...>` | Save 1920x1080 store screenshots this many seconds after the page loads, then quit, e.g. `--screenshot 5,10,15,20,25`. |
+| `--screenshot <s,s,...>` | Save 1920x1080 store screenshots this many seconds after the page loads, then quit, e.g. `--screenshot 5,10,15,20,25` (up to 20 times, each at most 600). |
 | `--fullscreen` | Honour `window.fullscreen` from `gameshipper.json`. |
 | `--frozen-lock` | Fail instead of accepting changed or new CDN files; for CI. |
 | `--steam-sdk <path>` | Your Steamworks SDK zip or folder (see [Steam](#steam)). |

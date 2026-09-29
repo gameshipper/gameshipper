@@ -71,7 +71,7 @@ export const COMMANDS: CommandHelp[] = [
       {
         name: 'screenshot',
         value: '<s,s,...>',
-        description: 'Save 1920x1080 store screenshots to out/store/screenshots this many seconds after loading, then quit (e.g. 5,10,15,20,25).',
+        description: 'Save 1920x1080 store screenshots to out/store/screenshots this many seconds after loading, then quit (e.g. 5,10,15,20,25; up to 20 times, each at most 600).',
       },
       { name: 'fullscreen', description: 'Honour window.fullscreen (play is windowed by default).' },
       FROZEN_LOCK,

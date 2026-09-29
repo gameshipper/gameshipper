@@ -221,6 +221,18 @@ describe('gameshipper CLI', () => {
     expect(human.out).toContain('✗ ENTRY_MISSING');
   });
 
+  it('play --screenshot takes at most 20 times of at most 600 seconds (USAGE, exit 2)', async () => {
+    const dir = makeTmpDir();
+    writeFiles(dir, { 'index.html': '', 'gameshipper.json': CONFIG });
+    for (const times of ['601', '5,700', '0', 'soon']) {
+      const r = await run(['play', '--json', '--dir', dir, '--screenshot', times]);
+      expect([times, r.code, r.json().errors[0].code], times).toEqual([times, 2, 'USAGE']);
+      expect(r.json().errors[0].fix).toContain('each at most 600');
+    }
+    // Refused before anything runs: no run log, no .gameshipper folder.
+    expect(fs.readdirSync(dir).sort()).toEqual(['gameshipper.json', 'index.html']);
+  });
+
   it('says how long a smoke run lasts, in words', async () => {
     const dir = makeTmpDir();
     writeFiles(dir, { 'index.html': '<script src="http://127.0.0.1:9/lib.js"></script>', 'gameshipper.json': CONFIG });
