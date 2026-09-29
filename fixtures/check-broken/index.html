@@ -1,0 +1,20 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Broken Cube</title>
+  <!-- Deliberately not Deck-ready: default body margin, no overflow: hidden, and a HUD wider than 1280 px. -->
+  <style>body { background: #111; color: #fff; font: 28px sans-serif; }</style>
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "https://unpkg.com/three@0.170.0/build/three.module.js"
+      }
+    }
+  </script>
+</head>
+<body>
+  <div id="hud" style="position: absolute; top: 12px; left: 760px; white-space: nowrap">Score: 000000 · Lives: 3 · Level: 1 · Best: 999999</div>
+  <script type="module" src="./main.js"></script>
+</body>
+</html>
