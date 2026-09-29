@@ -32,5 +32,14 @@ export function configureAndroid(androidDir: string, config: Config): void {
   fs.writeFileSync(gradleFile, gradle);
 
   const gitignore = path.join(androidDir, '.gitignore');
-  if (fs.existsSync(gitignore)) fs.writeFileSync(gitignore, keepGeneratedFiles(fs.readFileSync(gitignore, 'utf8'), GENERATED));
+  if (fs.existsSync(gitignore)) fs.writeFileSync(gitignore, `${keepGeneratedFiles(fs.readFileSync(gitignore, 'utf8'), GENERATED).trimEnd()}\n${KEEP_GAME_FILES}`);
 }
+
+/**
+ * Capacitor's .gitignore ignores build/, bin/, gen/, out/ and *.log wherever they are, which would drop game files
+ * such as three.js's build/ folder. Last, so it wins: every file and folder of the game is kept.
+ */
+const KEEP_GAME_FILES = `
+# Gameshipper: the game's own files, whatever they're called
+!/app/src/main/assets/public/**
+`;

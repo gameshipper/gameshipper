@@ -1,11 +1,11 @@
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { configureAndroid } from '../../../src/core/mobile/native-android.js';
 import { configureIos, readDevelopmentTeam } from '../../../src/core/mobile/native-ios.js';
 import { generatedPlatform, mobileConfig } from '../../helpers/capacitor.js';
-import { readText } from '../../helpers/tmp.js';
+import { readText, writeFiles } from '../../helpers/tmp.js';
 
 describe('configureIos', () => {
   it('sets version, build number, deployment target, orientation and full screen', async () => {
@@ -54,6 +54,30 @@ describe('configureAndroid', () => {
     expect(gradle).toContain('applicationId "com.jane.moongame"');
     expect(readText(platformDir, 'app/src/main/AndroidManifest.xml')).toMatch(/android:name="\.MainActivity"\s+android:screenOrientation="sensorLandscape"/);
     expect(fs.existsSync(path.join(platformDir, 'app/src/main/java/com/jane/moongame/MainActivity.java'))).toBe(true);
-    expect(readText(platformDir, '.gitignore')).not.toContain('app/src/main/assets/public');
+    expect(readText(platformDir, '.gitignore')).not.toContain('\napp/src/main/assets/public\n');
+  });
+
+  it.runIf(spawnSync('git', ['--version']).status === 0)("its .gitignore never ignores the game's own files, whatever they're called", async () => {
+    const { platformDir, config } = await generatedPlatform('android');
+    configureAndroid(platformDir, config);
+    const game = 'app/src/main/assets/public';
+    // Capacitor's rules for build/, bin/, gen/, out/ and *.log match anywhere, like three.js's own build/ folder.
+    const kept = [
+      `${game}/_gameshipper/cdn/unpkg.com/three@0.170.0/build/three.module.js`,
+      `${game}/bin/level.bin`,
+      `${game}/gen/map.json`,
+      `${game}/out/intro.png`,
+      `${game}/debug.log`,
+      `${game}/index.html`,
+    ];
+    const stillIgnored = ['build/outputs/app.apk', 'app/build/intermediates/x.dex', 'local.properties', 'debug.log'];
+    writeFiles(platformDir, Object.fromEntries([...kept, ...stillIgnored].map((f) => [f, 'x'])));
+    const git = (...args: string[]) => spawnSync('git', args, { cwd: platformDir, encoding: 'utf8' });
+    expect(git('init', '-q').status).toBe(0);
+    // Exit code 1: not ignored (-v would also show the last rule that matched, here the re-including one).
+    for (const f of kept) expect(git('check-ignore', '-q', f).status, `${f}: ${git('check-ignore', '-v', f).stdout}`).toBe(1);
+    for (const f of stillIgnored) expect(git('check-ignore', '-q', f).status, f).toBe(0);
+    const untracked = git('status', '--porcelain', '--untracked-files=all').stdout;
+    for (const f of kept) expect(untracked, f).toContain(`?? ${f}`);
   });
 });
