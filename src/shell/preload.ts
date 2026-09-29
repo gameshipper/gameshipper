@@ -115,3 +115,25 @@ window.addEventListener(
   true,
 );
 window.addEventListener('focusout', () => ipcRenderer.send('gameshipper:text-blur'), true);
+
+// `gameshipper check` passes this argument (probe.ts PROBE_ARG) to find out whether the game reads a gamepad. It
+// runs in the page's own world before any game script, so it sees every call; main.ts reads the counts through
+// navigator[Symbol.for('gameshipper.probe')] (probe.ts READ_COUNTERS_JS).
+if (process.argv.includes('--gameshipper-probe')) {
+  contextBridge.executeInMainWorld({
+    func: () => {
+      const counts = { getGamepads: 0, gamepadListeners: 0 };
+      const getGamepads = Navigator.prototype.getGamepads;
+      Navigator.prototype.getGamepads = function (this: Navigator) {
+        counts.getGamepads++;
+        return getGamepads.call(this);
+      };
+      const addEventListener = EventTarget.prototype.addEventListener;
+      EventTarget.prototype.addEventListener = function (this: EventTarget, ...args: Parameters<EventTarget['addEventListener']>) {
+        if (args[0] === 'gamepadconnected' || args[0] === 'gamepaddisconnected') counts.gamepadListeners++;
+        return addEventListener.apply(this, args);
+      };
+      Object.defineProperty(navigator, Symbol.for('gameshipper.probe'), { value: () => ({ ...counts }) });
+    },
+  });
+}

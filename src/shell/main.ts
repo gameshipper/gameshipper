@@ -2,6 +2,17 @@ import { app, BrowserWindow, ipcMain, Menu, protocol, session, shell, type WebCo
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { Readable } from 'node:stream';
+import { PageCamera } from './camera.js';
+import {
+  captureSettings,
+  DECK_SIZE,
+  isAllowedOffline,
+  QUIT_TIMEOUT_EXIT_CODE,
+  QUIT_TIMEOUT_MS,
+  SCREENSHOT_SIZE,
+  screenshotFileName,
+  type Size,
+} from './capture.js';
 import { floatingKeyboardArgs } from './deck-keyboard.js';
 import {
   createDiagnostics,
@@ -11,7 +22,7 @@ import {
   writeSummary,
 } from './diagnostics.js';
 import { chromiumSwitches } from './flags.js';
-import { isFullscreenToggle } from './keys.js';
+import { isFullscreenToggle, isScreenshotKey } from './keys.js';
 import { mimeType } from './mime.js';
 import { chooseOverlay, startRepaint } from './overlay.js';
 import { caseMismatch, requestParts, userDataDir } from './paths.js';
@@ -26,6 +37,7 @@ import {
   newWindowSource,
   returnToGame,
 } from './policy.js';
+import { cleanCounters, cleanLayout, layoutProbe, PROBE_ARG, READ_COUNTERS_JS, type ProbeReport } from './probe.js';
 import { planFileResponse } from './range.js';
 import { entryUrl, readRuntimeConfig } from './runtime-config.js';
 import { callSaveStore, createSaveStore, type SaveStore } from './saves.js';
@@ -36,6 +48,8 @@ const env = process.env;
 const diagnostics = createDiagnostics(env.GAMESHIPPER_LOG ?? null);
 const smokeSeconds = Number(env.GAMESHIPPER_SMOKE_SECONDS ?? '0');
 const smoke = smokeSeconds > 0;
+/** What `play` and `check` asked the shell to capture (capture.ts); nothing for a shipped game. */
+const capture = captureSettings(env);
 
 const errorText = (e: unknown): string => {
   try {
@@ -68,7 +82,13 @@ async function stopSteam(): Promise<void> {
 let smokeDone = false;
 /** Set once the page has finished loading (or its load was stopped); the backstop checks it. */
 let pageLoaded = false;
-function finishSmoke(code: number): void {
+/** What a `check` run measured just before its summary was written (runProbe). */
+let probeReport: ProbeReport | null = null;
+/**
+ * `closing`: a `check` run ends by closing the game's window the way a player does, so its exit code shows whether
+ * the game quits (closeLikeAPlayer). Every other ending exits at once with `code`.
+ */
+function finishSmoke(code: number, closing?: BrowserWindow): void {
   if (smokeDone) return;
   smokeDone = true;
   let exitCode = code;
@@ -83,11 +103,15 @@ function finishSmoke(code: number): void {
   }
   if (env.GAMESHIPPER_SMOKE_OUT) {
     try {
-      writeSummary(env.GAMESHIPPER_SMOKE_OUT, diagnostics.summary());
+      writeSummary(env.GAMESHIPPER_SMOKE_OUT, probeReport ? { ...diagnostics.summary(), probe: probeReport } : diagnostics.summary());
     } catch (e) {
       process.stderr.write(`Gameshipper: couldn't write the smoke summary: ${errorText(e)}\n`);
       exitCode = code || 1;
     }
+  }
+  if (closing && exitCode === 0 && !closing.isDestroyed()) {
+    closeLikeAPlayer(closing);
+    return;
   }
   // app.exit() skips will-quit, so Steam is told here that the game closed. Nothing runs after app.exit(), so no
   // poll for a Steam call's result can come after the shutdown.
@@ -338,8 +362,9 @@ function createWindow(pluginManifest: Record<string, string[]>): BrowserWindow {
       contextIsolation: true,
       sandbox: true,
       nodeIntegration: false,
-      // The sandboxed preload can't read files, so it gets the plugin list on its command line.
-      additionalArguments: [`--gameshipper-plugins=${encodeURIComponent(JSON.stringify(pluginManifest))}`],
+      // The sandboxed preload can't read files, so it gets the plugin list on its command line. `check` also has
+      // it count the game's gamepad use (PROBE_ARG; see the end of preload.ts).
+      additionalArguments: [`--gameshipper-plugins=${encodeURIComponent(JSON.stringify(pluginManifest))}`, ...(capture.probeDir ? [PROBE_ARG] : [])],
     },
   });
   const wc = win.webContents;
@@ -376,7 +401,8 @@ function createWindow(pluginManifest: Record<string, string[]>): BrowserWindow {
   let lastReturn: number | null = null;
   let stoppedReturning = false;
   wc.on('did-navigate', (_event, url) => {
-    if (isGameUrl(url) || stoppedReturning) return;
+    // fixViewport shows about:blank on purpose, before the game has loaded.
+    if (isGameUrl(url) || stoppedReturning || fixingViewport) return;
     const now = Date.now();
     if (!returnToGame(lastReturn, now)) {
       stoppedReturning = true;
@@ -423,12 +449,147 @@ function attachOverlay(win: BrowserWindow): void {
   }
 }
 
-function armSmokeTest(win: BrowserWindow): void {
+/** How long one capture step (a screenshot, fixing the page size, one measurement) may take. */
+const CAPTURE_STEP_MS = 5000;
+/** How long the end of a smoke run waits for screenshots still being taken. */
+const SCREENSHOTS_WAIT_MS = 10_000;
+/** Longest text of a problem a `check` run's probe reports. */
+const MAX_PROBE_ERROR_CHARS = 500;
+
+function withTimeout<T>(promise: Promise<T>, ms: number, what: string): Promise<T> {
+  let timer: NodeJS.Timeout | undefined;
+  const timeout = new Promise<never>((_resolve, reject) => {
+    timer = setTimeout(() => reject(new Error(`${what} timed out after ${ms / 1000} s`)), ms);
+  });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
+}
+
+/** `check`: every request that isn't for the game's own files fails, and is recorded (capture.ts isAllowedOffline). */
+function blockInternet(): void {
+  session.defaultSession.webRequest.onBeforeRequest({ urls: ['<all_urls>'] }, (details, callback) => {
+    if (isAllowedOffline(details.url)) {
+      callback({});
+      return;
+    }
+    diagnostics.record({ kind: 'blocked-request', url: details.url });
+    callback({ cancel: true });
+  });
+}
+
+/** Set while the window shows about:blank to fix the page's size (fixViewport), before the game has loaded. */
+let fixingViewport = false;
+/** Why the page's size couldn't be fixed, for `check`'s probe. */
+const captureErrors: string[] = [];
+
+/**
+ * Lays the page out at `size` from before the game's first script runs, so a game that reads the window size once
+ * at start-up gets it too. DevTools commands only answer once the window has loaded a page, so it loads
+ * about:blank first. Never throws: without it the game runs at the window's size, and the run says why.
+ */
+async function fixViewport(win: BrowserWindow, camera: PageCamera, size: Size): Promise<void> {
+  fixingViewport = true;
+  try {
+    await withTimeout(win.loadURL('about:blank'), CAPTURE_STEP_MS, 'loading about:blank');
+    await withTimeout(camera.fixViewport(size), CAPTURE_STEP_MS, 'fixing the page size');
+  } catch (e) {
+    const message = `Couldn't lay the page out at ${size.width}x${size.height}: ${errorText(e)}`;
+    captureErrors.push(message.slice(0, MAX_PROBE_ERROR_CHARS));
+    diagnostics.record({ kind: 'console', level: 'warning', message, source: '', line: 0 });
+  } finally {
+    fixingViewport = false;
+  }
+}
+
+let screenshotQueue: Promise<void> = Promise.resolve();
+
+/** Saves a 1920x1080 PNG into `dir`. Queued, so two captures never overlap. */
+function takeScreenshot(camera: PageCamera, dir: string): Promise<void> {
+  screenshotQueue = screenshotQueue.then(async () => {
+    try {
+      const png = await withTimeout(camera.capture(SCREENSHOT_SIZE), CAPTURE_STEP_MS, 'taking the screenshot');
+      fs.mkdirSync(dir, { recursive: true });
+      const file = path.join(dir, screenshotFileName());
+      fs.writeFileSync(file, png);
+      diagnostics.record({ kind: 'screenshot', file, width: SCREENSHOT_SIZE.width, height: SCREENSHOT_SIZE.height });
+    } catch (e) {
+      diagnostics.record({ kind: 'screenshot-failed', error: errorText(e) });
+    }
+  });
+  return screenshotQueue;
+}
+
+/** F12 saves a store screenshot, and `play --screenshot` takes them at set times. Only `play` asks for either. */
+function enableScreenshots(win: BrowserWindow, camera: PageCamera): void {
+  const dir = capture.screenshotDir;
+  if (!dir) return;
+  win.webContents.on('before-input-event', (event, input) => {
+    if (!isScreenshotKey(input)) return;
+    event.preventDefault();
+    void takeScreenshot(camera, dir);
+  });
+  win.webContents.once('did-finish-load', () => {
+    for (const seconds of capture.screenshotAt ?? []) setTimeout(() => void takeScreenshot(camera, dir), seconds * 1000);
+  });
+}
+
+/** What `check` needs from the running game: its last frame, its layout, and whether it read a gamepad. */
+async function runProbe(wc: WebContents, camera: PageCamera, dir: string): Promise<ProbeReport> {
+  const report: ProbeReport = { viewport: camera.viewport, frame: null, layout: null, counters: null, errors: [...captureErrors] };
+  const attempt = async <T>(what: string, fn: () => Promise<T>): Promise<T | null> => {
+    try {
+      return await withTimeout(fn(), CAPTURE_STEP_MS, what);
+    } catch (e) {
+      report.errors.push(`${what}: ${errorText(e)}`.slice(0, MAX_PROBE_ERROR_CHARS));
+      return null;
+    }
+  };
+  const png = await attempt('capturing the frame', () => camera.capture(camera.viewport ?? DECK_SIZE));
+  if (png) {
+    await attempt('saving the frame', async () => {
+      fs.mkdirSync(dir, { recursive: true });
+      fs.writeFileSync(path.join(dir, 'frame.png'), png);
+      report.frame = path.join(dir, 'frame.png');
+    });
+  }
+  // The page answers with plain data, but it may have replaced the functions the probe uses: clean it.
+  report.layout = cleanLayout(await attempt('measuring the page', () => wc.executeJavaScript(`(${layoutProbe.toString()})()`) as Promise<unknown>));
+  report.counters = cleanCounters(await attempt('reading the gamepad counters', () => wc.executeJavaScript(READ_COUNTERS_JS) as Promise<unknown>));
+  return report;
+}
+
+/**
+ * How a `check` run ends: its window closes as when a player closes it, so the exit code shows whether the game
+ * quits (window-all-closed → quit → will-quit shuts Steam down → exit code 0). A game still running
+ * QUIT_TIMEOUT_MS later (a beforeunload handler that returns a value keeps the window open, say) is stopped with
+ * QUIT_TIMEOUT_EXIT_CODE; Steam is told first, as app.exit() skips will-quit.
+ */
+function closeLikeAPlayer(win: BrowserWindow): void {
+  setTimeout(() => void stopSteam().finally(() => app.exit(QUIT_TIMEOUT_EXIT_CODE)), QUIT_TIMEOUT_MS);
+  win.close();
+}
+
+/**
+ * The end of a smoke run that ran its full length: screenshots still being taken finish, and a `check` run
+ * measures the game, then closes its window like a player. finishSmoke does the rest.
+ */
+async function endSmoke(win: BrowserWindow, camera: PageCamera): Promise<void> {
+  if (smokeDone) return;
+  await withTimeout(screenshotQueue, SCREENSHOTS_WAIT_MS, 'the screenshots').catch(() => undefined);
+  const dir = capture.probeDir;
+  if (!dir || win.isDestroyed()) {
+    finishSmoke(0);
+    return;
+  }
+  probeReport = await runProbe(win.webContents, camera, dir);
+  finishSmoke(0, win);
+}
+
+function armSmokeTest(win: BrowserWindow, camera: PageCamera): void {
   const wc = win.webContents;
   const runFullDuration = (): void => {
     if (pageLoaded) return;
     pageLoaded = true;
-    setTimeout(() => finishSmoke(0), smokeSeconds * 1000);
+    setTimeout(() => void endSmoke(win, camera), smokeSeconds * 1000);
   };
   wc.on('did-finish-load', runFullDuration);
   wc.on('did-fail-load', (_event, code, _description, _url, isMainFrame) => {
@@ -452,7 +613,7 @@ app.on('will-quit', (event) => {
   void stopSteam().finally(() => app.exit(0));
 });
 
-void app.whenReady().then(() => {
+void app.whenReady().then(async () => {
   // Steam is launching the game again; this copy only waits to exit.
   if (steam?.state === 'restarting') return;
   Menu.setApplicationMenu(
@@ -464,8 +625,16 @@ void app.whenReady().then(() => {
   registerSteam();
   registerPlugins(plugins);
   watchRemoteRequests();
+  if (capture.offline) blockInternet();
   const win = createWindow(plugins.manifest());
+  const camera = new PageCamera(win.webContents);
+  // First, before anything waits for the game's page to load: fixing the size shows about:blank.
+  if (capture.viewport) await fixViewport(win, camera, capture.viewport);
   attachOverlay(win);
-  if (smoke) armSmokeTest(win);
-  void loadGame(win);
+  enableScreenshots(win, camera);
+  if (smoke) armSmokeTest(win, camera);
+  void loadGame(win).then((loaded) => {
+    // Back from the game's first page mustn't lead to the about:blank that fixed its size.
+    if (loaded && capture.viewport && !win.isDestroyed()) win.webContents.navigationHistory.clear();
+  });
 });

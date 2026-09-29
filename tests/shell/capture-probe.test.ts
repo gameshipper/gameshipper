@@ -1,3 +1,5 @@
+import * as fs from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   CAPTURE_ENV_NAMES,
@@ -10,7 +12,7 @@ import {
   type CaptureSettings,
 } from '../../src/shell/capture.js';
 import { isFullscreenToggle, isScreenshotKey } from '../../src/shell/keys.js';
-import { cleanCounters, cleanLayout, layoutProbe } from '../../src/shell/probe.js';
+import { cleanCounters, cleanLayout, layoutProbe, PROBE_ARG, READ_COUNTERS_JS } from '../../src/shell/probe.js';
 
 describe('capture settings', () => {
   it('parseSize reads WxH', () => {
@@ -176,5 +178,14 @@ describe('cleaning what the page answered', () => {
     expect(cleanLayout('nope')).toBeNull();
     expect(cleanCounters({ getGamepads: 3, gamepadListeners: 'x' })).toEqual({ getGamepads: 3, gamepadListeners: 0 });
     expect(cleanCounters(null)).toBeNull();
+  });
+});
+
+describe('preload ↔ probe', () => {
+  it('the preload counts gamepad use only for the probe argument, where READ_COUNTERS_JS reads it', () => {
+    const preload = fs.readFileSync(fileURLToPath(new URL('../../src/shell/preload.ts', import.meta.url)), 'utf8');
+    expect(preload).toContain(`process.argv.includes('${PROBE_ARG}')`);
+    expect(preload).toContain("Symbol.for('gameshipper.probe')");
+    expect(READ_COUNTERS_JS).toContain("Symbol.for('gameshipper.probe')");
   });
 });
