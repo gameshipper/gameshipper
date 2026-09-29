@@ -138,6 +138,70 @@ describe('bundleCdn', () => {
     expect(result.files).toHaveLength(7);
   });
 
+  it('CDN_NOT_LOCKED with frozenLock when there is no lock yet, without downloading or writing one', async () => {
+    const projectDir = makeTmpDir();
+    const stageDir = path.join(projectDir, 'stage');
+    makeGame(stageDir);
+
+    await expect(bundleCdn(testCtx(projectDir), stageDir, { frozenLock: true })).rejects.toMatchObject({
+      error: {
+        code: 'CDN_NOT_LOCKED',
+        message: expect.stringContaining(`${server.base}/three@1/build/three.module.js`),
+        fix: 'Run a build without --frozen-lock once to record it in gameshipper.lock.',
+      },
+    });
+    expect(server.hits).toEqual([]);
+    expect(fs.existsSync(path.join(projectDir, 'gameshipper.lock'))).toBe(false);
+  });
+
+  it('CDN_NOT_LOCKED with frozenLock when the game loads a URL the lock does not record', async () => {
+    const projectDir = makeTmpDir();
+    makeGame(path.join(projectDir, 'stage1'));
+    await bundleCdn(testCtx(projectDir), path.join(projectDir, 'stage1'));
+    const lockBefore = readText(projectDir, 'gameshipper.lock');
+    server.routes['/extra.js'] = { body: 'window.EXTRA = 1;', type: JS };
+    const stage2 = path.join(projectDir, 'stage2');
+    makeGame(stage2);
+    writeFiles(stage2, { 'extra.html': `<script src="${server.base}/extra.js"></script>` });
+
+    await expect(bundleCdn(testCtx(projectDir, makeTmpDir()), stage2, { frozenLock: true })).rejects.toMatchObject({
+      error: { code: 'CDN_NOT_LOCKED', message: expect.stringContaining(`${server.base}/extra.js`) },
+    });
+    expect(readText(projectDir, 'gameshipper.lock')).toBe(lockBefore);
+  });
+
+  it('frozenLock never rewrites the lock, even when the game stops loading remote files', async () => {
+    const projectDir = makeTmpDir();
+    makeGame(path.join(projectDir, 'stage1'));
+    await bundleCdn(testCtx(projectDir), path.join(projectDir, 'stage1'));
+    const lockBefore = readText(projectDir, 'gameshipper.lock');
+    const plain = path.join(projectDir, 'plain');
+    writeFiles(plain, { 'index.html': '<script src="./game.js"></script>', 'game.js': 'console.log(1)' });
+
+    const result = await bundleCdn(testCtx(projectDir), plain, { frozenLock: true });
+
+    expect(result.files).toEqual([]);
+    expect(readText(projectDir, 'gameshipper.lock')).toBe(lockBefore);
+  });
+
+  it('frozenLock keeps an optional file that is still missing a warning, and fails once it appears', async () => {
+    server.routes['/opt/mod.js'] = { body: "export const load = () => import('./later.js');", type: JS };
+    const projectDir = makeTmpDir();
+    const game = (stageDir: string) => writeFiles(stageDir, { 'index.html': `<script type="module" src="${server.base}/opt/mod.js"></script>` });
+    game(path.join(projectDir, 'stage1'));
+    await bundleCdn(testCtx(projectDir), path.join(projectDir, 'stage1'));
+    game(path.join(projectDir, 'stage2'));
+
+    const again = await bundleCdn(testCtx(projectDir, makeTmpDir()), path.join(projectDir, 'stage2'), { frozenLock: true });
+    expect(again.warnings.map((w) => w.code)).toEqual(['CDN_OPTIONAL_MISSING']);
+
+    server.routes['/opt/later.js'] = { body: 'export const later = 1;', type: JS };
+    game(path.join(projectDir, 'stage3'));
+    await expect(bundleCdn(testCtx(projectDir, makeTmpDir()), path.join(projectDir, 'stage3'), { frozenLock: true })).rejects.toMatchObject({
+      error: { code: 'CDN_NOT_LOCKED', message: expect.stringContaining(`${server.base}/opt/later.js`) },
+    });
+  });
+
   it('leaves a game without remote files untouched and writes no lock', async () => {
     const projectDir = makeTmpDir();
     const stageDir = path.join(projectDir, 'stage');

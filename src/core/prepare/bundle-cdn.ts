@@ -31,7 +31,11 @@ export interface BundleResult {
 }
 
 export interface BundleOptions {
-  /** Fail with CDN_CHANGED when a file no longer matches gameshipper.lock (`build --frozen-lock`). */
+  /**
+   * `build --frozen-lock` (like `npm ci`): build exactly what gameshipper.lock records. Fails with CDN_CHANGED
+   * when a file no longer matches it and CDN_NOT_LOCKED when the game loads a URL it doesn't record.
+   * The lock is never rewritten.
+   */
   frozenLock?: boolean;
   /** Per-download timeout in milliseconds (default 60 s). */
   timeoutMs?: number;
@@ -225,12 +229,22 @@ export async function bundleCdn(ctx: Ctx, stageDir: string, opts: BundleOptions 
     for (const u of findCssUrls(read(rel))) if (isRemote(u)) enqueue(u, rel, true);
   }
 
+  const notLocked = (url: string, from: string): GsFailure =>
+    new GsFailure(
+      'CDN_NOT_LOCKED',
+      `${url} (loaded by ${from}) isn't in gameshipper.lock.`,
+      'Run a build without --frozen-lock once to record it in gameshipper.lock.',
+    );
+
   // 2. Download everything reachable. References resolve against the URL a file was served from (after redirects).
   const fetched = new Map<string, Fetched>();
   const wantedPaths = new Map<string, string>();
   while (queue.length) {
     const { url, from, direct } = queue.shift() as Pending;
     const expected = lock.files[url]?.sha256 ?? null;
+    // Optional files are tried first: one the last build left out because it failed to download
+    // isn't in the lock either, and leaving it out again is still the locked build.
+    if (opts.frozenLock && expected === null && direct) throw notLocked(url, from);
     let got: Fetched;
     try {
       got = await fetchRemote(ctx, url, expected, { timeoutMs: opts.timeoutMs });
@@ -245,6 +259,7 @@ export async function bundleCdn(ctx: Ctx, stageDir: string, opts: BundleOptions 
       );
       continue;
     }
+    if (opts.frozenLock && expected === null) throw notLocked(url, from);
     if (expected !== null && got.sha256 !== expected) {
       const changed = `${url} (loaded by ${from}) has changed since it was recorded in gameshipper.lock.`;
       if (opts.frozenLock) {
@@ -279,7 +294,7 @@ export async function bundleCdn(ctx: Ctx, stageDir: string, opts: BundleOptions 
     }
   }
   if (fetched.size === 0) {
-    if (lockExists(ctx.projectDir)) writeLock(ctx.projectDir, { version: 1, files: {} });
+    if (!opts.frozenLock && lockExists(ctx.projectDir)) writeLock(ctx.projectDir, { version: 1, files: {} });
     return { files: [], warnings: unique(warnings) };
   }
 
@@ -360,6 +375,8 @@ export async function bundleCdn(ctx: Ctx, stageDir: string, opts: BundleOptions 
   }
 
   const files = [...vendored].map(([url, v]) => ({ url, path: v.path, sha256: v.sha256 })).sort((a, b) => byCodeUnit(a.url, b.url));
-  writeLock(ctx.projectDir, { version: 1, files: Object.fromEntries(files.map((f) => [f.url, { path: f.path, sha256: f.sha256 }])) });
+  if (!opts.frozenLock) {
+    writeLock(ctx.projectDir, { version: 1, files: Object.fromEntries(files.map((f) => [f.url, { path: f.path, sha256: f.sha256 }])) });
+  }
   return { files, warnings: unique(warnings) };
 }
