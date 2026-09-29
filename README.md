@@ -105,7 +105,15 @@ The loop: `status --json`, `init --yes --json`, then `play --smoke --json` until
 
 Each code lists at most 10 issues, then one more issue counting the rest. `data.smoke.summary.events` holds the first 100 diagnostic events; `data.smoke.eventsLog` names a JSON-lines file with all of them, including everything the game logged.
 
-Other problems have codes too, such as `CDN_FETCH_FAILED`, `CDN_CHANGED`, `ENTRY_MISSING`, `CONFIG_INVALID`, `ICON_TOO_SMALL`, `ICON_NOT_SQUARE`, `STEAM_SDK_MISSING`, `STEAM_SDK_INVALID`, `STEAM_SDK_CACHE_FAILED`, `PLUGIN_HOOK_FAILED` and `PACKAGE_FAILED` from a build, or `GAME_EXITED` when a game quits with an error during `play`, each with its fix. An icon problem only stops `build`: `play` warns with the same code and uses the default icon.
+Other problems have codes too, such as `CDN_FETCH_FAILED`, `CDN_CHANGED`, `ENTRY_MISSING`, `CONFIG_INVALID`, `ICON_TOO_SMALL`, `ICON_NOT_SQUARE`, `STEAM_SDK_MISSING`, `STEAM_SDK_INVALID`, `STEAM_SDK_CACHE_FAILED` (Gameshipper's cache can't be written), `STEAM_NATIVE_DOWNLOAD_FAILED` (another OS's native Steam bridge couldn't be downloaded), `STEAM_UNSUPPORTED_PLATFORM` (a warning: Steam has no libraries for that OS and CPU, like arm64 Linux, so it runs without Steam), `PLUGIN_LOAD_FAILED`, `PLUGIN_IMPORTS_NOT_COPIED` (a warning, see [Plugins](#plugins)), `PLUGIN_HOOK_FAILED` and `PACKAGE_FAILED` from a build, or `GAME_EXITED` when a game quits with an error during `play`, each with its fix. An icon problem only stops `build`: `play` warns with the same code and uses the default icon.
+
+### Environment variables
+
+| Variable | |
+|---|---|
+| `GAMESHIPPER_CACHE` | Gameshipper's download cache (CDN files, Steamworks SDK libraries, native Steam bridges). Default: the OS's user cache folder. |
+| `GAMESHIPPER_STEAM_SDK` | Your Steamworks SDK zip or folder (see [Steam](#steam)). |
+| `GAMESHIPPER_NPM_REGISTRY` | The npm registry that other OSes' native Steam bridges (`@koromix/koffi-*`) are downloaded from. Default: `npm_config_registry`, then https://registry.npmjs.org. Downloads are checked against pinned hashes. |
 
 ### Files
 
@@ -201,7 +209,15 @@ export default {
 };
 ```
 
-Plugin and function names use letters, digits and `_`, and no two plugins may share a name, even in different letter case. A single-file plugin is copied alone, so one that imports other files or packages gets a `PLUGIN_IMPORTS_NOT_COPIED` warning: bundle it into one file or make it a folder plugin. A folder plugin is copied whole by the same rules as the game (no `.env` files, Steamworks SDK, `.git`, `out/` or `node_modules/.bin`); its `main` must be inside the folder, and a link out of the folder fails the build with `PLUGIN_LOAD_FAILED`. A plugin's files are never copied into the game itself. A failing `beforePackage` stops the build (`PLUGIN_HOOK_FAILED`), as does a hook still running after 5 minutes; a failing `afterPackage` fails that target. Only use plugins you trust: they run with the same rights as the game.
+Plugin and function names use letters, digits and `_`, and no two plugins may share a name, even in different letter case. A single-file plugin is copied alone, so one that imports other files or packages gets a `PLUGIN_IMPORTS_NOT_COPIED` warning: bundle it into one file or make it a folder plugin. A folder plugin is copied with its `node_modules`, except:
+
+- anywhere in it: `.env` and `.env.*` files, `steam_appid.txt`, `.git`, `.DS_Store`, `Thumbs.db`, and the Steamworks SDK (anything named `steamworks_sdk*`, `redistributable_bin`, or a folder holding a `redistributable_bin/`);
+- at its top: every dot file and folder (`.npmrc`, `.vscode`, `.github`, ...) and `out/`;
+- every `node_modules/.bin`.
+
+Its `main` must be a packaged file inside the folder, and a link out of the folder (or to nothing, or into a loop) fails the build with `PLUGIN_LOAD_FAILED`. A plugin's files are never copied into the game itself. A failing `beforePackage` stops the build (`PLUGIN_HOOK_FAILED`), as does a hook still running after 5 minutes; a failing `afterPackage` fails that target. Only use plugins you trust: they run with the same rights as the game.
+
+Each `build` and `play` loads plugins afresh. A process that stays running (such as an MCP server) picks up an edited ES module plugin's own entry file, but a CommonJS plugin, and any file a plugin imports, keeps its first-loaded code until that process restarts.
 
 ## TypeScript
 
@@ -224,6 +240,23 @@ Windows and Linux builds are x64. ¹ Universal Mac builds need Apple's command-l
 ## Coming in later versions
 
 Store images, `check`, `publish`, Mac signing and notarization, and iOS and Android builds.
+
+## Development
+
+```sh
+npm test                  # unit tests
+npm run typecheck
+npm run test:integration  # builds Gameshipper, then packages and runs real apps
+```
+
+The Steam end-to-end test is opt-in. It needs macOS, a running, signed-in Steam client, network access and a Steamworks SDK zip, and on the signed-in account it unlocks then clears Spacewar's `ACH_WIN_ONE_GAME` and moves its `NumGames` stat up and back:
+
+```sh
+GAMESHIPPER_STEAM_E2E=1 GAMESHIPPER_STEAM_E2E_SDK=/path/to/steamworks_sdk_165.zip \
+  npm run test:integration -- tests/integration/steam.int.test.ts --reporter=verbose
+```
+
+Steam's overlay can only hook a game on an unlocked screen, so on a locked one the overlay-hook test is reported as skipped, with the reason.
 
 ## License
 
