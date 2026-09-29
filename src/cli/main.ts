@@ -195,13 +195,14 @@ async function initCommand(projectDir: string, values: Values, io: CliIO, run: R
       return usage(`--app-id must be a whole number, like 1234567 (got "${appIdRaw}").`, 'Find it in the Steamworks dashboard URL.');
     }
   }
-  const iconAnswer =
-    flags.icon !== undefined || !interactive ? undefined : await prompt.ask('Icon PNG, 1024x1024 ("none" to skip)', detected.icon ?? 'none');
+  const iconDefault = detected.icon ?? 'none';
+  const iconAnswer = flags.icon !== undefined || !interactive ? undefined : await prompt.ask('Icon PNG, 1024x1024 ("none" to skip)', iconDefault);
   const result = initProject(projectDir, {
     ...flags,
     name,
     appId,
-    ...(iconAnswer === undefined ? {} : { icon: iconAnswer === 'none' ? null : iconAnswer }),
+    // Accepting the default keeps what was detected, including the warning about an icon that didn't qualify.
+    ...(iconAnswer === undefined || iconAnswer === iconDefault ? {} : { icon: iconAnswer === 'none' ? null : iconAnswer }),
   });
   if (result.ok) recordRun(projectDir, 'init', result);
   return { result, human: initSummary(result) };

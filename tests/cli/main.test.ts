@@ -130,6 +130,17 @@ describe('gameshipper CLI', () => {
     expect(again.out).toContain('CONFIG_EXISTS');
   });
 
+  it('init at a terminal still warns about an icon that did not qualify when the person keeps the default', async () => {
+    const dir = makeTmpDir();
+    writeFiles(dir, { 'index.html': '', 'icon.png': makeSolidPng(512, 512) });
+    const ask = vi.fn(async (_q: string, fallback: string) => fallback);
+    const r = await run(['init', '--dir', dir], true, { ask });
+    expect(r.code).toBe(0);
+    expect(ask.mock.calls[2]).toEqual(['Icon PNG, 1024x1024 ("none" to skip)', 'none']);
+    expect(JSON.parse(readText(dir, 'gameshipper.json')).icon).toBeNull();
+    expect(r.out).toContain("! ICON_UNSUITABLE: icon.png is 512x512; Steam needs a square PNG of at least 1024x1024, so it wasn't used.");
+  });
+
   it('init reports a wrong --entry or --icon straight away instead of asking questions first', async () => {
     const dir = makeTmpDir();
     writeFiles(dir, { 'index.html': '' });
