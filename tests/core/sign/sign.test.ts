@@ -37,11 +37,19 @@ describe('signing identities', () => {
     expect(matchIdentity('Developer ID Installer', ids)).toBeNull();
   });
 
-  it('MAC_IDENTITY_NOT_FOUND names the identities that are there', async () => {
+  it('MAC_IDENTITY_NOT_FOUND counts the identities that are there by type, without their names', async () => {
     const list = async () => parseIdentities(OUTPUT);
     expect(await findSigningIdentity('Developer ID Application: Jane', list)).toEqual({ hash: H1, name: 'Developer ID Application: Jane Doe (TEAM123456)' });
-    await expect(findSigningIdentity('Developer ID Application: Nobody (NOPE000000)', list)).rejects.toMatchObject({
-      error: { code: 'MAC_IDENTITY_NOT_FOUND', message: expect.stringContaining('"Apple Development: jane@example.com (ABCDE12345)"') },
+    const selfSigned = `${OUTPUT}  3) ${H1.replace('0', '9')} "Jane's test cert"\n`;
+    const err = await findSigningIdentity('Developer ID Application: Nobody (NOPE000000)', async () => parseIdentities(selfSigned)).then(
+      () => null,
+      (e: { error: { code: string; message: string; fix: string } }) => e.error,
+    );
+    expect(err?.code).toBe('MAC_IDENTITY_NOT_FOUND');
+    expect(err?.message).toContain('found 3 signing identities (Developer ID Application, Apple Development, other); none match');
+    for (const text of ['Jane', 'jane@example.com', 'TEAM123456', 'ABCDE12345', 'Nobody', H1, H2]) expect(JSON.stringify(err), text).not.toContain(text);
+    await expect(findSigningIdentity('Developer ID Application: Nobody', async () => [])).rejects.toMatchObject({
+      error: { message: expect.stringContaining('found no signing identities') },
     });
   });
 });
@@ -59,6 +67,18 @@ describe.runIf(process.platform === 'darwin')('signMacApp (macOS)', () => {
     const helper = codesignText('-d', '--entitlements', '-', '--xml', `${app}/Contents/Frameworks/Mini Helper.app`);
     expect(helper).toContain('com.apple.security.cs.disable-library-validation');
     expect(helper).not.toContain('allow-dyld-environment-variables');
+  });
+
+  it("the run log names a Developer ID by its SHA-1, never by its name", async () => {
+    const dir = makeTmpDir();
+    const ctx = testCtx(dir);
+    // Not in the keychain, so codesign fails; what matters is what was logged first.
+    await expect(signMacApp(ctx, makeMiniApp(dir), { hash: H2, name: 'Developer ID Application: Jane Doe (TEAM123456)' })).rejects.toMatchObject({
+      error: { code: 'MAC_SIGN_FAILED' },
+    });
+    const log = fs.readFileSync(ctx.logPath, 'utf8');
+    expect(log).toContain(H2);
+    expect(log).not.toContain('Jane Doe');
   });
 
   it('MAC_SIGN_FAILED with codesign output in a log file', async () => {

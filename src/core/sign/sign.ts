@@ -45,13 +45,38 @@ export async function listSigningIdentities(): Promise<SigningIdentity[]> {
   }
 }
 
-/** The keychain identity GAMESHIPPER_MAC_IDENTITY names. Throws MAC_IDENTITY_NOT_FOUND. */
+/** Apple's certificate types, the part of an identity's name before the colon. */
+const CERTIFICATE_TYPES = [
+  'Developer ID Application',
+  'Developer ID Installer',
+  'Apple Development',
+  'Apple Distribution',
+  'Mac Developer',
+  'Mac App Distribution',
+  '3rd Party Mac Developer Application',
+  '3rd Party Mac Developer Installer',
+  'iPhone Developer',
+  'iPhone Distribution',
+];
+
+/** An identity's certificate type, or "other"; never the rest of its name (a person's name or email). */
+function certificateType(identity: SigningIdentity): string {
+  return CERTIFICATE_TYPES.find((type) => identity.name.startsWith(`${type}:`)) ?? 'other';
+}
+
+/**
+ * The keychain identity GAMESHIPPER_MAC_IDENTITY names. Throws MAC_IDENTITY_NOT_FOUND, which only counts the
+ * identities that are there by type: their names hold people's names and emails, and results get shared.
+ */
 export async function findSigningIdentity(wanted: string, list: () => Promise<SigningIdentity[]> = listSigningIdentities): Promise<SigningIdentity> {
   const identities = await list();
   const match = matchIdentity(wanted, identities);
   if (match) return match;
-  const available = identities.map((i) => `"${i.name}"`).join(', ') || 'none';
-  throw new GsFailure('MAC_IDENTITY_NOT_FOUND', `No signing identity matching "${wanted}" is in your keychain (found: ${available}).`, IDENTITY_FIX);
+  const types = [...new Set(identities.map(certificateType))];
+  const found = identities.length
+    ? `found ${identities.length} signing identit${identities.length === 1 ? 'y' : 'ies'} (${types.join(', ')}); none match`
+    : 'found no signing identities';
+  throw new GsFailure('MAC_IDENTITY_NOT_FOUND', `No signing identity in your keychain matches GAMESHIPPER_MAC_IDENTITY (${found}).`, IDENTITY_FIX);
 }
 
 /** Writes a tool's output to .gameshipper/logs/<tool>-<time>.log and returns the path. */
@@ -69,7 +94,8 @@ export function writeToolLog(ctx: Ctx, tool: string, text: string): string {
  */
 export async function signMacApp(ctx: Ctx, appPath: string, identity: SigningIdentity | null): Promise<void> {
   const files = writeEntitlementFiles(path.join(ctx.projectDir, '.gameshipper', 'sign'));
-  ctx.log(`signing ${appPath} ${identity ? `with ${identity.name}` : 'ad-hoc'} (hardened runtime)`);
+  // By SHA-1: the identity's name holds a person's legal name, and run logs get shared.
+  ctx.log(`signing ${appPath} ${identity ? `with the identity ${identity.hash}` : 'ad-hoc'} (hardened runtime)`);
   try {
     await sign({
       app: appPath,

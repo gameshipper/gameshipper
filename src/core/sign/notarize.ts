@@ -11,9 +11,15 @@ export function notaryCredentials(auth: NotaryAuth): NotaryToolCredentials {
   return { appleApiKey: auth.appleApiKey, appleApiKeyId: auth.appleApiKeyId, ...(auth.appleApiIssuer ? { appleApiIssuer: auth.appleApiIssuer } : {}) };
 }
 
+/**
+ * notarytool's login flags for a command in a fix, naming the variables rather than their values: key paths, key
+ * IDs and issuers identify an account, and results get shared.
+ */
 function authFlags(auth: NotaryAuth): string {
-  if (auth.kind === 'keychain-profile') return `--keychain-profile "${auth.keychainProfile}"${auth.keychain ? ` --keychain "${auth.keychain}"` : ''}`;
-  return `--key "${auth.appleApiKey}" --key-id ${auth.appleApiKeyId}${auth.appleApiIssuer ? ` --issuer ${auth.appleApiIssuer}` : ''}`;
+  if (auth.kind === 'keychain-profile') {
+    return `--keychain-profile "$GAMESHIPPER_NOTARY_PROFILE"${auth.keychain ? ' --keychain "$GAMESHIPPER_NOTARY_KEYCHAIN"' : ''}`;
+  }
+  return `--key "$GAMESHIPPER_NOTARY_KEY" --key-id "$GAMESHIPPER_NOTARY_KEY_ID"${auth.appleApiIssuer ? ' --issuer "$GAMESHIPPER_NOTARY_ISSUER"' : ''}`;
 }
 
 /** Turns an @electron/notarize error into a stable Gameshipper error. */

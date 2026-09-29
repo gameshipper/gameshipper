@@ -345,7 +345,7 @@ Without them the Mac app is ad-hoc signed: it runs on your Mac, and `build` warn
 | Code | |
 |---|---|
 | `APPLE_CREDENTIALS_INVALID` | The variables are half-set or mixed (a notary login without an identity, a keychain without a profile, a profile with API key variables, say); the message names them. Stops the build before anything is built; exit code 2. |
-| `MAC_IDENTITY_NOT_FOUND` | `GAMESHIPPER_MAC_IDENTITY` isn't in your keychain. The message lists what is; exit code 2. |
+| `MAC_IDENTITY_NOT_FOUND` | `GAMESHIPPER_MAC_IDENTITY` isn't in your keychain. The message counts the identities that are there by certificate type, without their names (run `security find-identity -v -p codesigning` to see them); exit code 2. |
 | `MAC_SIGN_FAILED`, `NOTARIZE_FAILED`, `STAPLE_FAILED`, `NOTARIZE_TOOL_MISSING` | Signing or notarizing failed; the Mac target fails. The fix names the log in `.gameshipper/logs/` with codesign's output or Apple's report. |
 | `MAC_UNSIGNED`, `MAC_NOT_NOTARIZED`, `MAC_BUNDLE_ID_DEFAULT`, `MAC_SIGN_HOST`, `MAC_ADHOC_SIGN_FAILED` | Warnings: how far the Mac app got, and what to set to go further. |
 

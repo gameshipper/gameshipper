@@ -24,7 +24,20 @@ describe('notarizeFailure', () => {
     expect(f.error.code).toBe('NOTARIZE_FAILED');
     expect(f.error.message).toContain('status: Invalid');
     expect(f.error.fix).toContain('/p/.gameshipper/logs/notarize-1.log');
-    expect(f.error.fix).toContain('xcrun notarytool log abc-123 --keychain-profile "gs-notary"');
+    expect(f.error.fix).toContain('xcrun notarytool log abc-123 --keychain-profile "$GAMESHIPPER_NOTARY_PROFILE"');
+  });
+
+  it("names the login by its variables, never the key's path, ID or issuer", () => {
+    const apiKey: NotaryAuth = { kind: 'api-key', appleApiKey: '/Users/jane/keys/AuthKey_K1ABCDEF.p8', appleApiKeyId: 'K1ABCDEF', appleApiIssuer: '69a6de7e-1111-2222-3333-444455556666' };
+    const keychain: NotaryAuth = { kind: 'keychain-profile', keychainProfile: 'gs', keychain: '/Users/jane/Library/Keychains/ci.keychain-db' };
+    const invalid = 'Failed to notarize via notarytool\n\n{"id":"abc-123","status":"Invalid"}';
+    const f = notarizeFailure(invalid, '/p/l.log', '/o/G.app', apiKey);
+    expect(f.error.fix).toContain('xcrun notarytool log abc-123 --key "$GAMESHIPPER_NOTARY_KEY" --key-id "$GAMESHIPPER_NOTARY_KEY_ID" --issuer "$GAMESHIPPER_NOTARY_ISSUER"');
+    const k = notarizeFailure(invalid, '/p/l.log', '/o/G.app', keychain);
+    expect(k.error.fix).toContain('--keychain-profile "$GAMESHIPPER_NOTARY_PROFILE" --keychain "$GAMESHIPPER_NOTARY_KEYCHAIN"');
+    for (const text of ['AuthKey_K1ABCDEF', 'K1ABCDEF', '69a6de7e', 'jane', 'ci.keychain-db']) {
+      expect(JSON.stringify([f.error, k.error]), text).not.toContain(text);
+    }
   });
 
   it('recognises a missing notarytool, stapling and signature problems', () => {
