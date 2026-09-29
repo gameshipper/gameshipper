@@ -46,6 +46,32 @@ describe('stageGame', () => {
     }
   });
 
+  it('never stages a folder holding an unpacked SDK, whatever its name', async () => {
+    const dir = makeTmpDir();
+    writeFiles(dir, {
+      'index.html': '',
+      'third_party/readme.txt': '',
+      'third_party/valve/redistributable_bin/osx/libsteam_api.dylib': 'lib',
+      'third_party/valve/public/steam/steam_api.h': '',
+      'redistributable_bin/linux64/libsteam_api.so': 'so',
+    });
+    const { stageDir } = await stageGame(testCtx(dir), parseConfig({ name: 'x', version: '1.0.0' }).data!);
+    const exists = (rel: string) => fs.existsSync(path.join(stageDir, rel));
+    expect(exists('third_party/readme.txt')).toBe(true);
+    for (const skipped of ['third_party/valve', 'redistributable_bin']) expect(exists(skipped), skipped).toBe(false);
+  });
+
+  it('never stages the SDK a build uses, whatever it is called, even through a link', async () => {
+    const dir = makeTmpDir();
+    writeFiles(dir, { 'index.html': '', 'vendor/valve.zip': 'zip', 'vendor/folder/lib.dylib': 'lib', 'vendor/keep.txt': '' });
+    if (process.platform !== 'win32') fs.symlinkSync(path.join(dir, 'vendor', 'valve.zip'), path.join(dir, 'data.bin'));
+    const exclude = [path.join(dir, 'vendor', 'valve.zip'), path.join(dir, 'vendor', 'folder')];
+    const { stageDir } = await stageGame(testCtx(dir), parseConfig({ name: 'x', version: '1.0.0' }).data!, { exclude });
+    const exists = (rel: string) => fs.existsSync(path.join(stageDir, rel));
+    expect(exists('vendor/keep.txt')).toBe(true);
+    for (const skipped of ['vendor/valve.zip', 'vendor/folder', 'data.bin']) expect(exists(skipped), skipped).toBe(false);
+  });
+
   it.skipIf(process.platform === 'win32')('never stages an SDK through a link with another name', async () => {
     const dir = makeTmpDir();
     writeFiles(dir, { 'index.html': '', 'vendor/steamworks_sdk_165.zip': 'zip' });

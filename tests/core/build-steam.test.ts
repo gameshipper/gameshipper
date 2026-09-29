@@ -8,6 +8,7 @@ import { listFiles } from '../../src/core/fsutil.js';
 import { runPlay } from '../../src/core/play.js';
 import { testCtx } from '../helpers/ctx.js';
 import { makeTmpDir, readText, writeFiles } from '../helpers/tmp.js';
+import { makeZip } from '../helpers/zip.js';
 
 type Pack = typeof packageDesktop;
 const fakePack: Pack = async (_ctx, _config, _appDir, _icon, job) => ({
@@ -41,7 +42,7 @@ export default {
 };
 `;
 
-function project(extra: Record<string, string> = {}): { dir: string; shellDir: string } {
+function project(extra: Record<string, string | Buffer> = {}): { dir: string; shellDir: string } {
   const dir = makeTmpDir();
   const shellDir = makeTmpDir();
   writeFiles(dir, {
@@ -112,6 +113,23 @@ describe('runBuild with Steam and plugins', () => {
     const plugin = await runBuild(testCtx(dir), config({ game, plugins: ['broken.mjs'] }), { shellDir, host: 'linux', pack: fakePack, env: {} });
     expect(plugin.errors.map((e) => e.code)).toEqual(['PLUGIN_LOAD_FAILED']);
     expect(fs.existsSync(path.join(dir, 'ran.txt'))).toBe(false);
+  });
+
+  it('never ships an SDK that --steam-sdk, steam.sdk or GAMESHIPPER_STEAM_SDK finds inside the game folder', async () => {
+    const zip = makeZip({ 'sdk/redistributable_bin/linux64/libsteam_api.so': 'so' });
+    const { dir, shellDir } = project({ 'vendor/flag.zip': zip, 'vendor/config.zip': zip, 'vendor/env.zip': zip, 'vendor/keep.txt': '' });
+    const r = await runBuild(testCtx(dir), config({ targets: ['linux'], steam: { sdk: 'vendor/config.zip' } }), {
+      shellDir,
+      host: 'linux',
+      pack: fakePack,
+      env: { GAMESHIPPER_STEAM_SDK: path.join(dir, 'vendor', 'env.zip') },
+      steamSdk: path.join(dir, 'vendor', 'flag.zip'),
+      koffi,
+    });
+    expect(r.errors).toEqual([]);
+    const game = listFiles(path.join(dir, '.gameshipper', 'app', 'game'));
+    expect(game).toContain('vendor/keep.txt');
+    expect(game.filter((f) => f.endsWith('.zip') || f.includes('steam'))).toEqual([]);
   });
 
   it('warns STEAM_SDK_MISSING without an SDK, and the app gets no Steam files', async () => {

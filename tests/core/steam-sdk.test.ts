@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -14,12 +15,14 @@ const LIBS = {
   'redistributable_bin/linux64/libsteam_api.so': 'so',
 };
 
-/** A zip laid out like Valve's steamworks_sdk_<version>.zip. */
-function sdkZip(version: string): Buffer {
+/** A zip laid out like Valve's steamworks_sdk_<version>.zip. `build` changes the libraries' contents. */
+function sdkZip(version: string, build = ''): Buffer {
   const files: Record<string, string> = { 'sdk/Readme.txt': `Welcome\n\nv${version} 23th July 2026\n`, 'sdk/steamworksexample/release/steam_appid.txt': '480' };
-  for (const [rel, content] of Object.entries(LIBS)) files[`sdk/${rel}`] = content;
+  for (const [rel, content] of Object.entries(LIBS)) files[`sdk/${rel}`] = content + build;
   return makeZip(files);
 }
+
+const sha8 = (data: Buffer) => createHash('sha256').update(data).digest('hex').slice(0, 8);
 
 function options(projectDir: string, extra: Partial<FindSdkOptions> = {}): FindSdkOptions {
   return { projectDir, config: null, env: {}, cacheDir: makeTmpDir('gs-cache-'), ...extra };
@@ -83,6 +86,18 @@ describe('findSteamSdk', () => {
 
   it('sorts versions numerically, unknown last', () => {
     expect(['1.9', null, '1.65', '1.62'].sort(newestFirst)).toEqual(['1.65', '1.62', '1.9', null]);
+    expect(['1.58', '1.57', '1.58a', '1.59'].sort(newestFirst)).toEqual(['1.59', '1.58a', '1.58', '1.57']);
+  });
+
+  it('reads letter versions like v1.58a from the Readme and the zip name', () => {
+    const dir = makeTmpDir();
+    const readme = 'Welcome\n\nv1.58a 26th October 2023\n...\nv1.58 15th September 2023\n';
+    writeFiles(dir, {
+      'readme/sdk.zip': makeZip({ 'sdk/Readme.txt': readme, 'sdk/redistributable_bin/osx/libsteam_api.dylib': 'dylib' }),
+      'named/steamworks_sdk_158a.zip': makeZip({ 'sdk/redistributable_bin/osx/libsteam_api.dylib': 'dylib' }),
+    });
+    expect(findSteamSdk(options(dir, { flagPath: path.join(dir, 'readme', 'sdk.zip') }))).toMatchObject({ version: '1.58a' });
+    expect(findSteamSdk(options(dir, { flagPath: path.join(dir, 'named', 'steamworks_sdk_158a.zip') }))).toMatchObject({ version: '1.58a' });
   });
 
   it('explains how to get the SDK when it is missing', () => {
@@ -94,12 +109,13 @@ describe('findSteamSdk', () => {
 });
 
 describe('ensureSteamSdk', () => {
-  it('extracts only the libraries from a zip into the cache, once per version', () => {
+  it('extracts only the libraries from a zip into the cache, once per zip', () => {
     const dir = makeTmpDir();
-    writeFiles(dir, { '.sdk/steamworks_sdk_165.zip': sdkZip('1.65') });
+    const zip = sdkZip('1.65');
+    writeFiles(dir, { '.sdk/steamworks_sdk_165.zip': zip });
     const ctx = testCtx(dir);
     const sdk = ensureSteamSdk(ctx, findSteamSdk(options(dir, { cacheDir: ctx.cacheDir }))!);
-    expect(sdk.dir).toBe(path.join(ctx.cacheDir, 'steamworks-sdk', '1.65'));
+    expect(sdk.dir).toBe(path.join(ctx.cacheDir, 'steamworks-sdk', `1.65-${sha8(zip)}`));
     const files: string[] = fs.readdirSync(sdk.dir, { recursive: true, encoding: 'utf8' }).filter((f) => fs.statSync(path.join(sdk.dir, f)).isFile());
     expect(files.map((f) => f.split(path.sep).join('/')).sort()).toEqual([
       'Readme.txt',
@@ -111,12 +127,69 @@ describe('ensureSteamSdk', () => {
     expect(findSteamSdk(options(dir, { cacheDir: ctx.cacheDir }))).toMatchObject({ kind: 'cache', version: '1.65' });
   });
 
+  it('keeps different zips of the same version apart', () => {
+    const dir = makeTmpDir();
+    const [first, second] = [sdkZip('1.65'), sdkZip('1.65', ' rebuilt')];
+    writeFiles(dir, { 'a/steamworks_sdk_165.zip': first, 'b/steamworks_sdk_165.zip': second });
+    const ctx = testCtx(dir);
+    const a = ensureSteamSdk(ctx, findSteamSdk(options(dir, { flagPath: path.join(dir, 'a', 'steamworks_sdk_165.zip') }))!);
+    const b = ensureSteamSdk(ctx, findSteamSdk(options(dir, { flagPath: path.join(dir, 'b', 'steamworks_sdk_165.zip') }))!);
+    expect([path.basename(a.dir), path.basename(b.dir)]).toEqual([`1.65-${sha8(first)}`, `1.65-${sha8(second)}`]);
+    expect(fs.readFileSync(path.join(b.dir, 'redistributable_bin', 'osx', 'libsteam_api.dylib'), 'utf8')).toBe('dylib rebuilt');
+  });
+
+  it('replaces an incomplete extraction and leaves no temporary folders', () => {
+    const dir = makeTmpDir();
+    const zip = sdkZip('1.65');
+    writeFiles(dir, { '.sdk/steamworks_sdk_165.zip': zip });
+    const ctx = testCtx(dir);
+    const target = path.join(ctx.cacheDir, 'steamworks-sdk', `1.65-${sha8(zip)}`);
+    writeFiles(target, { 'redistributable_bin/osx/libsteam_api.dylib': 'half' });
+    const sdk = ensureSteamSdk(ctx, findSteamSdk(options(dir, { cacheDir: ctx.cacheDir }))!);
+    expect(sdk.dir).toBe(target);
+    expect(fs.readFileSync(path.join(target, 'redistributable_bin', 'win64', 'steam_api64.dll'), 'utf8')).toBe('dll');
+    expect(fs.readdirSync(path.join(ctx.cacheDir, 'steamworks-sdk'))).toEqual([path.basename(target)]);
+  });
+
+  it.skipIf(process.platform === 'win32' || process.getuid?.() === 0)('STEAM_SDK_CACHE_FAILED when the cache cannot be written', () => {
+    const dir = makeTmpDir();
+    writeFiles(dir, { '.sdk/steamworks_sdk_165.zip': sdkZip('1.65') });
+    const ctx = testCtx(dir);
+    fs.chmodSync(ctx.cacheDir, 0o555);
+    try {
+      expect(() => ensureSteamSdk(ctx, findSteamSdk(options(dir, { cacheDir: ctx.cacheDir }))!)).toThrow(
+        expect.objectContaining({ error: expect.objectContaining({ code: 'STEAM_SDK_CACHE_FAILED', fix: expect.stringContaining('GAMESHIPPER_CACHE') }) }),
+      );
+    } finally {
+      fs.chmodSync(ctx.cacheDir, 0o755);
+    }
+  });
+
+  it('STEAM_SDK_INVALID, with the reason, when a library in the zip is damaged or encrypted', () => {
+    const dir = makeTmpDir();
+    const ctx = testCtx(dir);
+    const damaged = makeZip({ 'redistributable_bin/osx/libsteam_api.dylib': 'dylib dylib dylib' }, 0);
+    damaged[30 + 'redistributable_bin/osx/libsteam_api.dylib'.length] ^= 0xff;
+    const encrypted = makeZip({ 'redistributable_bin/osx/libsteam_api.dylib': 'dylib' });
+    const central = encrypted.lastIndexOf(Buffer.from([0x50, 0x4b, 0x01, 0x02]));
+    encrypted.writeUInt16LE(encrypted.readUInt16LE(central + 8) | 1, central + 8);
+    writeFiles(dir, { 'damaged.zip': damaged, 'encrypted.zip': encrypted });
+    const extract = (name: string) => () => ensureSteamSdk(ctx, findSteamSdk(options(dir, { flagPath: path.join(dir, name) }))!);
+    expect(extract('damaged.zip')).toThrow(
+      expect.objectContaining({ error: expect.objectContaining({ code: 'STEAM_SDK_INVALID', message: expect.stringContaining('checksum mismatch') }) }),
+    );
+    expect(extract('encrypted.zip')).toThrow(
+      expect.objectContaining({ error: expect.objectContaining({ code: 'STEAM_SDK_INVALID', message: expect.stringContaining('encrypted') }) }),
+    );
+  });
+
   it('keys zips without a version by their hash, and uses folders in place', () => {
     const dir = makeTmpDir();
-    writeFiles(dir, { 'custom.zip': makeZip({ 'redistributable_bin/osx/libsteam_api.dylib': 'dylib' }), 'folder/redistributable_bin/linux64/libsteam_api.so': 'so' });
+    const custom = makeZip({ 'redistributable_bin/osx/libsteam_api.dylib': 'dylib' });
+    writeFiles(dir, { 'custom.zip': custom, 'folder/redistributable_bin/linux64/libsteam_api.so': 'so' });
     const ctx = testCtx(dir);
     const zipped = ensureSteamSdk(ctx, findSteamSdk(options(dir, { flagPath: path.join(dir, 'custom.zip') }))!);
-    expect(path.basename(zipped.dir)).toMatch(/^sha256-[0-9a-f]{16}$/);
+    expect(path.basename(zipped.dir)).toBe(`unknown-${sha8(custom)}`);
     expect(fs.readFileSync(path.join(zipped.dir, 'redistributable_bin', 'osx', 'libsteam_api.dylib'), 'utf8')).toBe('dylib');
     const folder = ensureSteamSdk(ctx, findSteamSdk(options(dir, { flagPath: path.join(dir, 'folder') }))!);
     expect(folder.dir).toBe(path.join(dir, 'folder'));

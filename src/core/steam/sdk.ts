@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
+import { moveIntoCache } from '../cache.js';
 import type { Config, DesktopTarget } from '../config/schema.js';
 import type { Ctx } from '../context.js';
 import { GsFailure, gsError, type GsError } from '../result.js';
@@ -48,22 +49,29 @@ export interface FindSdkOptions {
   flagPath?: string;
 }
 
-const README_VERSION = /^v(\d+\.\d+)\b/m;
+/** "v1.65 23th July 2026" or "v1.58a 26th October 2023": the first such line is the SDK's own version. */
+const README_VERSION = /^v(\d+\.\d+[a-z]?)\b/m;
 const SDK_ZIP_NAME = /^steamworks_sdk.*\.zip$/i;
 
 function versionFromName(file: string): string | null {
-  const m = path.basename(file).match(/steamworks_sdk_(\d)(\d{2})/i);
-  return m ? `${m[1]}.${m[2]}` : null;
+  const m = path.basename(file).match(/steamworks_sdk_(\d)(\d{2})([a-z]?)(?![a-z0-9])/i);
+  return m ? `${m[1]}.${m[2]}${m[3].toLowerCase()}` : null;
 }
 
 function versionFromReadme(text: string | null): string | null {
   return text?.match(README_VERSION)?.[1] ?? null;
 }
 
+/** "1.58a" → [1, 58, 1]; "1.58" → [1, 58, 0]: a letter release comes after the plain one. */
+function versionParts(v: string): number[] {
+  const m = /^(\d+)\.(\d+)([a-z]?)$/.exec(v);
+  return m ? [Number(m[1]), Number(m[2]), m[3] ? m[3].charCodeAt(0) - 96 : 0] : [];
+}
+
 /** Sort comparator: newest version first, unknown versions last. */
 export function newestFirst(a: string | null, b: string | null): number {
-  const pa = a ? a.split('.').map(Number) : [];
-  const pb = b ? b.split('.').map(Number) : [];
+  const pa = a ? versionParts(a) : [];
+  const pb = b ? versionParts(b) : [];
   if (!pa.length || !pb.length) return pb.length - pa.length;
   for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
     const d = (pb[i] ?? 0) - (pa[i] ?? 0);
@@ -127,11 +135,21 @@ function inspect(p: string): Inspected | null {
   return fs.statSync(p).isDirectory() ? inspectDir(p) : inspectZip(p);
 }
 
-function invalid(label: string, p: string): GsFailure {
+const message = (e: unknown): string => (e instanceof Error ? e.message : String(e));
+
+function invalid(label: string, p: string, reason = "it has no redistributable_bin/ folder with Steam's libraries, or the zip is damaged"): GsFailure {
   return new GsFailure(
     'STEAM_SDK_INVALID',
-    `${label} (${p}) isn't a usable Steamworks SDK: it has no redistributable_bin/ folder with Steam's libraries, or the zip is damaged.`,
+    `${label} (${p}) isn't a usable Steamworks SDK: ${reason}.`,
     `Use the steamworks_sdk_<version>.zip you downloaded from ${SDK_DOWNLOAD_URL} (or its unzipped folder), or remove that setting.`,
+  );
+}
+
+function cacheFailed(dir: string, e: unknown): GsFailure {
+  return new GsFailure(
+    'STEAM_SDK_CACHE_FAILED',
+    `Couldn't save the Steamworks SDK's libraries in Gameshipper's cache (${dir}): ${message(e)}`,
+    'Free up disk space or make that folder writable, or set GAMESHIPPER_CACHE to a folder you can write to.',
   );
 }
 
@@ -151,18 +169,21 @@ function listNames(dir: string): string[] {
  * when a path that should be an SDK isn't one. steam.sdk is relative to the project; the flag
  * and the environment variable are relative to the current folder, like any command-line path.
  */
-export function findSteamSdk(opts: FindSdkOptions): SdkFound | null {
-  const explicit: Array<[SdkSourceKind, string | null | undefined, string, string]> = [
+/** The SDK settings that are set, in the order findSteamSdk tries them, with their paths resolved. */
+function explicitSources(opts: FindSdkOptions): Array<{ kind: SdkSourceKind; label: string; path: string }> {
+  const sources: Array<[SdkSourceKind, string | null | undefined, string, string]> = [
     ['flag', opts.flagPath, '--steam-sdk', process.cwd()],
     ['config', opts.config?.steam.sdk, 'steam.sdk in gameshipper.json', opts.projectDir],
     ['env', opts.env.GAMESHIPPER_STEAM_SDK, 'GAMESHIPPER_STEAM_SDK', process.cwd()],
   ];
-  for (const [kind, raw, label, base] of explicit) {
-    if (!raw) continue;
-    const p = path.resolve(base, raw);
-    const found = inspect(p);
-    if (!found) throw invalid(label, p);
-    return { kind, ...found };
+  return sources.flatMap(([kind, raw, label, base]) => (raw ? [{ kind, label, path: path.resolve(base, raw) }] : []));
+}
+
+export function findSteamSdk(opts: FindSdkOptions): SdkFound | null {
+  for (const source of explicitSources(opts)) {
+    const found = inspect(source.path);
+    if (!found) throw invalid(source.label, source.path);
+    return { kind: source.kind, ...found };
   }
 
   const sdkFolder = path.join(opts.projectDir, '.sdk');
@@ -191,6 +212,14 @@ export function findSteamSdk(opts: FindSdkOptions): SdkFound | null {
   return cached.length ? { kind: 'cache', ...cached[0] } : null;
 }
 
+/**
+ * Every path an SDK setting points at (--steam-sdk, steam.sdk, GAMESHIPPER_STEAM_SDK, whether or not it's
+ * the one used) and the SDK found. Staging never copies these into the game, whatever they're called.
+ */
+export function steamSdkPaths(opts: FindSdkOptions, found: SdkFound | null): string[] {
+  return [...explicitSources(opts).map((s) => s.path), ...(found ? [found.path] : [])];
+}
+
 /** The warning for builds and play runs without an SDK. They still work; window.steam just reports unavailable. */
 export function sdkMissingWarning(detail?: string): GsError {
   return gsError(
@@ -202,41 +231,54 @@ export function sdkMissingWarning(detail?: string): GsError {
 
 /**
  * Makes the SDK's libraries available as real files. Folders are used in place; zips have just
- * their libraries (and Readme.txt) extracted once into <cache>/steamworks-sdk/<version>/.
+ * their libraries (and Readme.txt) extracted once into <cache>/steamworks-sdk/<version>-<hash>/,
+ * where <hash> starts the zip's SHA-256, so two different zips of one version never share files.
+ * Throws STEAM_SDK_INVALID for a damaged zip and STEAM_SDK_CACHE_FAILED when the cache can't be written.
  */
 export function ensureSteamSdk(ctx: Ctx, found: SdkFound): SteamSdk {
   if (found.format === 'dir') return { dir: found.root, version: found.version, targets: found.targets, found };
   let zip: Buffer;
   try {
     zip = fs.readFileSync(found.path);
-  } catch {
-    throw invalid('The Steamworks SDK zip', found.path);
+  } catch (e) {
+    throw invalid('The Steamworks SDK zip', found.path, message(e));
   }
-  const key = found.version ?? `sha256-${createHash('sha256').update(zip).digest('hex').slice(0, 16)}`;
+  const key = `${found.version ?? 'unknown'}-${createHash('sha256').update(zip).digest('hex').slice(0, 8)}`;
   const cacheRoot = path.join(ctx.cacheDir, 'steamworks-sdk');
   const dir = path.join(cacheRoot, key);
-  const libFile = (base: string, target: DesktopTarget) => path.join(base, 'redistributable_bin', ...SDK_LIBS[target].split('/'));
-  if (!found.targets.every((t) => fs.existsSync(libFile(dir, t)))) {
-    fs.mkdirSync(cacheRoot, { recursive: true });
-    const tmp = fs.mkdtempSync(path.join(cacheRoot, '.extract-'));
+  const libRel = (target: DesktopTarget) => `redistributable_bin/${SDK_LIBS[target]}`;
+  const complete = (d: string) => found.targets.every((t) => fs.existsSync(path.join(d, ...libRel(t).split('/'))));
+  if (!complete(dir)) {
+    // Read everything first: a damaged zip is the SDK's problem, a failed write is the cache's.
+    const files = new Map<string, Buffer>();
     try {
-      const entries = readZipEntries(zip);
-      const wanted = new Map<string, string>(found.targets.map((t) => [`${found.root}redistributable_bin/${SDK_LIBS[t]}`, libFile(tmp, t)]));
-      wanted.set(`${found.root}Readme.txt`, path.join(tmp, 'Readme.txt'));
-      for (const entry of entries) {
-        const dest = wanted.get(entry.name);
-        if (!dest) continue;
-        fs.mkdirSync(path.dirname(dest), { recursive: true });
-        fs.writeFileSync(dest, readZipEntry(zip, entry));
+      const wanted = new Map<string, string>(found.targets.map((t) => [`${found.root}${libRel(t)}`, libRel(t)]));
+      wanted.set(`${found.root}Readme.txt`, 'Readme.txt');
+      for (const entry of readZipEntries(zip)) {
+        const rel = wanted.get(entry.name);
+        if (rel) files.set(rel, readZipEntry(zip, entry));
       }
-      fs.rmSync(dir, { recursive: true, force: true });
-      fs.renameSync(tmp, dir);
     } catch (e) {
-      fs.rmSync(tmp, { recursive: true, force: true });
-      if (e instanceof GsFailure) throw e;
-      throw invalid('The Steamworks SDK zip', found.path);
+      throw invalid('The Steamworks SDK zip', found.path, message(e));
     }
-    ctx.log(`extracted Steamworks SDK ${key} libraries from ${found.path} → ${dir}`);
+    try {
+      fs.mkdirSync(cacheRoot, { recursive: true });
+      const tmp = fs.mkdtempSync(path.join(cacheRoot, '.extract-'));
+      try {
+        for (const [rel, data] of files) {
+          const dest = path.join(tmp, ...rel.split('/'));
+          fs.mkdirSync(path.dirname(dest), { recursive: true });
+          fs.writeFileSync(dest, data);
+        }
+      } catch (e) {
+        fs.rmSync(tmp, { recursive: true, force: true });
+        throw e;
+      }
+      moveIntoCache(tmp, dir, complete);
+    } catch (e) {
+      throw cacheFailed(dir, e);
+    }
+    ctx.log(`extracted Steamworks SDK ${found.version ?? '(unknown version)'} libraries from ${found.path} → ${dir}`);
   }
   return { dir, version: found.version, targets: found.targets, found };
 }

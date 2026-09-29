@@ -104,7 +104,7 @@ The loop: `status --json`, `init --yes --json`, then `play --smoke --json` until
 
 Each code lists at most 10 issues, then one more issue counting the rest. `data.smoke.summary.events` holds the first 100 diagnostic events; `data.smoke.eventsLog` names a JSON-lines file with all of them, including everything the game logged.
 
-Other problems have codes too, such as `CDN_FETCH_FAILED`, `CDN_CHANGED`, `ENTRY_MISSING`, `CONFIG_INVALID`, `ICON_TOO_SMALL`, `ICON_NOT_SQUARE`, `STEAM_SDK_MISSING`, `STEAM_SDK_INVALID`, `PLUGIN_HOOK_FAILED` and `PACKAGE_FAILED` from a build, or `GAME_EXITED` when a game quits with an error during `play`, each with its fix. An icon problem only stops `build`: `play` warns with the same code and uses the default icon.
+Other problems have codes too, such as `CDN_FETCH_FAILED`, `CDN_CHANGED`, `ENTRY_MISSING`, `CONFIG_INVALID`, `ICON_TOO_SMALL`, `ICON_NOT_SQUARE`, `STEAM_SDK_MISSING`, `STEAM_SDK_INVALID`, `STEAM_SDK_CACHE_FAILED`, `PLUGIN_HOOK_FAILED` and `PACKAGE_FAILED` from a build, or `GAME_EXITED` when a game quits with an error during `play`, each with its fix. An icon problem only stops `build`: `play` warns with the same code and uses the default icon.
 
 ### Files
 
@@ -159,7 +159,7 @@ Slot names are 1 to 64 letters, numbers, `-` or `_`, and the data must be JSON-s
 Your game gets `window.steam` in desktop builds and in `play`. It works with your own copy of Valve's Steamworks SDK; Gameshipper never ships Valve's files itself.
 
 1. Download the Steamworks SDK zip from https://partner.steamgames.com/downloads/list (you need a Steamworks partner login).
-2. Put it in your game folder's `.sdk/` folder, e.g. `.sdk/steamworks_sdk_165.zip`. `init` adds `.sdk/` to `.gitignore`: don't commit Valve's files. You can also set `steam.sdk` in gameshipper.json (relative to the game folder), set `GAMESHIPPER_STEAM_SDK`, or pass `--steam-sdk <path>`. Once a build has used an SDK, Gameshipper keeps its libraries in its cache and later projects find them there.
+2. Put it in your game folder's `.sdk/` folder, e.g. `.sdk/steamworks_sdk_165.zip`. `init` adds `.sdk/` to `.gitignore`: don't commit Valve's files. You can also set `steam.sdk` in gameshipper.json (relative to the game folder), set `GAMESHIPPER_STEAM_SDK`, or pass `--steam-sdk <path>`. Once a build has used an SDK, Gameshipper keeps its libraries in its cache and later projects find them there. The SDK is never copied into the game, whatever it's called and wherever it is.
 3. `npx gameshipper status` shows which SDK builds will use. Without one, builds still work (with a `STEAM_SDK_MISSING` warning) and `window.steam.isAvailable()` resolves `false`.
 
 Each build gets only the Steam library its OS needs, copied from your SDK. Nobody needs a `steam_appid.txt`, and none is ever shipped.

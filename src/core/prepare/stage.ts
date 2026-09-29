@@ -29,10 +29,34 @@ const BUILD_TIMEOUT_MS = 10 * 60 * 1000;
 const CLOSE_GRACE_MS = 2000;
 
 const isEnvFile = (name: string): boolean => name === '.env' || name.startsWith('.env.');
-/** The Steamworks SDK (a steamworks_sdk/ folder or steamworks_sdk_165.zip) is Valve's, licensed to the developer: never game content. */
-const isSteamworksSdk = (name: string): boolean => /^steamworks_sdk/i.test(name);
-/** Names never staged, wherever they are. Also checked against the name a link points at. */
-const isSkippedAnywhere = (name: string): boolean => SKIP_ANYWHERE.has(name) || isEnvFile(name) || isSteamworksSdk(name);
+/**
+ * The Steamworks SDK (a steamworks_sdk/ folder, steamworks_sdk_165.zip, or its redistributable_bin/ folder of
+ * Steam's libraries) is Valve's, licensed to the developer: never game content.
+ */
+const isSteamworksSdk = (name: string): boolean => /^steamworks_sdk/i.test(name) || name === 'redistributable_bin';
+/**
+ * Names never staged, wherever they are. Also checked against the name a link points at, and used for
+ * plugin folders (core/plugins.ts).
+ */
+export const isSkippedAnywhere = (name: string): boolean => SKIP_ANYWHERE.has(name) || isEnvFile(name) || isSteamworksSdk(name);
+
+/** A folder holding Steam's libraries, like Valve's SDK zip unpacked under any name (sdk/redistributable_bin/...). */
+export function holdsSteamworksSdk(dir: string): boolean {
+  try {
+    return fs.statSync(path.join(dir, 'redistributable_bin')).isDirectory();
+  } catch {
+    return false;
+  }
+}
+
+/** The real path of `p`, or `p` itself when it doesn't exist (yet). */
+export function realOrSelf(p: string): string {
+  try {
+    return fs.realpathSync(p);
+  } catch {
+    return path.resolve(p);
+  }
+}
 
 /** `rel` is relative to the game folder. */
 function isSkipped(rel: string): boolean {
@@ -42,13 +66,13 @@ function isSkipped(rel: string): boolean {
   return parts.length === 1 && (base.startsWith('.') || SKIP_TOP_LEVEL.has(base));
 }
 
-function isWithin(child: string, parent: string): boolean {
+export function isWithin(child: string, parent: string): boolean {
   const rel = path.relative(parent, child);
   return rel === '' || (rel !== '..' && !rel.startsWith(`..${path.sep}`) && !path.isAbsolute(rel));
 }
 
 /** A link to a folder loops when that folder contains one of the folders the link sits in. */
-function loopsBack(link: string, target: string, root: string): boolean {
+export function loopsBack(link: string, target: string, root: string): boolean {
   for (let dir = path.dirname(link); ; dir = path.dirname(dir)) {
     if (isWithin(fs.realpathSync(dir), target)) return true;
     if (dir === root || dir === path.dirname(dir)) return false;
@@ -144,7 +168,15 @@ export async function runBuildCommand(ctx: Ctx, config: Config, opts: { timeoutM
   }
 }
 
-export async function stageGame(ctx: Ctx, config: Config): Promise<{ stageDir: string; warnings: GsError[] }> {
+export interface StageOptions {
+  /**
+   * Files and folders never staged, whatever they're called: the Steamworks SDK paths a build was given
+   * (see steamSdkPaths in core/steam/sdk.ts).
+   */
+  exclude?: string[];
+}
+
+export async function stageGame(ctx: Ctx, config: Config, opts: StageOptions = {}): Promise<{ stageDir: string; warnings: GsError[] }> {
   const { buildCommand, outputDir, dir, entry } = config.game;
   const source = path.resolve(ctx.projectDir, buildCommand ? (outputDir ?? 'dist') : dir);
   const shown = path.relative(ctx.projectDir, source) || '.';
@@ -185,13 +217,14 @@ export async function stageGame(ctx: Ctx, config: Config): Promise<{ stageDir: s
     return false;
   };
   const LOOP_FIX = 'Remove the link, or replace it with a copy of the folder.';
-  // Plugins run in Electron's main process; core/plugins.ts copies them into the app separately.
-  const pluginPaths = new Set(config.plugins.map((p) => path.resolve(ctx.projectDir, p)));
+  // Plugins run in Electron's main process; core/plugins.ts copies them into the app separately. The SDK
+  // is never shipped as game files. Compared by real path, so a link to one of them is left out too.
+  const excluded = new Set([...config.plugins.map((p) => path.resolve(ctx.projectDir, p)), ...(opts.exclude ?? [])].map(realOrSelf));
   // Called for every path before it's copied (links not yet followed).
   const keep = (src: string): boolean => {
     const rel = path.relative(source, src);
     if (rel === '') return true;
-    if (isSkipped(rel) || pluginPaths.has(src)) return false;
+    if (isSkipped(rel) || excluded.has(realOrSelf(src)) || holdsSteamworksSdk(src)) return false;
     if (!fs.lstatSync(src).isSymbolicLink()) return true;
     let target: string;
     try {

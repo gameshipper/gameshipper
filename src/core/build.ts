@@ -12,7 +12,7 @@ import { runBuildCommand, stageGame } from './prepare/stage.js';
 import { fail, GsFailure, gsError, ok, type GsError, type Result } from './result.js';
 import { bundleSteam, type SteamBundle } from './steam/bundle.js';
 import type { KoffiNativeOptions, NativeTarget } from './steam/natives.js';
-import { ensureSteamSdk, findSteamSdk, sdkMissingWarning } from './steam/sdk.js';
+import { ensureSteamSdk, findSteamSdk, sdkMissingWarning, steamSdkPaths } from './steam/sdk.js';
 
 export interface TargetResult {
   target: Target;
@@ -76,9 +76,11 @@ export async function prepareApp(
 ): Promise<PreparedApp> {
   // Checked first: a broken plugin or SDK setting should fail before a long game build.
   const plugins = await loadPlugins(ctx, config);
-  const sdkFound = findSteamSdk({ projectDir: ctx.projectDir, config, env: opts.env ?? process.env, cacheDir: ctx.cacheDir, flagPath: opts.steamSdk });
+  const sdkOptions = { projectDir: ctx.projectDir, config, env: opts.env ?? process.env, cacheDir: ctx.cacheDir, flagPath: opts.steamSdk };
+  const sdkFound = findSteamSdk(sdkOptions);
   await runBuildCommand(ctx, config);
-  const staged = await stageGame(ctx, config);
+  // Valve's SDK is never game content, even when a setting points inside the game folder.
+  const staged = await stageGame(ctx, config, { exclude: steamSdkPaths(sdkOptions, sdkFound) });
   const bundled = await bundleCdn(ctx, staged.stageDir, { frozenLock: opts.frozenLock });
   const warnings = [...staged.warnings, ...bundled.warnings];
   let iconBase: string | null = null;

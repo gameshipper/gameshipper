@@ -24,4 +24,22 @@ describe('zip reader', () => {
     zip[30 + 'a.txt'.length] ^= 0xff;
     expect(() => readZipEntry(zip, entry)).toThrow('a.txt is damaged (checksum mismatch)');
   });
+
+  it('never inflates an entry past its recorded size', () => {
+    const zip = makeZip({ 'big.bin': Buffer.alloc(1_000_000) });
+    const central = zip.lastIndexOf(Buffer.from([0x50, 0x4b, 0x01, 0x02]));
+    zip.writeUInt32LE(10, central + 24);
+    const entry = readZipEntries(zip)[0];
+    expect(entry.size).toBe(10);
+    expect(() => readZipEntry(zip, entry)).toThrow('big.bin is damaged (it holds more than its recorded 10 bytes)');
+  });
+
+  it('rejects encrypted entries', () => {
+    const zip = makeZip({ 'secret.dll': 'x' });
+    const central = zip.lastIndexOf(Buffer.from([0x50, 0x4b, 0x01, 0x02]));
+    zip.writeUInt16LE(zip.readUInt16LE(central + 8) | 1, central + 8);
+    const entry = readZipEntries(zip)[0];
+    expect(entry.encrypted).toBe(true);
+    expect(() => readZipEntry(zip, entry)).toThrow("secret.dll is encrypted (password-protected zips aren't supported)");
+  });
 });

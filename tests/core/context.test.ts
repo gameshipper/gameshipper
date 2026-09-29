@@ -1,7 +1,7 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { cacheRoot } from '../../src/core/cache.js';
+import { cacheRoot, moveIntoCache } from '../../src/core/cache.js';
 import { createCtx } from '../../src/core/context.js';
 import { listFiles } from '../../src/core/fsutil.js';
 import { makeTmpDir, writeFiles } from '../helpers/tmp.js';
@@ -15,6 +15,37 @@ describe('cacheRoot', () => {
     expect(cacheRoot({}, 'linux', '/home/u')).toBe(path.join('/home/u', '.cache', 'gameshipper'));
     expect(cacheRoot({ XDG_CACHE_HOME: '/xdg' }, 'linux', '/home/u')).toBe(path.join('/xdg', 'gameshipper'));
     expect(cacheRoot({ LOCALAPPDATA: 'C:\\L' }, 'win32', 'C:\\U')).toBe(path.join('C:\\L', 'gameshipper', 'Cache'));
+  });
+});
+
+describe('moveIntoCache', () => {
+  const complete = (dir: string) => fs.existsSync(path.join(dir, 'lib.so'));
+  const fresh = () => {
+    const root = makeTmpDir();
+    writeFiles(root, { 'tmp/lib.so': 'new' });
+    return { root, tmp: path.join(root, 'tmp'), dir: path.join(root, 'key') };
+  };
+
+  it('moves a finished download into place', () => {
+    const { tmp, dir } = fresh();
+    moveIntoCache(tmp, dir, complete);
+    expect(fs.readFileSync(path.join(dir, 'lib.so'), 'utf8')).toBe('new');
+    expect(fs.existsSync(tmp)).toBe(false);
+  });
+
+  it('keeps a complete copy another build put there first, and discards its own', () => {
+    const { root, tmp, dir } = fresh();
+    writeFiles(root, { 'key/lib.so': 'theirs' });
+    moveIntoCache(tmp, dir, complete);
+    expect(fs.readFileSync(path.join(dir, 'lib.so'), 'utf8')).toBe('theirs');
+    expect(fs.existsSync(tmp)).toBe(false);
+  });
+
+  it('replaces an incomplete copy', () => {
+    const { root, tmp, dir } = fresh();
+    writeFiles(root, { 'key/partial.txt': '' });
+    moveIntoCache(tmp, dir, complete);
+    expect(fs.readdirSync(dir)).toEqual(['lib.so']);
   });
 });
 

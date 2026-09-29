@@ -125,8 +125,11 @@ describe.skipIf(!ENABLED)('Steam on this Mac with App ID 480', () => {
     const devEvents: DiagEvent[] = play.result.data.smoke.summary.events;
     expect(steamEvent(devEvents)).toMatchObject({ state: 'ready', appId: 480, overlay: 'none' });
     expect(gameReport(devEvents)).toEqual(EXPECTED_REPORT);
+    // Extracted once into <cache>/steamworks-sdk/<version>-<start of the zip's SHA-256>.
     const version = status.result.data.steamSdk.version;
-    expect(fs.existsSync(path.join(env.GAMESHIPPER_CACHE, 'steamworks-sdk', version, 'redistributable_bin', 'osx', 'libsteam_api.dylib'))).toBe(true);
+    const cached = fs.readdirSync(path.join(env.GAMESHIPPER_CACHE, 'steamworks-sdk')).filter((n) => !n.startsWith('.'));
+    expect(cached).toEqual([expect.stringMatching(new RegExp(`^${version.replace('.', '\\.')}-[0-9a-f]{8}$`))]);
+    expect(fs.existsSync(path.join(env.GAMESHIPPER_CACHE, 'steamworks-sdk', cached[0], 'redistributable_bin', 'osx', 'libsteam_api.dylib'))).toBe(true);
 
     const build = cli(['build', '--target', 'mac'], dir, env);
     expect(build.result.errors).toEqual([]);
