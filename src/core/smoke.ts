@@ -35,7 +35,11 @@ export interface SmokeOptions {
   windowed: boolean;
   /** Stop the game if it's still running this long after launch. Default: `seconds` + 45 s. */
   timeoutMs?: number;
-  /** Extra environment variables for the game (a test emulating how Steam launches a game, say). */
+  /**
+   * Extra environment variables for the game (a test emulating how Steam launches a game, say). They can't
+   * change Gameshipper's own GAMESHIPPER_* variables or set ELECTRON_RUN_AS_NODE, which would stop the game
+   * from starting as an app.
+   */
   env?: NodeJS.ProcessEnv;
 }
 
@@ -66,6 +70,8 @@ export function problemCount(issues: GsError[]): number {
 
 /** Compile-time check that every DiagEvent kind is handled. */
 const unhandled = (_event: never): void => {};
+/** Compile-time check that every SteamState is handled; a newer shell's unknown state is skipped. */
+const unhandledState = (_state: never): void => {};
 
 function capText(text: string): string {
   if (text.length <= MAX_TEXT_CHARS) return text;
@@ -202,25 +208,35 @@ export function summaryToIssues(
         );
         break;
       case 'steam':
-        // A build without the SDK already carries a STEAM_SDK_MISSING warning from build or play.
-        if (e.state === 'not-running') {
-          add(
-            warnings,
-            gsError(
-              'STEAM_NOT_RUNNING',
-              `Steam isn't running, so Steam features were off in this run (App ID ${e.appId}).`,
-              'Start Steam and sign in, then run again. The game still works without Steam: window.steam.isAvailable() resolves false.',
-            ),
-          );
-        } else if (e.state === 'init-failed') {
-          add(
-            errors,
-            gsError(
-              'STEAM_INIT_FAILED',
-              `Steam is running but didn't start for App ID ${e.appId}: ${e.message ?? 'no reason given'}`,
-              `Check that the signed-in Steam account owns App ID ${e.appId} (Valve's test app 480 works for everyone) and that steam.appId in gameshipper.json is right. The events log has Steam's own messages.`,
-            ),
-          );
+        switch (e.state) {
+          case 'not-running':
+            add(
+              warnings,
+              gsError(
+                'STEAM_NOT_RUNNING',
+                `Steam isn't running, so Steam features were off in this run (App ID ${e.appId}).`,
+                'Start Steam and sign in, then run again. The game still works without Steam: window.steam.isAvailable() resolves false.',
+              ),
+            );
+            break;
+          case 'init-failed':
+            add(
+              errors,
+              gsError(
+                'STEAM_INIT_FAILED',
+                `Steam is running but didn't start for App ID ${e.appId}: ${e.message ?? 'no reason given'}`,
+                `Check that the signed-in Steam account owns App ID ${e.appId} (Valve's test app 480 works for everyone) and that steam.appId in gameshipper.json is right. If the message says the Steam bridge couldn't load, the build's Steam files are missing or broken: build again (and report it if that keeps happening). The events log has Steam's own messages.`,
+              ),
+            );
+            break;
+          // Not problems: a build without the SDK already carries a STEAM_SDK_MISSING warning from build or play,
+          // and a restarting game is being relaunched by Steam.
+          case 'ready':
+          case 'no-sdk':
+          case 'restarting':
+            break;
+          default:
+            unhandledState(e.state);
         }
         break;
       case 'steam-overlay':
@@ -413,10 +429,10 @@ export async function runSmoke(ctx: Ctx, opts: SmokeOptions): Promise<Result<Smo
   const eventsLog = eventsLogPath(ctx.projectDir, started);
   // Each run gets its own summary next to its events log, so runs never read each other's.
   const outFile = path.join(path.dirname(eventsLog), `smoke-${fileStamp(started)}.json`);
-  // The smoke settings come last, so extra variables can't change them.
+  const extra = Object.entries(opts.env ?? {}).filter(([name]) => !name.startsWith('GAMESHIPPER_') && name !== 'ELECTRON_RUN_AS_NODE');
   const env = {
     ...gameEnv(eventsLog, opts.userDataDir, opts.windowed),
-    ...opts.env,
+    ...Object.fromEntries(extra),
     GAMESHIPPER_SMOKE_SECONDS: String(opts.seconds),
     GAMESHIPPER_SMOKE_OUT: outFile,
   };
