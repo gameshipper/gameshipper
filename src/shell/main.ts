@@ -464,8 +464,16 @@ function withTimeout<T>(promise: Promise<T>, ms: number, what: string): Promise<
   return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
 }
 
-/** `check`: every request that isn't for the game's own files fails, and is recorded (capture.ts isAllowedOffline). */
-function blockInternet(): void {
+/** A proxy nothing listens on (the discard port): connections sent through it fail at once. */
+const DEAD_PROXY = 'http://127.0.0.1:9';
+
+/**
+ * `check`: every request that isn't for the game's own files fails, and is recorded (capture.ts isAllowedOffline).
+ * WebRTC never passes through webRequest: the window is kept from using UDP except through a proxy
+ * (offlineWebRtc), and the session's proxy is a dead one, loopback included, so WebRTC's TCP (TURN) fails too.
+ * Neither is recorded. WebTransport and plugins' own networking in the main process aren't blocked here.
+ */
+async function blockInternet(): Promise<void> {
   session.defaultSession.webRequest.onBeforeRequest({ urls: ['<all_urls>'] }, (details, callback) => {
     if (isAllowedOffline(details.url)) {
       callback({});
@@ -474,6 +482,17 @@ function blockInternet(): void {
     diagnostics.record({ kind: 'blocked-request', url: details.url });
     callback({ cancel: true });
   });
+  try {
+    await session.defaultSession.setProxy({ proxyRules: DEAD_PROXY, proxyBypassRules: '<-loopback>' });
+  } catch (e) {
+    const message = `Couldn't route WebRTC's TCP connections to nowhere: ${errorText(e)}`;
+    diagnostics.record({ kind: 'console', level: 'warning', message, source: '', line: 0 });
+  }
+}
+
+/** `check`: no WebRTC UDP (STUN, peer connections) unless through a proxy, and blockInternet's proxy is dead. */
+function offlineWebRtc(win: BrowserWindow): void {
+  win.webContents.setWebRTCIPHandlingPolicy('disable_non_proxied_udp');
 }
 
 /** Set while the window shows about:blank to fix the page's size (fixViewport), before the game has loaded. */
@@ -625,8 +644,9 @@ void app.whenReady().then(async () => {
   registerSteam();
   registerPlugins(plugins);
   watchRemoteRequests();
-  if (capture.offline) blockInternet();
+  if (capture.offline) await blockInternet();
   const win = createWindow(plugins.manifest());
+  if (capture.offline) offlineWebRtc(win);
   const camera = new PageCamera(win.webContents);
   // First, before anything waits for the game's page to load: fixing the size shows about:blank.
   if (capture.viewport) await fixViewport(win, camera, capture.viewport);

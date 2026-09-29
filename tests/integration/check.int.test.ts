@@ -1,3 +1,4 @@
+import { spawn } from 'node:child_process';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import sharp from 'sharp';
@@ -13,6 +14,39 @@ async function game(fixture: string): Promise<string> {
   fs.cpSync(path.join(ROOT, 'fixtures', fixture), dir, { recursive: true });
   writeFiles(dir, { 'icon.png': makeSolidPng(1024, 1024), 'art/key-art.png': await makeKeyArt(), 'art/logo.png': await makeLogo() });
   return dir;
+}
+
+/**
+ * Listens where the check-broken fixture's WebRTC code sends STUN (UDP 34780) and TURN (TCP 34781) traffic.
+ * `stop` says whether both were listening and what reached them.
+ */
+async function startRtcServers(): Promise<{ stop: () => Promise<{ listening: boolean; reached: string[] }> }> {
+  const report = path.join(makeTmpDir('gs-rtc-'), 'servers.txt');
+  const script = `
+    const fs = require('fs');
+    const log = (line) => fs.appendFileSync(${JSON.stringify(report)}, line + '\\n');
+    let up = 0;
+    const ready = () => ++up === 2 && log('listening');
+    const udp = require('dgram').createSocket('udp4');
+    udp.on('message', (m) => log('udp ' + m.length + ' bytes'));
+    udp.on('error', (e) => log('udp error ' + e.message));
+    udp.bind(34780, '127.0.0.1', ready);
+    const tcp = require('net').createServer((s) => { log('tcp connection'); s.destroy(); });
+    tcp.on('error', (e) => log('tcp error ' + e.message));
+    tcp.listen(34781, '127.0.0.1', ready);
+  `;
+  const child = spawn(process.execPath, ['-e', script], { stdio: 'ignore' });
+  const lines = (): string[] => (fs.existsSync(report) ? fs.readFileSync(report, 'utf8').split('\n').filter(Boolean) : []);
+  for (let i = 0; i < 100 && !lines().some((l) => l === 'listening' || l.includes('error')); i++) await new Promise((r) => setTimeout(r, 50));
+  return {
+    async stop() {
+      // What arrived while `check` ran has been handled by now.
+      await new Promise((r) => setTimeout(r, 500));
+      child.kill();
+      const seen = lines();
+      return { listening: seen.includes('listening'), reached: seen.filter((l) => l !== 'listening') };
+    },
+  };
 }
 
 type Check = { id: string; status: string; code?: string; details?: string[] };
@@ -90,7 +124,11 @@ describe('check on this computer', () => {
     const build = cli(['build'], dir);
     expect(build.result.errors).toEqual([]);
 
+    // The STUN and TURN servers the game's WebRTC code uses (fixtures/check-broken/main.js), in their own process:
+    // `cli` blocks this one while the check runs.
+    const servers = await startRtcServers();
     const check = cli(['check', '--seconds', '5'], dir);
+    expect(await servers.stop()).toEqual({ listening: true, reached: [] });
     expect(check.code).toBe(1);
     const byId = Object.fromEntries((check.result.data.checks as Check[]).map((c) => [c.id, c]));
     expect(byId['offline.requests']).toMatchObject({ status: 'fail', code: 'CHECK_OFFLINE', details: ['https://example.com/scores.json'] });
