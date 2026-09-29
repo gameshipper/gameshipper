@@ -256,6 +256,16 @@ export function summaryToIssues(
       case 'plugin-error':
         add(errors, gsError('PLUGIN_LOAD_FAILED', `Plugin ${e.plugin} failed to load in the game: ${e.message}`, 'Fix the plugin, then run `npx gameshipper play --smoke` again.'));
         break;
+      case 'blocked-request':
+        // Only `check` blocks the network. Its offline.requests check reads every one from the events log; the
+        // http(s) ones also arrive as remote-request events (failed with net::ERR_BLOCKED_BY_CLIENT).
+        break;
+      case 'screenshot':
+        // A saved screenshot is a result, not a problem: `play` lists them from the events log.
+        break;
+      case 'screenshot-failed':
+        add(warnings, gsError('SCREENSHOT_FAILED', `A screenshot couldn't be saved: ${e.error}`, 'Try again. If it keeps failing, run with --verbose and report the run log.'));
+        break;
       default:
         // A summary from a newer shell may hold kinds this version doesn't know; they're skipped.
         unhandled(e);

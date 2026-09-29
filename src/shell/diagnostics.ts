@@ -2,6 +2,7 @@
 // would load Electron into the CLI. Keep it to Node built-ins.
 import * as fs from 'node:fs';
 import * as path from 'node:path';
+import type { ProbeReport } from './probe.js';
 
 export type ConsoleLevel = 'info' | 'warning' | 'error' | 'debug';
 /** How Steam started in this run (see shell/steam.ts). */
@@ -29,12 +30,19 @@ export type DiagEvent =
    */
   | { kind: 'steam-overlay'; enabled: boolean; reason?: string }
   /** A plugin's module failed to load in the game's main process. */
-  | { kind: 'plugin-error'; plugin: string; message: string };
+  | { kind: 'plugin-error'; plugin: string; message: string }
+  /** `check` blocked a request that wasn't for the game's own files (capture.ts isAllowedOffline). */
+  | { kind: 'blocked-request'; url: string }
+  /** F12 or `play --screenshot` saved a store screenshot. */
+  | { kind: 'screenshot'; file: string; width: number; height: number }
+  | { kind: 'screenshot-failed'; error: string };
 
 export interface DiagSummary {
   events: DiagEvent[];
   /** info/debug console messages beyond MAX_INFO_EVENTS (still in the JSONL log). */
   droppedInfo: number;
+  /** What a `check` run measured at its end (capture.ts probeDir). */
+  probe?: ProbeReport;
 }
 
 export interface Diagnostics {
