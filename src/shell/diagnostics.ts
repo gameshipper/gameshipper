@@ -1,4 +1,5 @@
 import * as fs from 'node:fs';
+import * as path from 'node:path';
 
 export type ConsoleLevel = 'info' | 'warning' | 'error' | 'debug';
 
@@ -27,6 +28,13 @@ export function createDiagnostics(logFile: string | null): Diagnostics {
   const events: DiagEvent[] = [];
   let infoCount = 0;
   let droppedInfo = 0;
+  if (logFile) {
+    try {
+      fs.mkdirSync(path.dirname(logFile), { recursive: true });
+    } catch {
+      // Logging must never crash the game; appends below will fail quietly too.
+    }
+  }
   return {
     record(event) {
       if (logFile) {

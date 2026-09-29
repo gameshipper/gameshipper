@@ -17,6 +17,12 @@ describe('createDiagnostics', () => {
     expect(typeof lines[0].at).toBe('string');
   });
 
+  it('creates a missing log folder', () => {
+    const log = path.join(makeTmpDir(), 'logs', 'nested', 'events.jsonl');
+    createDiagnostics(log).record({ kind: 'crashed', reason: 'oom' });
+    expect(JSON.parse(fs.readFileSync(log, 'utf8'))).toMatchObject({ kind: 'crashed', reason: 'oom' });
+  });
+
   it('caps chatty info/debug console events but never drops errors', () => {
     const d = createDiagnostics(null);
     for (let i = 0; i < MAX_INFO_EVENTS + 50; i++) d.record({ kind: 'console', level: 'info', message: `tick ${i}`, source: '', line: 0 });

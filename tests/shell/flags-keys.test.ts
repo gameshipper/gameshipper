@@ -19,7 +19,12 @@ describe('chromiumSwitches', () => {
 });
 
 describe('isFullscreenToggle', () => {
-  const key = (k: Partial<{ type: string; key: string; alt: boolean }>) => ({ type: 'keyDown', key: '', alt: false, ...k });
+  const key = (k: Partial<{ type: string; key: string; alt: boolean; isAutoRepeat: boolean }>) => ({
+    type: 'keyDown',
+    key: '',
+    alt: false,
+    ...k,
+  });
   it('F11 and Alt+Enter toggle fullscreen on key down', () => {
     expect(isFullscreenToggle(key({ key: 'F11' }))).toBe(true);
     expect(isFullscreenToggle(key({ key: 'Enter', alt: true }))).toBe(true);
@@ -27,5 +32,10 @@ describe('isFullscreenToggle', () => {
   it('ignores key up and plain Enter', () => {
     expect(isFullscreenToggle(key({ key: 'F11', type: 'keyUp' }))).toBe(false);
     expect(isFullscreenToggle(key({ key: 'Enter' }))).toBe(false);
+  });
+  it('ignores auto-repeat key downs so holding F11 does not flicker', () => {
+    expect(isFullscreenToggle(key({ key: 'F11', isAutoRepeat: true }))).toBe(false);
+    expect(isFullscreenToggle(key({ key: 'Enter', alt: true, isAutoRepeat: true }))).toBe(false);
+    expect(isFullscreenToggle(key({ key: 'F11', isAutoRepeat: false }))).toBe(true);
   });
 });
