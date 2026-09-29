@@ -9,6 +9,9 @@ import type { StatusData } from '../core/status.js';
 
 const rel = (projectDir: string, p: string) => path.relative(projectDir, p).split(path.sep).join('/');
 
+/** "1 second", "3 seconds". */
+export const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`;
+
 export function initSummary(r: Result<InitData>): string[] {
   if (!r.ok || !r.data) return [];
   const { config } = r.data;
@@ -46,7 +49,7 @@ export function playSummary(r: Result<PlayData>, opts: { smoke: boolean }): stri
   if (opts.smoke) {
     const { smoke } = r.data;
     if (!smoke) return [];
-    return [r.ok ? '✓ The game ran with no errors.' : `✗ Found ${r.errors.length} problem(s) while the game ran.`, `Events: ${smoke.eventsLog}`];
+    return [r.ok ? '✓ The game ran with no errors.' : `✗ Found ${plural(r.errors.length, 'problem')} while the game ran.`, `Events: ${smoke.eventsLog}`];
   }
   if (!r.ok) return [];
   return ['Game closed.', ...(r.data.eventsLog ? [`Events: ${r.data.eventsLog}`] : [])];

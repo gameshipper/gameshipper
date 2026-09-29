@@ -14,8 +14,14 @@ describe('exitCodeFor', () => {
     expect(exitCodeFor(fail(gsError('PACKAGE_FAILED', 'x')))).toBe(1);
   });
 
-  it('treats a missing folder, an unlocked CDN file and a missing bundle ID as input problems', () => {
-    for (const code of ['CDN_NOT_LOCKED', 'DIR_MISSING', 'BUNDLE_ID_REQUIRED']) {
+  it('treats a missing folder, an unlocked or changed CDN file and a missing bundle ID as input problems', () => {
+    for (const code of ['CDN_NOT_LOCKED', 'CDN_CHANGED', 'DIR_MISSING', 'BUNDLE_ID_REQUIRED']) {
+      expect(exitCodeFor(fail(gsError(code, 'x')))).toBe(2);
+    }
+  });
+
+  it('treats a bad icon or game folder as a config fix', () => {
+    for (const code of ['ICON_TOO_SMALL', 'ICON_INVALID', 'GAME_DIR_MISSING', 'GAME_DIR_INVALID']) {
       expect(exitCodeFor(fail(gsError(code, 'x')))).toBe(2);
     }
   });
@@ -60,9 +66,17 @@ describe('help', () => {
   it('lists every command with its flags, for humans and agents', () => {
     expect(COMMANDS.map((c) => c.name)).toEqual(['init', 'play', 'build', 'status']);
     const data = helpData();
-    expect(data.globalFlags.map((f) => f.name)).toEqual(['json', 'verbose', 'yes', 'dir', 'help']);
+    expect(data.globalFlags.map((f) => f.name)).toEqual(['json', 'verbose', 'yes', 'dir', 'help', 'version']);
     expect(data.exitCodes).toEqual({ '0': 'success', '1': 'a target or check failed', '2': 'invalid config, usage or missing input' });
     expect(helpText()).toContain('npx gameshipper play --smoke');
+  });
+
+  it('shows the short forms of flags', () => {
+    const text = helpText();
+    expect(text).toMatch(/^ {2}-y, --yes +Never prompt/m);
+    expect(text).toMatch(/^ {2}-h, --help +Show help/m);
+    expect(text).toMatch(/^ {2}-v, --version +Print the Gameshipper version/m);
+    expect(text).toMatch(/^ {6}--json +Print the result as JSON/m);
   });
 
   it('describes every gameshipper.json field as JSON Schema', () => {
@@ -137,7 +151,9 @@ describe('playSummary', () => {
     const smoke = { summary: { events: [], droppedInfo: 0 }, eventsLog: '/p/events.jsonl', exitCode: 0 };
     expect(playSummary(ok({ appDir: '/p/app', smoke }), { smoke: true })).toEqual(['✓ The game ran with no errors.', 'Events: /p/events.jsonl']);
     const bad = fail([gsError('GAME_CONSOLE_ERROR', 'x'), gsError('GAME_FILE_MISSING', 'y')], [], { appDir: '/p/app', smoke });
-    expect(playSummary(bad, { smoke: true })).toEqual(['✗ Found 2 problem(s) while the game ran.', 'Events: /p/events.jsonl']);
+    expect(playSummary(bad, { smoke: true })).toEqual(['✗ Found 2 problems while the game ran.', 'Events: /p/events.jsonl']);
+    const one = fail(gsError('GAME_CONSOLE_ERROR', 'x'), [], { appDir: '/p/app', smoke });
+    expect(playSummary(one, { smoke: true })[0]).toBe('✗ Found 1 problem while the game ran.');
     // The game never reported back: the errors say why, and there is nothing to summarize.
     expect(playSummary(fail(gsError('SMOKE_NO_RESULT', 'x'), [], { appDir: '/p/app' }), { smoke: true })).toEqual([]);
   });

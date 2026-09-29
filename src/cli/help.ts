@@ -4,6 +4,9 @@ import { GAMESHIPPER_VERSION } from '../core/version.js';
 
 export interface FlagHelp {
   name: string;
+  /** One-letter form, e.g. `y` for `-y`. */
+  short?: string;
+  /** Present when the flag takes a value; the CLI parses these as strings and the rest as booleans. */
   value?: string;
   description: string;
 }
@@ -18,9 +21,10 @@ export interface CommandHelp {
 export const GLOBAL_FLAGS: FlagHelp[] = [
   { name: 'json', description: 'Print the result as JSON on stdout and nothing else (for agents and scripts).' },
   { name: 'verbose', description: 'Also stream the run log to stderr.' },
-  { name: 'yes', description: 'Never prompt; use detected defaults and flags.' },
+  { name: 'yes', short: 'y', description: 'Never prompt; use detected defaults and flags.' },
   { name: 'dir', value: '<path>', description: 'Game folder (default: the current folder).' },
-  { name: 'help', description: 'Show help for a command.' },
+  { name: 'help', short: 'h', description: 'Show help for a command.' },
+  { name: 'version', short: 'v', description: 'Print the Gameshipper version.' },
 ];
 
 const FROZEN_LOCK: FlagHelp = {
@@ -89,10 +93,17 @@ export function helpData() {
   };
 }
 
-const flagLine = (f: FlagHelp) => `  --${f.name}${f.value ? ` ${f.value}` : ''}`.padEnd(26) + f.description;
+/** One line per flag; when any flag in the list has a short form, long-only flags line up after it. */
+function flagLines(flags: FlagHelp[]): string[] {
+  const shortWidth = flags.some((f) => f.short) ? 4 : 0;
+  return flags.map((f) => {
+    const short = (f.short ? `-${f.short}, ` : '').padStart(shortWidth);
+    return `  ${short}--${f.name}${f.value ? ` ${f.value}` : ''}`.padEnd(26 + shortWidth) + f.description;
+  });
+}
 
 export function commandHelpText(c: CommandHelp): string {
-  return [c.summary, '', `Usage: ${c.usage}`, ...(c.flags.length ? ['', 'Flags:', ...c.flags.map(flagLine)] : [])].join('\n');
+  return [c.summary, '', `Usage: ${c.usage}`, ...(c.flags.length ? ['', 'Flags:', ...flagLines(c.flags)] : [])].join('\n');
 }
 
 export function helpText(): string {
@@ -103,7 +114,7 @@ export function helpText(): string {
     ...COMMANDS.map((c) => `  ${c.name.padEnd(8)}${c.summary}`),
     '',
     'Global flags:',
-    ...GLOBAL_FLAGS.map(flagLine),
+    ...flagLines(GLOBAL_FLAGS),
     '',
     'Typical run:',
     '  npx gameshipper init',

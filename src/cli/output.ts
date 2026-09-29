@@ -16,7 +16,13 @@ const USAGE_CODES = new Set([
   'TARGET_NOT_CONFIGURED',
   'LOCK_INVALID',
   'CDN_NOT_LOCKED',
+  // An error only under --frozen-lock (otherwise a warning).
+  'CDN_CHANGED',
   'BUNDLE_ID_REQUIRED',
+  'ICON_TOO_SMALL',
+  'ICON_INVALID',
+  'GAME_DIR_MISSING',
+  'GAME_DIR_INVALID',
 ]);
 
 export function exitCodeFor(result: Result<unknown>): number {

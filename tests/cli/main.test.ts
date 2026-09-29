@@ -65,6 +65,31 @@ describe('gameshipper CLI', () => {
     expect([r.code, r.json().ok]).toEqual([0, true]);
   });
 
+  it('the fix for a bad flag names the command that was run', async () => {
+    const a = await run(['status', '--dir', 'build', '--bogus', '--json']);
+    expect(a.json().errors[0].fix).toMatch(/^Flags for status: none besides the global flags\./);
+    const b = await run(['--dir', 'play', 'build', '--bogus', '--json']);
+    expect(b.json().errors[0].fix).toMatch(/^Flags for build: /);
+    const c = await run(['--bogus', '--json']);
+    expect(c.json().errors[0].fix).toBe('Run `npx gameshipper help` to see the commands and their flags.');
+  });
+
+  it('boolean flags accept =true and =false', async () => {
+    const dir = makeTmpDir();
+    const a = await run(['status', '--json=true', '--dir', dir]);
+    expect([a.code, a.json().ok]).toEqual([0, true]);
+    const b = await run(['status', '--json=false', '--dir', dir]);
+    expect(b.out).toMatch(/^Gameshipper /);
+    // Still JSON when parsing fails, so an agent can read the error.
+    const c = await run(['status', '--json=true', '--verbose=maybe', '--dir', dir]);
+    expect([c.code, c.json().errors[0].code]).toEqual([2, 'USAGE']);
+  });
+
+  it('--dir "" is a usage error, not the current folder', async () => {
+    const r = await run(['status', '--json', '--dir', '']);
+    expect([r.code, r.json().errors[0].code, r.json().errors[0].message]).toEqual([2, 'USAGE', '--dir needs a folder path.']);
+  });
+
   it('init --yes --json writes the config without prompting', async () => {
     const dir = makeTmpDir();
     writeFiles(dir, { 'index.html': '' });
@@ -140,6 +165,14 @@ describe('gameshipper CLI', () => {
     expect(human.out).toContain('✗ ENTRY_MISSING');
   });
 
+  it('says how long a smoke run lasts, in words', async () => {
+    const dir = makeTmpDir();
+    writeFiles(dir, { 'index.html': '<script src="http://127.0.0.1:9/lib.js"></script>', 'gameshipper.json': CONFIG });
+    const r = await run(['play', '--smoke', '--seconds', '1', '--frozen-lock', '--dir', dir]);
+    expect(r.out.split('\n')[0]).toBe('Running the game for 1 second to check it…');
+    expect(r.out).toContain('✗ CDN_NOT_LOCKED');
+  });
+
   it('--frozen-lock reaches build and play: an unrecorded CDN file is an input error', async () => {
     const dir = makeTmpDir();
     writeFiles(dir, { 'index.html': '<script src="http://127.0.0.1:9/lib.js"></script>', 'gameshipper.json': CONFIG });
@@ -176,31 +209,27 @@ describe('gameshipper CLI', () => {
 });
 
 describe('safety net', () => {
-  it('turns an unexpected failure into a JSON INTERNAL_ERROR with the log, which holds the stack', async () => {
-    const dir = makeTmpDir();
-    // Recording the last run fails: .gameshipper/last is a file.
-    writeFiles(dir, { '.gameshipper/last': '' });
-    const r = await run(['build', '--json', '--dir', dir]);
-    expect(r.code).toBe(1);
-    const json = r.json();
-    expect(json).toMatchObject({ ok: false, errors: [{ code: 'INTERNAL_ERROR', fix: expect.stringContaining('report the log') }] });
-    expect(json.logPath).toMatch(/build-.+\.log$/);
-    expect(fs.readFileSync(json.logPath, 'utf8')).toMatch(/Error: .*\n\s+at /);
-  });
-
-  it('prints one line, plus the log path when there is one, for a person', async () => {
+  it('prints one line for a person when there is no log yet', async () => {
     const dir = makeTmpDir();
     // The run log can't be created: .gameshipper is a file.
     writeFiles(dir, { '.gameshipper': '' });
     const r = await run(['build', '--dir', dir]);
     expect(r.code).toBe(1);
     expect(r.out.trimEnd().split('\n')).toEqual([expect.stringMatching(/^✗ INTERNAL_ERROR: Unexpected error: .+/)]);
+  });
+});
 
-    const withLog = makeTmpDir();
-    writeFiles(withLog, { '.gameshipper/last': '' });
-    const lines = (await run(['build', '--dir', withLog])).out.trimEnd().split('\n');
-    expect(lines).toHaveLength(2);
-    expect(lines[1]).toMatch(/^Log: .+build-.+\.log$/);
+describe('recording the last run', () => {
+  it('is best-effort: a run that finished keeps its result, with a LAST_RUN_NOT_SAVED warning', async () => {
+    const dir = makeTmpDir();
+    // .gameshipper/last is a file, so the record can't be written.
+    writeFiles(dir, { 'index.html': '', '.gameshipper/last': '' });
+    const build = await run(['build', '--json', '--dir', dir]);
+    expect([build.code, build.json().errors[0].code]).toEqual([2, 'CONFIG_MISSING']);
+    expect(build.json().warnings.map((w: { code: string }) => w.code)).toEqual(['LAST_RUN_NOT_SAVED']);
+    const init = await run(['init', '--yes', '--json', '--dir', dir]);
+    expect([init.code, init.json().ok]).toEqual([0, true]);
+    expect(init.json().warnings.map((w: { code: string }) => w.code)).toEqual(['STEAM_TEST_APP', 'LAST_RUN_NOT_SAVED']);
   });
 });
 
