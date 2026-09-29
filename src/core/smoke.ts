@@ -326,10 +326,34 @@ export function gameEnv(eventsLog: string, userDataDir: string, windowed: boolea
 /** A file-name-safe timestamp, e.g. 2026-09-29T15-50-38-836Z. */
 const fileStamp = (now: Date): string => now.toISOString().replace(/[:.]/g, '-');
 
-/** Creates this run's (empty) events log and returns its path, so the path in a result always exists. */
+/** How many events logs, and how many smoke summaries, .gameshipper/logs keeps: the newest ones. */
+export const KEPT_RUN_FILES = 20;
+const RUN_FILES = [/^events-.+\.jsonl$/, /^smoke-.+\.json$/];
+
+/** Deletes all but the newest `keep` of each kind of run file in `logs`. Their names sort by time. */
+function pruneRunFiles(logs: string, keep: number): void {
+  const names = fs.readdirSync(logs).sort();
+  for (const kind of RUN_FILES) {
+    const old = names.filter((n) => kind.test(n)).slice(0, -keep);
+    for (const name of old) {
+      try {
+        fs.rmSync(path.join(logs, name), { force: true });
+      } catch {
+        // Still open somewhere (Windows); the next run tries again.
+      }
+    }
+  }
+}
+
+/**
+ * Creates this run's (empty) events log and returns its path, so the path in a result always exists.
+ * First deletes the oldest events logs and smoke summaries, leaving room for this run's within KEPT_RUN_FILES.
+ */
 export function eventsLogPath(projectDir: string, now: Date = new Date()): string {
-  const file = path.join(projectDir, '.gameshipper', 'logs', `events-${fileStamp(now)}.jsonl`);
-  fs.mkdirSync(path.dirname(file), { recursive: true });
+  const logs = path.join(projectDir, '.gameshipper', 'logs');
+  fs.mkdirSync(logs, { recursive: true });
+  pruneRunFiles(logs, KEPT_RUN_FILES - 1);
+  const file = path.join(logs, `events-${fileStamp(now)}.jsonl`);
   fs.writeFileSync(file, '', { flag: 'a' });
   return file;
 }
@@ -354,8 +378,8 @@ function readSummary(file: string): DiagSummary | 'missing' | 'unreadable' {
 export async function runSmoke(ctx: Ctx, opts: SmokeOptions): Promise<Result<SmokeData>> {
   const started = new Date();
   const eventsLog = eventsLogPath(ctx.projectDir, started);
-  // Each run gets its own summary (named like its events log), so runs never read each other's.
-  const outFile = path.join(ctx.projectDir, '.gameshipper', `smoke-${fileStamp(started)}.json`);
+  // Each run gets its own summary next to its events log, so runs never read each other's.
+  const outFile = path.join(path.dirname(eventsLog), `smoke-${fileStamp(started)}.json`);
   const env = { ...gameEnv(eventsLog, opts.userDataDir, opts.windowed), GAMESHIPPER_SMOKE_SECONDS: String(opts.seconds), GAMESHIPPER_SMOKE_OUT: outFile };
   const timeoutMs = opts.timeoutMs ?? (opts.seconds + SMOKE_TIMEOUT_GRACE_SECONDS) * 1000;
   ctx.log(`smoke run: ${opts.command} ${opts.args.join(' ')} for ${opts.seconds}s`);

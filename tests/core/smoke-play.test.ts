@@ -3,7 +3,7 @@ import * as path from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import { parseConfig } from '../../src/core/config/load.js';
 import { runPlay } from '../../src/core/play.js';
-import { runSmoke, summaryToIssues, truncateSummary } from '../../src/core/smoke.js';
+import { eventsLogPath, runSmoke, summaryToIssues, truncateSummary } from '../../src/core/smoke.js';
 import { LOAD_TIMEOUT_DESCRIPTION, type DiagEvent, type DiagSummary } from '../../src/shell/diagnostics.js';
 import { testCtx } from '../helpers/ctx.js';
 import { makeTmpDir, writeFiles } from '../helpers/tmp.js';
@@ -488,15 +488,49 @@ describe('long messages', () => {
 });
 
 describe('smoke summaries', () => {
-  it('each run writes its own summary file, named like its events log', async () => {
-    const { dir, shellDir } = project(`require('fs').writeFileSync(process.env.GAMESHIPPER_SMOKE_OUT, JSON.stringify({ droppedInfo: 0, events: [] }));`);
+  const WRITES_SUMMARY = `require('fs').writeFileSync(process.env.GAMESHIPPER_SMOKE_OUT, JSON.stringify({ droppedInfo: 0, events: [] }));`;
+
+  it('each run writes its own summary next to its events log, with the same timestamp', async () => {
+    const { dir, shellDir } = project(WRITES_SUMMARY);
     const first = await runPlay(testCtx(dir), config, { shellDir, smokeSeconds: 1, electronPath: process.execPath });
     const second = await runPlay(testCtx(dir), config, { shellDir, smokeSeconds: 1, electronPath: process.execPath });
-    const work = path.join(dir, '.gameshipper');
+    const logs = path.join(dir, '.gameshipper', 'logs');
     const stamp = (eventsLog: string) => /events-(.+)\.jsonl$/.exec(eventsLog)![1];
     const expected = [first, second].map((r) => `smoke-${stamp(r.data!.smoke!.eventsLog)}.json`);
     expect(new Set(expected).size).toBe(2);
-    expect(fs.readdirSync(work).filter((f) => f.startsWith('smoke')).sort()).toEqual(expected.sort());
+    expect(fs.readdirSync(logs).filter((f) => f.startsWith('smoke-')).sort()).toEqual(expected.sort());
+    expect(fs.readdirSync(path.join(dir, '.gameshipper')).filter((f) => f.startsWith('smoke'))).toEqual([]);
+  });
+
+  it('keeps the newest 20 summaries and 20 events logs, and nothing else is touched', async () => {
+    const { dir, shellDir } = project(WRITES_SUMMARY);
+    const logs = path.join(dir, '.gameshipper', 'logs');
+    const old = (i: number) => `2020-01-01T00-00-${String(i).padStart(2, '0')}-000Z`;
+    const files: Record<string, string> = { 'play-2020-01-01T00-00-00-000Z.log': '', 'notes.txt': '' };
+    for (let i = 0; i < 25; i++) {
+      files[`events-${old(i)}.jsonl`] = '';
+      files[`smoke-${old(i)}.json`] = '{}';
+    }
+    writeFiles(logs, files);
+
+    const r = await runPlay(testCtx(dir), config, { shellDir, smokeSeconds: 1, electronPath: process.execPath });
+
+    const left = fs.readdirSync(logs).sort();
+    const kept = (prefix: string) => left.filter((f) => f.startsWith(prefix));
+    // The 19 newest older ones, plus this run's.
+    const newest19 = (prefix: string, ext: string) => Array.from({ length: 19 }, (_, i) => `${prefix}${old(i + 6)}${ext}`);
+    expect(kept('events-')).toEqual([...newest19('events-', '.jsonl'), path.basename(r.data!.smoke!.eventsLog)]);
+    expect(kept('smoke-')).toEqual([...newest19('smoke-', '.json'), path.basename(r.data!.smoke!.eventsLog).replace(/^events-(.+)\.jsonl$/, 'smoke-$1.json')]);
+    expect(left).toContain('play-2020-01-01T00-00-00-000Z.log');
+    expect(left).toContain('notes.txt');
+  });
+
+  it('interactive play prunes old events logs too', () => {
+    const dir = makeTmpDir();
+    const logs = path.join(dir, '.gameshipper', 'logs');
+    writeFiles(logs, Object.fromEntries(Array.from({ length: 30 }, (_, i) => [`events-2020-01-01T00-00-${String(i).padStart(2, '0')}-000Z.jsonl`, ''])));
+    eventsLogPath(dir);
+    expect(fs.readdirSync(logs).filter((f) => f.startsWith('events-'))).toHaveLength(20);
   });
 });
 
