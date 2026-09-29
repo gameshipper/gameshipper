@@ -2,12 +2,18 @@ import { app, BrowserWindow, ipcMain, Menu, protocol, session, shell } from 'ele
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { Readable } from 'node:stream';
-import { createDiagnostics, writeSummary } from './diagnostics.js';
+import { createDiagnostics, mainProcessErrorReason, writeSummary } from './diagnostics.js';
 import { chromiumSwitches } from './flags.js';
 import { isFullscreenToggle } from './keys.js';
 import { mimeType } from './mime.js';
 import { caseMismatch, requestParts } from './paths.js';
-import { classifyLoadFailure, isGameUrl, isPermissionAllowed, navigationAction } from './policy.js';
+import {
+  classifyLoadFailure,
+  CROSS_ORIGIN_ISOLATION_HEADERS,
+  isGameUrl,
+  isPermissionAllowed,
+  navigationAction,
+} from './policy.js';
 import { planFileResponse } from './range.js';
 import { entryUrl, readRuntimeConfig } from './runtime-config.js';
 import { callSaveStore, createSaveStore, type SaveStore } from './saves.js';
@@ -17,35 +23,42 @@ const diagnostics = createDiagnostics(env.GAMESHIPPER_LOG ?? null);
 const smokeSeconds = Number(env.GAMESHIPPER_SMOKE_SECONDS ?? '0');
 const smoke = smokeSeconds > 0;
 
-const errorText = (e: unknown): string => (e instanceof Error ? e.message : String(e));
+const errorText = (e: unknown): string => {
+  try {
+    return e instanceof Error ? e.message : String(e);
+  } catch {
+    return '(unprintable value)';
+  }
+};
 
 // A smoke run always ends with a summary or a non-zero exit code; it never hangs.
 let smokeDone = false;
+/** Set once the page has finished loading (or its load was stopped); the backstop checks it. */
+let pageLoaded = false;
 function finishSmoke(code: number): void {
   if (smokeDone) return;
+  smokeDone = true;
+  let exitCode = code;
   if (env.GAMESHIPPER_SMOKE_OUT) {
     try {
       writeSummary(env.GAMESHIPPER_SMOKE_OUT, diagnostics.summary());
     } catch (e) {
       process.stderr.write(`Gameshipper: couldn't write the smoke summary: ${errorText(e)}\n`);
-      app.exit(code || 1);
-      return;
+      exitCode = code || 1;
     }
   }
-  smokeDone = true;
-  app.exit(code);
+  app.exit(exitCode);
 }
 
 if (smoke) {
   // Registered before anything that can throw (like reading config.json). Having a listener
   // also stops Electron from showing its modal error dialog, which would block the run.
   const onFatal = (error: unknown): void => {
-    diagnostics.record({ kind: 'crashed', reason: `main process error: ${errorText(error)}` });
+    diagnostics.record({ kind: 'crashed', reason: mainProcessErrorReason(error) });
     finishSmoke(1);
   };
   process.on('uncaughtException', onFatal);
   process.on('unhandledRejection', onFatal);
-  setTimeout(() => finishSmoke(0), (smokeSeconds + 30) * 1000);
 }
 
 // Unpackaged (play) runs would otherwise log a CSP warning that says nothing about the game.
@@ -53,6 +66,17 @@ env.ELECTRON_DISABLE_SECURITY_WARNINGS = 'true';
 
 const config = readRuntimeConfig(path.join(__dirname, 'config.json'));
 const gameRoot = path.join(__dirname, '..', 'game');
+const gameEntry = entryUrl(config.entry);
+
+if (smoke) {
+  // Backstop: end the run even if the page never loads, and report that as a failure, not a pass.
+  setTimeout(() => {
+    if (!pageLoaded) {
+      diagnostics.record({ kind: 'load-failed', url: gameEntry, code: 0, description: 'The page never finished loading (timed out)' });
+    }
+    finishSmoke(0);
+  }, (smokeSeconds + 30) * 1000);
+}
 
 // Everything below must happen before the app is ready.
 for (const [name, value] of chromiumSwitches(process.platform)) app.commandLine.appendSwitch(name, value);
@@ -104,7 +128,7 @@ async function serve(request: Request): Promise<Response> {
   const plan = planFileResponse(size, request.headers.get('range'), mimeType(file));
   const body =
     plan.body === null ? null : (Readable.toWeb(fs.createReadStream(file, plan.body === 'whole' ? {} : plan.body)) as ReadableStream);
-  return new Response(body, { status: plan.status, headers: plan.headers });
+  return new Response(body, { status: plan.status, headers: { ...plan.headers, ...CROSS_ORIGIN_ISOLATION_HEADERS } });
 }
 
 function registerSaves(store: SaveStore): void {
@@ -128,11 +152,16 @@ function restrictPermissions(): void {
   session.defaultSession.setPermissionCheckHandler((_wc, permission) => isPermissionAllowed(permission));
 }
 
-/** The window only ever shows the game; web links open in the player's browser instead. */
+/** The window only ever shows the game; web, mail and Steam links go to the system instead. */
 function leaveGame(url: string): void {
-  diagnostics.record({ kind: 'blocked-navigation', url });
-  // Smoke runs are automated, so they note the link without opening a browser.
-  if (!smoke && navigationAction(url) === 'open-external') void shell.openExternal(url);
+  const external = navigationAction(url) === 'open-external';
+  diagnostics.record({ kind: 'blocked-navigation', url, action: external ? 'opened-externally' : 'blocked' });
+  // Smoke runs are automated, so they only note the link.
+  if (external && !smoke) {
+    shell.openExternal(url).catch((e: unknown) =>
+      diagnostics.record({ kind: 'console', level: 'warning', message: `Couldn't open ${url}: ${errorText(e)}`, source: '', line: 0 }),
+    );
+  }
 }
 
 function keepInGame(details: { url: string; isMainFrame: boolean; preventDefault(): void }): void {
@@ -171,7 +200,13 @@ function createWindow(): BrowserWindow {
     }),
   );
   wc.on('did-fail-load', (_event, code, description, url, isMainFrame) => {
-    if (classifyLoadFailure(code, isMainFrame) === 'fatal') diagnostics.record({ kind: 'load-failed', url, code, description });
+    const failure = classifyLoadFailure(code, isMainFrame);
+    if (failure === 'fatal') diagnostics.record({ kind: 'load-failed', url, code, description });
+    // Smoke runs report failed iframes (e.g. ones blocked by cross-origin isolation) as warnings.
+    else if (failure === 'frame-failed' && smoke) {
+      const message = `Embedded frame failed to load: ${url} (${description})`;
+      diagnostics.record({ kind: 'console', level: 'warning', message, source: '', line: 0 });
+    }
   });
   wc.on('render-process-gone', (_event, details) => diagnostics.record({ kind: 'crashed', reason: details.reason }));
   wc.on('before-input-event', (event, input) => {
@@ -182,6 +217,14 @@ function createWindow(): BrowserWindow {
   });
   wc.on('will-navigate', keepInGame);
   wc.on('will-redirect', keepInGame);
+  // Some navigations (such as to about:blank) never fire will-navigate. did-navigate reports
+  // every main-frame page that actually loads (not ones blocked above), so any page that isn't
+  // the game is replaced by the game again.
+  wc.on('did-navigate', (_event, url) => {
+    if (isGameUrl(url)) return;
+    leaveGame(url);
+    void win.loadURL(gameEntry);
+  });
   wc.setWindowOpenHandler(({ url }) => {
     leaveGame(url);
     return { action: 'deny' };
@@ -192,10 +235,9 @@ function createWindow(): BrowserWindow {
 
 function armSmokeTest(win: BrowserWindow): void {
   const wc = win.webContents;
-  let started = false;
   const runFullDuration = (): void => {
-    if (started) return;
-    started = true;
+    if (pageLoaded) return;
+    pageLoaded = true;
     setTimeout(() => finishSmoke(0), smokeSeconds * 1000);
   };
   wc.on('did-finish-load', runFullDuration);
@@ -220,5 +262,5 @@ void app.whenReady().then(() => {
   watchRemoteRequests();
   const win = createWindow();
   if (smoke) armSmokeTest(win);
-  void win.loadURL(entryUrl(config.entry));
+  void win.loadURL(gameEntry);
 });

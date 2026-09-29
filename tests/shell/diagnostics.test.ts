@@ -1,7 +1,7 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { createDiagnostics, MAX_INFO_EVENTS, writeSummary } from '../../src/shell/diagnostics.js';
+import { createDiagnostics, mainProcessErrorReason, MAX_INFO_EVENTS, writeSummary } from '../../src/shell/diagnostics.js';
 import { entryUrl } from '../../src/shell/runtime-config.js';
 import { makeTmpDir } from '../helpers/tmp.js';
 
@@ -40,6 +40,25 @@ describe('writeSummary', () => {
     const summary = { events: [{ kind: 'crashed' as const, reason: 'oom' }], droppedInfo: 0 };
     writeSummary(file, summary);
     expect(JSON.parse(fs.readFileSync(file, 'utf8'))).toEqual(summary);
+  });
+});
+
+describe('mainProcessErrorReason', () => {
+  it('describes errors and other thrown values', () => {
+    expect(mainProcessErrorReason(new SyntaxError('Unexpected end of JSON input'))).toBe('main process error: Unexpected end of JSON input');
+    expect(mainProcessErrorReason('plain string')).toBe('main process error: plain string');
+    expect(mainProcessErrorReason(42)).toBe('main process error: 42');
+  });
+  it('never throws, even for values that cannot be printed', () => {
+    const throwingMessage = Object.defineProperty(new Error(), 'message', {
+      get() {
+        throw new Error('nope');
+      },
+    });
+    const throwingToString = { toString: () => { throw new Error('nope'); } };
+    for (const value of [Object.create(null), throwingToString, throwingMessage]) {
+      expect(mainProcessErrorReason(value)).toBe('main process error (unprintable value)');
+    }
   });
 });
 

@@ -37,12 +37,10 @@ describe('parseRange', () => {
 });
 
 describe('planFileResponse', () => {
-  const isolation = { 'cross-origin-opener-policy': 'same-origin', 'cross-origin-embedder-policy': 'credentialless' };
-
-  it('serves the whole file with Accept-Ranges and cross-origin isolation headers', () => {
+  it('serves the whole file with Accept-Ranges', () => {
     expect(planFileResponse(100, null, 'video/mp4')).toEqual({
       status: 200,
-      headers: { 'content-type': 'video/mp4', 'content-length': '100', 'accept-ranges': 'bytes', ...isolation },
+      headers: { 'content-type': 'video/mp4', 'content-length': '100', 'accept-ranges': 'bytes' },
       body: 'whole',
     });
   });
@@ -50,7 +48,7 @@ describe('planFileResponse', () => {
   it('serves a single range as 206 Partial Content', () => {
     expect(planFileResponse(100, 'bytes=-10', 'video/mp4')).toEqual({
       status: 206,
-      headers: { 'content-type': 'video/mp4', 'content-length': '10', 'accept-ranges': 'bytes', 'content-range': 'bytes 90-99/100', ...isolation },
+      headers: { 'content-type': 'video/mp4', 'content-length': '10', 'accept-ranges': 'bytes', 'content-range': 'bytes 90-99/100' },
       body: { start: 90, end: 99 },
     });
   });

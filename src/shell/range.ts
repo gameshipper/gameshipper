@@ -27,15 +27,6 @@ export function parseRange(header: string | null | undefined, size: number): Byt
   return { start, end: last === '' ? size - 1 : Math.min(Number(last), size - 1) };
 }
 
-/**
- * Cross-origin isolation, so SharedArrayBuffer works for threaded engines (Emscripten, Godot).
- * `credentialless` still lets the game load images and scripts from other sites.
- */
-const ISOLATION_HEADERS = {
-  'cross-origin-opener-policy': 'same-origin',
-  'cross-origin-embedder-policy': 'credentialless',
-};
-
 export interface FileResponsePlan {
   status: 200 | 206 | 416;
   headers: Record<string, string>;
@@ -52,7 +43,7 @@ export function planFileResponse(size: number, rangeHeader: string | null | unde
   if (range === null) {
     return {
       status: 200,
-      headers: { 'content-type': contentType, 'content-length': String(size), 'accept-ranges': 'bytes', ...ISOLATION_HEADERS },
+      headers: { 'content-type': contentType, 'content-length': String(size), 'accept-ranges': 'bytes' },
       body: 'whole',
     };
   }
@@ -63,7 +54,6 @@ export function planFileResponse(size: number, rangeHeader: string | null | unde
       'content-length': String(range.end - range.start + 1),
       'accept-ranges': 'bytes',
       'content-range': `bytes ${range.start}-${range.end}/${size}`,
-      ...ISOLATION_HEADERS,
     },
     body: range,
   };

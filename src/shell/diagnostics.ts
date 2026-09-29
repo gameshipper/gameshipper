@@ -10,7 +10,12 @@ export type DiagEvent =
   | { kind: 'remote-request'; url: string; status: number | null; error: string | null }
   | { kind: 'load-failed'; url: string; code: number; description: string }
   | { kind: 'crashed'; reason: string }
-  | { kind: 'blocked-navigation'; url: string };
+  /**
+   * The game tried to leave its window. `action` is what normal play does with the URL:
+   * open it in the system's browser, mail app or Steam, or just block it. Smoke runs never
+   * open anything; they only record the attempt.
+   */
+  | { kind: 'blocked-navigation'; url: string; action: 'opened-externally' | 'blocked' };
 
 export interface DiagSummary {
   events: DiagEvent[];
@@ -62,4 +67,13 @@ export function createDiagnostics(logFile: string | null): Diagnostics {
 export function writeSummary(file: string, summary: DiagSummary): void {
   fs.mkdirSync(path.dirname(file), { recursive: true });
   fs.writeFileSync(file, JSON.stringify(summary, null, 2));
+}
+
+/** The `crashed` reason for an error thrown in the main process. Never throws itself. */
+export function mainProcessErrorReason(error: unknown): string {
+  try {
+    return `main process error: ${error instanceof Error ? error.message : String(error)}`;
+  } catch {
+    return 'main process error (unprintable value)';
+  }
 }
