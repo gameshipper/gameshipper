@@ -6,6 +6,8 @@ export interface Route {
   type?: string;
   status?: number;
   redirect?: string;
+  /** Accept the request and never answer (for timeout tests). */
+  hang?: boolean;
 }
 
 export interface TestServer {
@@ -29,6 +31,7 @@ export async function startServer(routes: Record<string, Route>): Promise<TestSe
       res.end('not found');
       return;
     }
+    if (route.hang) return;
     if (route.redirect) {
       res.writeHead(302, { location: route.redirect });
       res.end();

@@ -61,4 +61,13 @@ describe('fetchRemote', () => {
       error: { code: 'CDN_CHANGED' },
     });
   });
+
+  it('CDN_FETCH_FAILED says so when a download times out', async () => {
+    server = await startServer({ '/slow.js': { hang: true } });
+    const started = Date.now();
+    await expect(fetchRemote(testCtx(makeTmpDir()), `${server.base}/slow.js`, null, { timeoutMs: 100 })).rejects.toMatchObject({
+      error: { code: 'CDN_FETCH_FAILED', message: expect.stringContaining('timed out after 0.1s') },
+    });
+    expect(Date.now() - started).toBeLessThan(5_000);
+  });
 });

@@ -14,6 +14,9 @@ export interface Lockfile {
   files: Record<string, LockEntry>;
 }
 
+/** Plain code-unit order. localeCompare depends on the machine's locale, which would reorder the lock. */
+export const byCodeUnit = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0);
+
 export function lockExists(projectDir: string): boolean {
   return fs.existsSync(path.join(projectDir, LOCK_FILE));
 }
@@ -31,6 +34,6 @@ export function readLock(projectDir: string): Lockfile {
 }
 
 export function writeLock(projectDir: string, lock: Lockfile): void {
-  const files = Object.fromEntries(Object.entries(lock.files).sort(([a], [b]) => a.localeCompare(b)));
+  const files = Object.fromEntries(Object.entries(lock.files).sort(([a], [b]) => byCodeUnit(a, b)));
   fs.writeFileSync(path.join(projectDir, LOCK_FILE), `${JSON.stringify({ version: 1, files }, null, 2)}\n`);
 }

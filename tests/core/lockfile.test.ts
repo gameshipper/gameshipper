@@ -16,6 +16,12 @@ describe('lockfile', () => {
     expect(Object.keys(readLock(dir).files)).toEqual(['https://a', 'https://b']);
   });
 
+  it('sorts by code unit, not locale, so every machine writes the same lock', () => {
+    const dir = makeTmpDir();
+    writeLock(dir, { version: 1, files: { 'https://a': { path: 'a', sha256: '1' }, 'https://B': { path: 'B', sha256: '2' } } });
+    expect(Object.keys(readLock(dir).files)).toEqual(['https://B', 'https://a']);
+  });
+
   it('LOCK_INVALID on a damaged file', () => {
     const dir = makeTmpDir();
     writeFiles(dir, { 'gameshipper.lock': 'nope' });

@@ -43,20 +43,41 @@ function readCached(dir: string, key: string): Fetched | null {
   return { ...meta, body };
 }
 
-export async function fetchRemote(ctx: Ctx, url: string, expectedSha: string | null): Promise<Fetched> {
+export const FETCH_TIMEOUT_MS = 60_000;
+
+export interface FetchOptions {
+  /** Give up on one download after this many milliseconds (default 60 s). */
+  timeoutMs?: number;
+}
+
+function downloadFailed(url: string, e: unknown, timeoutMs: number): GsFailure {
+  const err = e as (Error & { cause?: unknown }) | undefined;
+  const timedOut = err?.name === 'TimeoutError' || (err?.cause as Error | undefined)?.name === 'TimeoutError';
+  const reason = timedOut ? `timed out after ${timeoutMs / 1000}s` : (err?.message ?? String(e));
+  return new GsFailure('CDN_FETCH_FAILED', `Couldn't download ${url}: ${reason}`, FETCH_FIX);
+}
+
+export async function fetchRemote(ctx: Ctx, url: string, expectedSha: string | null, opts: FetchOptions = {}): Promise<Fetched> {
   const dir = path.join(ctx.cacheDir, 'cdn');
   const key = sha256(url);
   const cached = readCached(dir, key);
   if (cached && (expectedSha === null || cached.sha256 === expectedSha)) return cached;
 
+  const timeoutMs = opts.timeoutMs ?? FETCH_TIMEOUT_MS;
+  const signal = AbortSignal.timeout(timeoutMs);
   let res: Response;
   try {
-    res = await fetch(url, { headers: { 'user-agent': FETCH_USER_AGENT } });
+    res = await fetch(url, { headers: { 'user-agent': FETCH_USER_AGENT }, signal });
   } catch (e) {
-    throw new GsFailure('CDN_FETCH_FAILED', `Couldn't download ${url}: ${(e as Error).message}`, FETCH_FIX);
+    throw downloadFailed(url, e, timeoutMs);
   }
   if (!res.ok) throw new GsFailure('CDN_FETCH_FAILED', `Couldn't download ${url} (HTTP ${res.status}).`, FETCH_FIX);
-  const body = Buffer.from(await res.arrayBuffer());
+  let body: Buffer;
+  try {
+    body = Buffer.from(await res.arrayBuffer());
+  } catch (e) {
+    throw downloadFailed(url, e, timeoutMs); // the body stalled or the connection dropped
+  }
   const got: Fetched = { url, finalUrl: res.url || url, body, contentType: res.headers.get('content-type'), sha256: sha256(body) };
   if (expectedSha !== null && got.sha256 !== expectedSha) {
     throw new GsFailure(
