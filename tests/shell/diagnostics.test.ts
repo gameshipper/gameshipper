@@ -1,7 +1,7 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { createDiagnostics, MAX_INFO_EVENTS } from '../../src/shell/diagnostics.js';
+import { createDiagnostics, MAX_INFO_EVENTS, writeSummary } from '../../src/shell/diagnostics.js';
 import { entryUrl } from '../../src/shell/runtime-config.js';
 import { makeTmpDir } from '../helpers/tmp.js';
 
@@ -31,6 +31,15 @@ describe('createDiagnostics', () => {
     expect(s.droppedInfo).toBe(50);
     expect(s.events).toHaveLength(MAX_INFO_EVENTS + 1);
     expect(s.events.at(-1)).toMatchObject({ level: 'error' });
+  });
+});
+
+describe('writeSummary', () => {
+  it('creates missing folders and writes the summary as JSON', () => {
+    const file = path.join(makeTmpDir(), 'a', 'b', 'summary.json');
+    const summary = { events: [{ kind: 'crashed' as const, reason: 'oom' }], droppedInfo: 0 };
+    writeSummary(file, summary);
+    expect(JSON.parse(fs.readFileSync(file, 'utf8'))).toEqual(summary);
   });
 });
 

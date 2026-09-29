@@ -9,7 +9,8 @@ export type DiagEvent =
   | { kind: 'case-mismatch'; url: string; actual: string }
   | { kind: 'remote-request'; url: string; status: number | null; error: string | null }
   | { kind: 'load-failed'; url: string; code: number; description: string }
-  | { kind: 'crashed'; reason: string };
+  | { kind: 'crashed'; reason: string }
+  | { kind: 'blocked-navigation'; url: string };
 
 export interface DiagSummary {
   events: DiagEvent[];
@@ -55,4 +56,10 @@ export function createDiagnostics(logFile: string | null): Diagnostics {
       return { events: [...events], droppedInfo };
     },
   };
+}
+
+/** Writes a smoke-run summary, creating its folder first. */
+export function writeSummary(file: string, summary: DiagSummary): void {
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, JSON.stringify(summary, null, 2));
 }
