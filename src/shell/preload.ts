@@ -23,7 +23,26 @@ for (const [name, fns] of Object.entries(pluginManifest)) {
   for (const fn of fns) plugins[name][fn] = (...args: unknown[]) => ipcRenderer.invoke('gameshipper:plugin', name, fn, args);
 }
 
-contextBridge.exposeInMainWorld('gameshipper', {
+/**
+ * Exposes `api` as the global `name` (window.steam, window.gameshipper) in a way the game can replace.
+ * exposeInMainWorld makes a property that can't be written or redefined, so a game with its own top-level
+ * `const steam`, `class steam` or `window.steam = ...` would fail ("Identifier 'steam' has already been
+ * declared"). So the API is exposed under a private name, then copied to an ordinary writable,
+ * configurable global, which the game's own declaration takes the place of.
+ */
+function exposeReplaceable(name: string, hiddenName: string, api: Record<string, unknown>): void {
+  contextBridge.exposeInMainWorld(hiddenName, api);
+  contextBridge.executeInMainWorld({
+    // Runs in the page's world, so it can't use anything from this file: only its arguments.
+    func: (key: string, from: string) => {
+      const value = (globalThis as unknown as Record<string, unknown>)[from];
+      Object.defineProperty(globalThis, key, { value, writable: true, configurable: true, enumerable: true });
+    },
+    args: [name, hiddenName],
+  });
+}
+
+exposeReplaceable('gameshipper', '__gameshipper', {
   version: 1,
   saves: {
     save: (slot: string, data: unknown) => callSaves('save', slot, data),
@@ -35,7 +54,7 @@ contextBridge.exposeInMainWorld('gameshipper', {
 });
 
 // Every method resolves to a harmless value (false, null or []) when Steam isn't available.
-contextBridge.exposeInMainWorld('steam', {
+exposeReplaceable('steam', '__gameshipperSteam', {
   isAvailable: () => callSteam('isAvailable'),
   getUserName: () => callSteam('getUserName'),
   getSteamId: () => callSteam('getSteamId'),

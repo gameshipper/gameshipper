@@ -4,6 +4,9 @@
  *
  *   /// <reference types="gameshipper/types" />
  *   if (window.steam && (await window.steam.isAvailable())) { ... }
+ *
+ * Both are ordinary writable globals: a game that declares its own `steam` or `gameshipper` replaces them
+ * (and then shouldn't reference these types).
  */
 
 export interface SteamAchievement {

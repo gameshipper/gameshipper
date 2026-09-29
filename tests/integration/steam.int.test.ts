@@ -108,6 +108,32 @@ describe('the Steam fixture without an SDK', () => {
   });
 });
 
+describe('a game with globals of its own named steam and gameshipper', () => {
+  it('still runs: its own declarations take the place of Gameshipper\'s', () => {
+    const env = { GAMESHIPPER_CACHE: makeTmpDir('gs-empty-cache-') };
+    const dir = makeTmpDir('gs-own-globals-');
+    writeFiles(dir, {
+      'icon.png': makeSolidPng(1024, 1024),
+      'index.html': '<!DOCTYPE html><html><head><meta charset="utf-8"><title>Own globals</title></head><body><script src="own.js"></script><script src="check.js"></script></body></html>',
+      // Classic scripts: their top-level declarations are globals, which window.steam and window.gameshipper must not block.
+      'own.js': 'const steam = { own: true };\nvar gameshipper = { own: true };\n',
+      'check.js': [
+        "console.log('own-globals:' + JSON.stringify({ steam: steam.own === true, gameshipper: gameshipper.own === true && window.gameshipper.own === true, bridge: typeof window.steam.isAvailable === 'function' }));",
+        "window.steam = 'replaced';",
+        "console.log('own-globals-assigned:' + JSON.stringify(window.steam === 'replaced'));",
+      ].join('\n'),
+    });
+    expect(cli(['init', '--yes', '--name', 'Own Globals'], dir, env).code).toBe(0);
+    const play = cli(['play', '--smoke', '--seconds', '2'], dir, env);
+    expect(play.result.errors).toEqual([]);
+    const messages = (play.result.data.smoke.summary.events as DiagEvent[]).flatMap((e) => (e.kind === 'console' ? [e.message] : []));
+    expect(messages).toEqual(
+      expect.arrayContaining(['own-globals:{"steam":true,"gameshipper":true,"bridge":true}', 'own-globals-assigned:true']),
+    );
+    fs.rmSync(dir, { recursive: true, force: true, maxRetries: 3 });
+  });
+});
+
 describe.skipIf(!ENABLED)('Steam on this Mac with App ID 480', () => {
   // A fresh cache, so SDK extraction and the Intel Mac koffi download really happen.
   const env = { GAMESHIPPER_CACHE: makeTmpDir('gs-steam-cache-') };
