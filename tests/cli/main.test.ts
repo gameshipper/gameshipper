@@ -124,6 +124,7 @@ describe('gameshipper CLI', () => {
       'Icon PNG, 1024x1024 ("none" to skip)',
       'Key art for the store images, PNG or JPEG, 3840x2160 ("none" to skip)',
       'Logo for the store images, PNG with a transparent background ("none" to skip)',
+      'Bundle ID for the iOS and Android projects, like com.yourname.yourgame ("none" for desktop only)',
     ]);
     expect(ask.mock.calls[0][1]).toBe('Moon Game');
     expect(JSON.parse(readText(dir, 'gameshipper.json'))).toMatchObject({ name: 'Sun Game', icon: null, steam: { appId: 7654321 } });

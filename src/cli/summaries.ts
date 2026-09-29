@@ -25,6 +25,7 @@ export function initSummary(r: Result<InitData>): string[] {
     `  Icon: ${config.icon ?? 'none'}`,
     `  Store art: key art ${config.keyArt ?? 'none'}, logo ${config.logo ?? 'none'}`,
     `  Steam App ID: ${config.steam.appId}`,
+    `  Mobile: ${config.mobile.bundleId ? `${config.mobile.bundleId} (the ios and android targets make Xcode and Android Studio projects)` : 'none, desktop only (pass --bundle-id to add iOS and Android)'}`,
     '',
     'Next: `npx gameshipper play` to try it, or `npx gameshipper play --smoke` for a quick automatic check.',
   ];

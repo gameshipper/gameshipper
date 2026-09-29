@@ -58,7 +58,8 @@ describe('store art in init', () => {
     const ask = vi.fn(async (q: string, fallback: string) => (q.startsWith('Logo') ? 'promo/logo.png' : fallback));
     const r = await run(['init', '--dir', dir], true, { ask });
     expect(r.code).toBe(0);
-    expect(ask.mock.calls.slice(3)).toEqual([
+    // The key art and logo questions; the bundle ID question comes after them.
+    expect(ask.mock.calls.slice(3, 5)).toEqual([
       ['Key art for the store images, PNG or JPEG, 3840x2160 ("none" to skip)', 'art/key-art.png'],
       ['Logo for the store images, PNG with a transparent background ("none" to skip)', 'none'],
     ]);

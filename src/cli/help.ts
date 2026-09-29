@@ -43,13 +43,18 @@ export const COMMANDS: CommandHelp[] = [
   {
     name: 'init',
     summary: 'Detect the game and write gameshipper.json.',
-    usage: 'npx gameshipper init [--name <name>] [--app-id <id>] [--icon <png>] [--key-art <file>] [--logo <png>]',
+    usage: 'npx gameshipper init [--name <name>] [--app-id <id>] [--icon <png>] [--key-art <file>] [--logo <png>] [--bundle-id <id>]',
     flags: [
       { name: 'name', value: '<name>', description: 'Game name shown in windows and stores.' },
       { name: 'app-id', value: '<id>', description: "Steam App ID (default 480, Valve's test app)." },
       { name: 'icon', value: '<png|none>', description: 'Square PNG icon, at least 1024x1024.' },
       { name: 'key-art', value: '<file|none>', description: 'Key art for the store images: PNG or JPEG, 3840x2160 recommended.' },
       { name: 'logo', value: '<png|none>', description: 'Game logo on a transparent background, for the store images.' },
+      {
+        name: 'bundle-id',
+        value: '<id|none>',
+        description: 'Bundle ID like com.yourname.yourgame: adds the ios and android targets (Xcode and Android Studio projects). It can never change once the game is in a store.',
+      },
       { name: 'entry', value: '<file>', description: "The game's HTML file (default: detected)." },
       { name: 'build-command', value: '<cmd>', description: 'Command that builds the game (default: detected).' },
       { name: 'output-dir', value: '<dir>', description: 'Folder the build command writes.' },

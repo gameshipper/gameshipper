@@ -84,7 +84,7 @@ interface RunState {
 }
 
 const str = (v: string | boolean | undefined) => (typeof v === 'string' ? v : undefined);
-/** A path answer where "none" means no file: --key-art none, --logo none. */
+/** An answer where "none" means nothing: --key-art none, --logo none, --bundle-id none. */
 const pathOrNone = (v: string | undefined) => (v === undefined ? undefined : v === 'none' ? null : v);
 /** --steam-sdk, as an absolute path: like --dir, it's relative to the current folder, not the game's. */
 const steamSdkFlag = (values: Values) => {
@@ -187,6 +187,7 @@ async function initCommand(projectDir: string, values: Values, io: CliIO, run: R
     icon: iconFlag === undefined ? undefined : iconFlag === 'none' ? null : iconFlag,
     keyArt: pathOrNone(str(values['key-art'])),
     logo: pathOrNone(str(values.logo)),
+    bundleId: pathOrNone(str(values['bundle-id'])),
     entry: str(values.entry),
     buildCommand: str(values['build-command']),
     outputDir: str(values['output-dir']),
@@ -216,6 +217,10 @@ async function initCommand(projectDir: string, values: Values, io: CliIO, run: R
     flags.logo !== undefined || !interactive
       ? undefined
       : await prompt.ask('Logo for the store images, PNG with a transparent background ("none" to skip)', detected.logo ?? 'none');
+  const bundleIdAnswer =
+    flags.bundleId !== undefined || !interactive
+      ? undefined
+      : await prompt.ask('Bundle ID for the iOS and Android projects, like com.yourname.yourgame ("none" for desktop only)', 'none');
   const result = initProject(projectDir, {
     ...flags,
     name,
@@ -224,6 +229,7 @@ async function initCommand(projectDir: string, values: Values, io: CliIO, run: R
     ...(iconAnswer === undefined || iconAnswer === iconDefault ? {} : { icon: iconAnswer === 'none' ? null : iconAnswer }),
     ...(keyArtAnswer === undefined ? {} : { keyArt: pathOrNone(keyArtAnswer) }),
     ...(logoAnswer === undefined ? {} : { logo: pathOrNone(logoAnswer) }),
+    ...(bundleIdAnswer === undefined ? {} : { bundleId: pathOrNone(bundleIdAnswer) }),
   });
   if (result.ok) recordRun(projectDir, 'init', result);
   return { result, human: initSummary(result) };

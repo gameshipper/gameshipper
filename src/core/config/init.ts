@@ -2,10 +2,11 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { ICON_REQUIREMENT, iconFileProblem } from '../desktop/icons.js';
 import { checkProjectDir } from '../fsutil.js';
+import { bundleIdProblem } from '../mobile/bundle-id.js';
 import { fail, gsError, ok, type GsError, type Result } from '../result.js';
 import { detectProject, type Detected } from './detect.js';
 import { CONFIG_FILE, parseConfig } from './load.js';
-import type { Config } from './schema.js';
+import { DESKTOP_TARGETS, type Config } from './schema.js';
 
 export interface InitAnswers {
   name?: string;
@@ -14,6 +15,8 @@ export interface InitAnswers {
   /** Key art and logo for the store images: a path relative to the project folder, or null for none. Left out: what was detected. */
   keyArt?: string | null;
   logo?: string | null;
+  /** mobile.bundleId; setting it also adds the ios and android targets. null or left out: desktop only. */
+  bundleId?: string | null;
   entry?: string;
   buildCommand?: string | null;
   outputDir?: string | null;
@@ -113,6 +116,16 @@ function planInit(dir: string, answers: InitAnswers, detected: Detected): InitPl
       errors.push(gsError('ASSET_MISSING', `${key}: ${value} doesn't exist.`, `Pass ${flag} with a path relative to your project folder, or ${flag} none.`));
     }
   }
+  const bundleIdError = answers.bundleId ? bundleIdProblem(answers.bundleId) : null;
+  if (bundleIdError) {
+    errors.push(
+      gsError(
+        'BUNDLE_ID_INVALID',
+        `--bundle-id ${bundleIdError}`,
+        'Pass --bundle-id like com.yourname.yourgame (it can never change once the game is in a store), or --bundle-id none for desktop only.',
+      ),
+    );
+  }
   const keyArt = answers.keyArt !== undefined ? answers.keyArt : detected.keyArt;
   const logo = answers.logo !== undefined ? answers.logo : detected.logo;
   return { entry, buildCommand, outputDir, icon, keyArt, logo, errors, warnings };
@@ -140,6 +153,8 @@ export function initProject(dir: string, answers: InitAnswers = {}): Result<Init
     keyArt: plan.keyArt,
     logo: plan.logo,
     steam: { appId: answers.appId ?? 480 },
+    // A bundle ID means the game is meant for phones too.
+    ...(answers.bundleId ? { targets: [...DESKTOP_TARGETS, 'ios', 'android'], mobile: { bundleId: answers.bundleId } } : {}),
   });
   if (!parsed.ok) return fail(parsed.errors);
   const config = parsed.data!;
