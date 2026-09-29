@@ -8,7 +8,7 @@ import type { Ctx } from '../context.js';
 import { ELECTRON_VERSION } from '../electron.js';
 import { defaultBundleId, fileSafeName, slugify } from '../names.js';
 import { GsFailure, gsError, type GsError } from '../result.js';
-import type { DesktopJob } from './targets.js';
+import type { DesktopJob, PackagerPlatform } from './targets.js';
 
 const run = promisify(execFile);
 
@@ -49,6 +49,10 @@ export function packagerOptions(
     overwrite: true,
     prune: false,
     quiet: true,
+    // Info.plist would otherwise file the game under Developer Tools.
+    appCategoryType: 'public.app-category.games',
+    // Without this, the Windows .exe's copyright still names Electron's authors.
+    appCopyright: `Copyright © ${new Date().getFullYear()} ${config.name}`,
     // The app folder is already exactly what should ship (staging filtered it). Packager's default
     // ignore list would silently drop game files such as .obj 3D models.
     ignore: () => false,
@@ -63,6 +67,23 @@ export function executableFor(config: Config, target: DesktopTarget, dir: string
   return path.join(dir, `${name}.app`, 'Contents', 'MacOS', name);
 }
 
+/**
+ * Packager writes <Name>-<platform>-<arch> into the pack folder; a successful run moves it to out/<target>.
+ * Clears what failed runs, other arches or an earlier game name left there, so they don't pile up.
+ */
+export function removeStalePackOutput(packDir: string, platform: PackagerPlatform): void {
+  let entries: string[];
+  try {
+    entries = fs.readdirSync(packDir);
+  } catch {
+    return;
+  }
+  const suffix = new RegExp(`-${platform}-[a-z0-9]+$`);
+  for (const entry of entries) {
+    if (suffix.test(entry)) fs.rmSync(path.join(packDir, entry), { recursive: true, force: true });
+  }
+}
+
 export async function packageDesktop(
   ctx: Ctx,
   config: Config,
@@ -73,6 +94,7 @@ export async function packageDesktop(
   const packDir = path.join(ctx.projectDir, '.gameshipper', 'pack');
   const tmpDir = path.join(ctx.projectDir, '.gameshipper', 'packager-tmp');
   ctx.log(`packaging ${job.target} (${job.platform}/${job.arch}) with Electron ${ELECTRON_VERSION}`);
+  removeStalePackOutput(packDir, job.platform);
   let produced: string[];
   try {
     produced = await packager(packagerOptions(config, appDir, packDir, tmpDir, iconBase, job));

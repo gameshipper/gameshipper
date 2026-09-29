@@ -1,7 +1,9 @@
+import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { parseConfig } from '../../src/core/config/load.js';
-import { executableFor, packagerOptions } from '../../src/core/desktop/package.js';
+import { executableFor, packagerOptions, removeStalePackOutput } from '../../src/core/desktop/package.js';
+import { makeTmpDir, writeFiles } from '../helpers/tmp.js';
 
 const config = parseConfig({ name: 'Moon Game', version: '1.2.3' }).data!;
 
@@ -33,6 +35,8 @@ describe('packagerOptions', () => {
       overwrite: true,
       prune: false,
       quiet: true,
+      appCategoryType: 'public.app-category.games',
+      appCopyright: `Copyright © ${new Date().getFullYear()} Moon Game`,
     });
     expect(opts.win32metadata).toEqual({ ProductName: 'Moon Game', FileDescription: 'Moon Game', CompanyName: 'Moon Game' });
   });
@@ -65,5 +69,27 @@ describe('executableFor', () => {
     expect(executableFor(space, 'windows', '/o/windows')).toBe(path.join('/o/windows', 'Space- The Game.exe'));
     expect(executableFor(space, 'mac', '/o/mac')).toBe(path.join('/o/mac', 'Space- The Game.app', 'Contents', 'MacOS', 'Space- The Game'));
     expect(executableFor(space, 'linux', '/o/linux')).toBe(path.join('/o/linux', 'space-the-game'));
+  });
+});
+
+describe('removeStalePackOutput', () => {
+  it("removes packager's leftover folders for one platform, whatever the game was called", () => {
+    const packDir = makeTmpDir();
+    writeFiles(packDir, {
+      'Moon Game-linux-x64/moon-game': '',
+      'Old Name-linux-x64/old-name': '',
+      'Moon Game-linux-arm64/moon-game': '',
+      'Moon Game-win32-x64/Moon Game.exe': '',
+      'Moon Game-darwin-universal/x': '',
+      'Moon Game-darwin-arm64/x': '',
+    });
+    removeStalePackOutput(packDir, 'linux');
+    expect(fs.readdirSync(packDir).sort()).toEqual(['Moon Game-darwin-arm64', 'Moon Game-darwin-universal', 'Moon Game-win32-x64']);
+    removeStalePackOutput(packDir, 'darwin');
+    expect(fs.readdirSync(packDir)).toEqual(['Moon Game-win32-x64']);
+  });
+
+  it('does nothing when the pack folder does not exist', () => {
+    expect(() => removeStalePackOutput(`${makeTmpDir()}/missing`, 'win32')).not.toThrow();
   });
 });
