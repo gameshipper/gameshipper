@@ -7,3 +7,9 @@ research_notes/
 
 # Steamworks SDK (licensed to the account holder; never commit)
 .sdk/
+
+# Build and runtime output
+node_modules/
+/dist/
+.gameshipper/
+out/

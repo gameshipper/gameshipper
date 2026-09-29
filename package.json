@@ -1,0 +1,29 @@
+{
+  "name": "gameshipper",
+  "version": "0.1.0",
+  "description": "Turn any web game folder into Steam-ready Windows, Mac and Linux builds. Built for AI agents.",
+  "license": "MIT",
+  "type": "module",
+  "bin": { "gameshipper": "bin/gameshipper.js" },
+  "files": ["bin", "dist"],
+  "engines": { "node": ">=22.12.0" },
+  "scripts": {
+    "build": "tsc -p tsconfig.json && node scripts/postbuild.mjs",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "test:integration": "npm run build && vitest run --config vitest.int.config.ts"
+  },
+  "dependencies": {
+    "@electron/packager": "20.3.0",
+    "electron": "44.4.5",
+    "es-module-lexer": "3.0.2",
+    "node-html-parser": "9.0.4",
+    "png2icons": "2.0.1",
+    "zod": "4.6.5"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "typescript": "7.0.2",
+    "vitest": "5.0.2"
+  }
+}
