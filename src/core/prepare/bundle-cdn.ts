@@ -56,6 +56,8 @@ interface Pending {
   /** The game file or downloaded URL that refers to `url`. */
   from: string;
   need: Need;
+  /** Set when it failed to download as an optional file: whether the server answered, and the warning. */
+  failed?: { status: number | null; warning: GsError };
 }
 
 interface Page {
@@ -194,8 +196,15 @@ export async function bundleCdn(ctx: Ctx, stageDir: string, opts: BundleOptions 
       queued.set(u, pending);
       queue.push(pending);
     } else if (NEED_RANK[need] > NEED_RANK[known.need]) {
-      // Still waiting in the queue: a module that can't load without it outranks a dynamic import.
+      // A module that can't load without it outranks a dynamic import. Still waiting in the queue, it's
+      // simply tried under the stricter rule. If it already failed as optional over the network, it's
+      // tried again under that rule (in place of its warning); an HTTP error would end the same way.
       Object.assign(known, { from, need });
+      if (known.failed?.status === null) {
+        warnings.splice(warnings.indexOf(known.failed.warning), 1);
+        known.failed = undefined;
+        queue.push(known);
+      }
     }
   };
   // Bare specifiers that resolve through a prefix key ("react-dom/" + "client"). Their vendored file may be
@@ -256,7 +265,8 @@ export async function bundleCdn(ctx: Ctx, stageDir: string, opts: BundleOptions 
   const wantedPaths = new Map<string, string>();
   const download = (url: string, expected: string | null) => fetchRemote(ctx, url, expected, { timeoutMs: opts.timeoutMs });
   while (queue.length) {
-    const { url, from, need } = queue.shift() as Pending;
+    const pending = queue.shift() as Pending;
+    const { url, from, need } = pending;
     const expected = lock.files[url]?.sha256 ?? null;
     // Files found inside downloads are tried first: one the last build left out because it failed to
     // download isn't in the lock either, and leaving it out again is still the locked build.
@@ -276,13 +286,13 @@ export async function bundleCdn(ctx: Ctx, stageDir: string, opts: BundleOptions 
       if (need === 'static' && e.status === null) {
         throw new GsFailure('CDN_FETCH_FAILED', `${from} imports ${url} and can't load without it. ${e.error.message}`, e.error.fix);
       }
-      warnings.push(
-        gsError(
-          'CDN_OPTIONAL_MISSING',
-          `Left out ${url}, which ${from} refers to. ${e.error.message}`,
-          "The game only breaks if it loads this file; the reference points at the original URL, so it can still load while the player is online. Run `npx gameshipper play --smoke` to check; if it's needed, download it into your game folder and load it from there.",
-        ),
+      const warning = gsError(
+        'CDN_OPTIONAL_MISSING',
+        `Left out ${url}, which ${from} refers to. ${e.error.message}`,
+        "The game only breaks if it loads this file; the reference points at the original URL, so it can still load while the player is online. Run `npx gameshipper play --smoke` to check; if it's needed, download it into your game folder and load it from there.",
       );
+      warnings.push(warning);
+      pending.failed = { status: e.status, warning };
       continue;
     }
     if (opts.frozenLock && expected === null) throw notLocked(url, from);

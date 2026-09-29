@@ -416,6 +416,47 @@ describe('bundleCdn', () => {
       expect(readText(stageDir, `${V.slice(1)}/net/mod.js`)).toContain(`from '${server.base}/net/dep.js'`);
     });
 
+    describe('a file that failed as optional, then turns up as a static import', () => {
+      // a.js tries x.js first (dynamically); by the time c.js is found to import it statically, it has failed.
+      const game = (stageDir: string) =>
+        writeFiles(stageDir, {
+          'index.html': `<script type="module" src="${server.base}/up/a.js"></script><script type="module" src="${server.base}/up/b.js"></script>`,
+        });
+      beforeEach(() => {
+        server.routes['/up/a.js'] = { body: "export const load = () => import('./x.js');", type: JS };
+        server.routes['/up/b.js'] = { body: "import { c } from './c.js';\nexport const b = c;", type: JS };
+        server.routes['/up/c.js'] = { body: "import { x } from './x.js';\nexport const c = x;", type: JS };
+      });
+
+      it('is tried again under the static rule, and fails the build when the network keeps failing', async () => {
+        server.routes['/up/x.js'] = { body: 'export const x = 1;', type: JS, reset: 3 };
+        const projectDir = makeTmpDir();
+        const stageDir = path.join(projectDir, 'stage');
+        game(stageDir);
+
+        const failure = await bundleCdn(testCtx(projectDir), stageDir).catch((e) => e);
+
+        expect(failure).toMatchObject({ error: { code: 'CDN_FETCH_FAILED' } });
+        expect(failure.error.message).toContain(`${server.base}/up/x.js`);
+        expect(failure.error.message).toContain(`${server.base}/up/c.js`);
+        // Once as optional, then twice (a retry) as static.
+        expect(server.hits.filter((h) => h === '/up/x.js')).toHaveLength(3);
+      });
+
+      it('is vendored without a stale warning when the second try works', async () => {
+        server.routes['/up/x.js'] = { body: 'export const x = 1;', type: JS, reset: 1 };
+        const projectDir = makeTmpDir();
+        const stageDir = path.join(projectDir, 'stage');
+        game(stageDir);
+
+        const result = await bundleCdn(testCtx(projectDir), stageDir);
+
+        expect(result.warnings).toEqual([]);
+        expect(result.files.map((f) => f.url)).toContain(`${server.base}/up/x.js`);
+        expect(readText(stageDir, `${V.slice(1)}/up/a.js`)).toContain(`import(${JSON.stringify(`${V}/up/x.js`)})`);
+      });
+    });
+
     it('dynamic imports stay optional on a network error', async () => {
       server.routes['/net/dep.js'] = { body: 'export const dep = 1;', type: JS };
       server.routes['/net/later.js'] = { body: 'export const later = 1;', type: JS, reset: 2 };
