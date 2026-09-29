@@ -79,6 +79,8 @@ describe('summaryToIssues', () => {
     expect(warnings.map((w) => w.code)).toEqual(['GAME_CONSOLE_WARNING', 'GAME_NAVIGATION_BLOCKED', 'GAME_USES_INTERNET']);
     expect(warnings[1].message).toBe('The game tried to leave its window for file:///etc/passwd (blocked).');
     expect(warnings[1].fix).toContain('steam:');
+    // Electron can't tell which frame opened a window, so an embedded site blocks the game's own new windows too.
+    expect(warnings[1].fix).toContain("even the game's own window.open() and target=\"_blank\" links are blocked");
     expect(warnings[2].message).toContain('failed: net::ERR_INTERNET_DISCONNECTED');
   });
 

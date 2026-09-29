@@ -203,7 +203,7 @@ export function summaryToIssues(
           gsError(
             'GAME_NAVIGATION_BLOCKED',
             `The game tried to leave its window for ${e.url} (blocked).`,
-            "The game window only shows the game's own pages. Web, mailto: and steam: links the game itself opens go to the player's browser or app; other URLs, and links from embedded sites, are blocked.",
+            "The game window only shows the game's own pages. Web, mailto: and steam: links the game itself opens go to the player's browser or app; other URLs, and links from embedded sites, are blocked. While the page has an embedded frame from another site, or one that failed to load, even the game's own window.open() and target=\"_blank\" links are blocked: Electron can't tell which frame opened a window.",
           ),
         );
         break;
