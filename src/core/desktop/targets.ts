@@ -50,13 +50,23 @@ function arm64MacJob(warning: GsError): DesktopJob {
   return { target: 'mac', platform: 'darwin', arch: 'arm64', warnings: [warning] };
 }
 
-export function planDesktopJobs(targets: readonly Target[], host: NodeJS.Platform, tools: HostTools = detectHostTools(host)): DesktopPlan {
+/**
+ * `tools` may be a function: it's only called when a Mac app is planned on a Mac, so other plans never
+ * run Apple's tools (checking takes two processes).
+ */
+export function planDesktopJobs(
+  targets: readonly Target[],
+  host: NodeJS.Platform,
+  tools: HostTools | (() => HostTools) = () => detectHostTools(host),
+): DesktopPlan {
   const plan: DesktopPlan = { jobs: [], skipped: [] };
   for (const target of ORDER.filter((t) => targets.includes(t))) {
     if (target === 'windows') plan.jobs.push({ target, platform: 'win32', arch: 'x64', warnings: [] });
     else if (target === 'linux') plan.jobs.push({ target, platform: 'linux', arch: 'x64', warnings: [] });
     else if (target === 'mac') {
-      if (host === 'darwin' && tools.lipo) plan.jobs.push({ target, platform: 'darwin', arch: 'universal', warnings: [] });
+      if (host === 'darwin' && (typeof tools === 'function' ? tools() : tools).lipo) {
+        plan.jobs.push({ target, platform: 'darwin', arch: 'universal', warnings: [] });
+      }
       else if (host === 'darwin') {
         plan.jobs.push(
           arm64MacJob(

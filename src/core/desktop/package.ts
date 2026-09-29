@@ -80,8 +80,21 @@ export function removeStalePackOutput(packDir: string, platform: PackagerPlatfor
   }
   const suffix = new RegExp(`-${platform}-[a-z0-9]+$`);
   for (const entry of entries) {
-    if (suffix.test(entry)) fs.rmSync(path.join(packDir, entry), { recursive: true, force: true });
+    // Retries ride out a file Windows briefly keeps busy (an antivirus scan, the indexer).
+    if (suffix.test(entry)) fs.rmSync(path.join(packDir, entry), { recursive: true, force: true, maxRetries: 3 });
   }
+}
+
+/** Errors that mean a file is in use (Windows reports EBUSY or EPERM), read-only or not ours to change. */
+const LOCKED_CODES = new Set(['EBUSY', 'EPERM', 'EACCES', 'ENOTEMPTY']);
+
+function packageFailed(ctx: Ctx, job: DesktopJob, e: unknown): GsFailure {
+  const code = (e as NodeJS.ErrnoException | undefined)?.code;
+  const fix =
+    code !== undefined && LOCKED_CODES.has(code)
+      ? "A file Gameshipper has to replace is in use or read-only. Close the game if it's running from out/, and any window or terminal open in out/ or .gameshipper/pack, then build again."
+      : `Re-run with --verbose. If Electron couldn't be downloaded, check your connection; the full log is ${ctx.logPath}.`;
+  return new GsFailure('PACKAGE_FAILED', `Packaging ${job.target} failed: ${e instanceof Error ? e.message : String(e)}`, fix);
 }
 
 export async function packageDesktop(
@@ -94,16 +107,12 @@ export async function packageDesktop(
   const packDir = path.join(ctx.projectDir, '.gameshipper', 'pack');
   const tmpDir = path.join(ctx.projectDir, '.gameshipper', 'packager-tmp');
   ctx.log(`packaging ${job.target} (${job.platform}/${job.arch}) with Electron ${ELECTRON_VERSION}`);
-  removeStalePackOutput(packDir, job.platform);
   let produced: string[];
   try {
+    removeStalePackOutput(packDir, job.platform);
     produced = await packager(packagerOptions(config, appDir, packDir, tmpDir, iconBase, job));
   } catch (e) {
-    throw new GsFailure(
-      'PACKAGE_FAILED',
-      `Packaging ${job.target} failed: ${(e as Error).message}`,
-      `Re-run with --verbose. If Electron couldn't be downloaded, check your connection; the full log is ${ctx.logPath}.`,
-    );
+    throw packageFailed(ctx, job, e);
   }
   if (!produced[0]) {
     throw new GsFailure(
@@ -113,9 +122,14 @@ export async function packageDesktop(
     );
   }
   const outDir = path.join(ctx.projectDir, 'out', job.target);
-  fs.rmSync(outDir, { recursive: true, force: true });
-  fs.mkdirSync(path.dirname(outDir), { recursive: true });
-  fs.renameSync(produced[0], outDir);
+  try {
+    // The previous build here is the one a player is most likely to have running.
+    fs.rmSync(outDir, { recursive: true, force: true, maxRetries: 3 });
+    fs.mkdirSync(path.dirname(outDir), { recursive: true });
+    fs.renameSync(produced[0], outDir);
+  } catch (e) {
+    throw packageFailed(ctx, job, e);
+  }
 
   const warnings = [...job.warnings];
   if (job.platform === 'darwin' && process.platform === 'darwin') {

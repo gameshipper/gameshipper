@@ -1,5 +1,5 @@
 import * as fs from 'node:fs';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { detectHostTools, planDesktopJobs } from '../../src/core/desktop/targets.js';
 import { ELECTRON_VERSION, electronBinary } from '../../src/core/electron.js';
 
@@ -35,6 +35,16 @@ describe('planDesktopJobs', () => {
     const mac = planDesktopJobs(['mac'], 'darwin', { lipo: false }).jobs[0];
     expect([mac.platform, mac.arch, mac.warnings[0].code]).toEqual(['darwin', 'arm64', 'MAC_NOT_UNIVERSAL']);
     expect(mac.warnings[0].fix).toContain('xcode-select --install');
+  });
+
+  it("checks for Apple's tools only when it plans a Mac app on a Mac", () => {
+    const detect = vi.fn(() => ({ lipo: true }));
+    planDesktopJobs(['windows', 'linux', 'ios'], 'darwin', detect);
+    planDesktopJobs(['mac'], 'linux', detect);
+    planDesktopJobs(['mac'], 'win32', detect);
+    expect(detect).not.toHaveBeenCalled();
+    expect(planDesktopJobs(['windows', 'mac'], 'darwin', detect).jobs.map((j) => j.arch)).toEqual(['x64', 'universal']);
+    expect(detect).toHaveBeenCalledTimes(1);
   });
 
   it('Windows host cannot build Mac', () => {

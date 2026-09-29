@@ -2,7 +2,8 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { parseConfig } from '../../src/core/config/load.js';
-import { executableFor, packagerOptions, removeStalePackOutput } from '../../src/core/desktop/package.js';
+import { executableFor, packageDesktop, packagerOptions, removeStalePackOutput } from '../../src/core/desktop/package.js';
+import { testCtx } from '../helpers/ctx.js';
 import { makeTmpDir, writeFiles } from '../helpers/tmp.js';
 
 const config = parseConfig({ name: 'Moon Game', version: '1.2.3' }).data!;
@@ -91,5 +92,30 @@ describe('removeStalePackOutput', () => {
 
   it('does nothing when the pack folder does not exist', () => {
     expect(() => removeStalePackOutput(`${makeTmpDir()}/missing`, 'win32')).not.toThrow();
+  });
+});
+
+describe('packageDesktop', () => {
+  const canLock = process.platform !== 'win32' && process.getuid?.() !== 0;
+
+  it.skipIf(!canLock)("PACKAGE_FAILED with a fix when an earlier build's output can't be removed", async () => {
+    const projectDir = makeTmpDir();
+    const packDir = path.join(projectDir, '.gameshipper', 'pack');
+    writeFiles(packDir, { 'Moon Game-linux-x64/moon-game': '' });
+    // Stands in for a folder Windows keeps locked (EBUSY) while the old build runs or Explorer shows it.
+    fs.chmodSync(packDir, 0o555);
+    try {
+      const job = { target: 'linux', platform: 'linux', arch: 'x64', warnings: [] } as const;
+      const run = packageDesktop(testCtx(projectDir), config, path.join(projectDir, 'app'), null, job);
+      await expect(run).rejects.toMatchObject({
+        error: {
+          code: 'PACKAGE_FAILED',
+          message: expect.stringContaining('Moon Game-linux-x64'),
+          fix: expect.stringContaining('in use or read-only'),
+        },
+      });
+    } finally {
+      fs.chmodSync(packDir, 0o755);
+    }
   });
 });
