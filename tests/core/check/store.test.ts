@@ -2,8 +2,11 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { STORE_IMAGES } from '../../../src/core/assets/sizes.js';
+import { makeStoreImages } from '../../../src/core/assets/store-images.js';
 import { aiDisclosureCheck, screenshotsCheck, storeImagesCheck, trailerCheck } from '../../../src/core/check/store.js';
 import { parseConfig } from '../../../src/core/config/load.js';
+import { testCtx } from '../../helpers/ctx.js';
+import { makeLogoPng, makeQuadrantPng } from '../../helpers/images.js';
 import { makeSolidPng } from '../../helpers/png.js';
 import { makeTmpDir, writeFiles } from '../../helpers/tmp.js';
 
@@ -48,6 +51,44 @@ describe('storeImagesCheck', () => {
     expect(c).toMatchObject({ status: 'fail', code: 'CHECK_STORE_IMAGES', fix: 'Run `npx gameshipper build` to make them again.' });
     expect(c.message).toBe('7 of 8 store images are older than art/logo.png: rebuild to refresh the store images.');
     expect(c.details).toEqual(STORE_IMAGES.filter((s) => s.file !== 'library_hero.png').map((s) => `${s.file} (${s.label}): older than art/logo.png`));
+  });
+});
+
+describe('storeImagesCheck with the record of what the images were made from', () => {
+  async function built(): Promise<{ dir: string; art: ReturnType<typeof config> }> {
+    const dir = makeTmpDir();
+    writeFiles(dir, { 'art/key.png': await makeQuadrantPng(1920, 1080), 'art/logo.png': await makeLogoPng(1400, 600), 'art/old-key.png': await makeQuadrantPng(2560, 1440) });
+    const art = config({ keyArt: 'art/key.png', logo: 'art/logo.png' });
+    expect((await makeStoreImages(testCtx(dir), art)).status).toBe('built');
+    return { dir, art };
+  }
+  const at = (dir: string, rel: string, seconds: number) => fs.utimesSync(path.join(dir, rel), seconds, seconds);
+  const now = Math.floor(Date.now() / 1000);
+
+  it('compares content, not times: art that only looks newer (clock skew, a touch) is fine', async () => {
+    const { dir, art } = await built();
+    at(dir, 'art/key.png', now + 3600);
+    at(dir, 'art/logo.png', now + 3600);
+    expect(await storeImagesCheck(dir, art)).toMatchObject({ status: 'pass' });
+  });
+
+  it('fails when the art changed, even with a timestamp older than the images', async () => {
+    const { dir, art } = await built();
+    writeFiles(dir, { 'art/logo.png': await makeLogoPng(1200, 600) });
+    at(dir, 'art/logo.png', now - 3600);
+    const c = await storeImagesCheck(dir, art);
+    expect(c).toMatchObject({ status: 'fail', code: 'CHECK_STORE_IMAGES', fix: 'Run `npx gameshipper build` to make them again.' });
+    expect(c.message).toBe("The store images don't show the current logo: rebuild to refresh them.");
+    expect(c.details).toEqual(['art/logo.png changed after the images were made']);
+  });
+
+  it('fails when gameshipper.json switched to other (older) key art, or another focus', async () => {
+    const { dir } = await built();
+    at(dir, 'art/old-key.png', now - 86_400);
+    const switched = config({ keyArt: 'art/old-key.png', logo: 'art/logo.png', keyArtFocus: [0.2, 0.5] });
+    const c = await storeImagesCheck(dir, switched);
+    expect(c).toMatchObject({ status: 'fail', message: "The store images don't show the current key art and key art focus: rebuild to refresh them." });
+    expect(c.details).toEqual(['keyArt is art/old-key.png, but the images were made from art/key.png', 'keyArtFocus is [0.2,0.5], but the images were made with [0.5,0.5]']);
   });
 });
 

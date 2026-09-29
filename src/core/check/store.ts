@@ -3,6 +3,7 @@ import * as path from 'node:path';
 import { SCREENSHOT_SIZE } from '../../shell/capture.js';
 import { imageInfo } from '../assets/inspect.js';
 import { MIN_SCREENSHOTS, screenshotDirFor, STORE_IMAGES, storeDirFor } from '../assets/sizes.js';
+import { fileSha256, readStoreSource, type StoreSource } from '../assets/store-images.js';
 import type { Config } from '../config/schema.js';
 import { capDetails, type CheckResult } from './types.js';
 
@@ -39,7 +40,21 @@ export async function storeImagesCheck(projectDir: string, config: Config): Prom
       details: problems,
     };
   }
-  // Made from the key art and logo: one changed since means the images show the old art.
+  // Made from the key art and logo: one changed since means the images show the old art. The record of what they
+  // were made from compares content; images from before it existed fall back to comparing times.
+  const source = readStoreSource(dir);
+  if (source) {
+    const changed = changedSince(projectDir, config, source);
+    if (!changed.length) return { ...base, status: 'pass', message: `All ${STORE_IMAGES.length} images are in out/store at Steam's sizes.` };
+    return {
+      ...base,
+      status: 'fail',
+      code: 'CHECK_STORE_IMAGES',
+      message: `The store images don't show the current ${changed.map((c) => c.what).join(' and ')}: rebuild to refresh them.`,
+      fix,
+      details: changed.map((c) => c.detail),
+    };
+  }
   const art = [config.keyArt, config.logo].flatMap((rel) => {
     const mtime = rel ? mtimeOf(path.join(projectDir, rel)) : null;
     return rel && mtime !== null ? [{ rel, mtime }] : [];
@@ -64,6 +79,27 @@ export async function storeImagesCheck(projectDir: string, config: Config): Prom
     };
   }
   return { ...base, status: 'pass', message: `All ${STORE_IMAGES.length} images are in out/store at Steam's sizes.` };
+}
+
+/** What differs between the key art, logo and focus gameshipper.json names now and what the images were made from. */
+function changedSince(projectDir: string, config: Config, source: StoreSource): Array<{ what: string; detail: string }> {
+  const changed: Array<{ what: string; detail: string }> = [];
+  for (const [key, what] of [
+    ['keyArt', 'key art'],
+    ['logo', 'logo'],
+  ] as const) {
+    const rel = config[key];
+    const made = source[key];
+    // Unset now: the fix already asks for it, and the next build removes the images.
+    if (!rel) continue;
+    if (rel !== made.path) changed.push({ what, detail: `${key} is ${rel}, but the images were made from ${made.path}` });
+    else if (fileSha256(path.join(projectDir, rel)) !== made.sha256) changed.push({ what, detail: `${rel} changed after the images were made` });
+  }
+  const [x, y] = config.keyArtFocus;
+  if (x !== source.keyArtFocus[0] || y !== source.keyArtFocus[1]) {
+    changed.push({ what: 'key art focus', detail: `keyArtFocus is ${JSON.stringify(config.keyArtFocus)}, but the images were made with ${JSON.stringify(source.keyArtFocus)}` });
+  }
+  return changed;
 }
 
 /** Steam takes 16:9 screenshots of 1920x1080 or larger; everything Gameshipper saves is exactly 1920x1080. */

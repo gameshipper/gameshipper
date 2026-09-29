@@ -1,3 +1,4 @@
+import * as crypto from 'node:crypto';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import type { Config } from '../config/schema.js';
@@ -61,9 +62,39 @@ async function renderLogo(logoFile: string, logo: LogoInfo, spec: StoreImageSpec
   return { png, artScale: null, logoScale };
 }
 
+/** out/store/.source.json: what the images were made from, so `check` can tell when they're out of date. */
+export const STORE_SOURCE_FILE = '.source.json';
+
+export interface StoreSource {
+  /** As gameshipper.json names them, with the SHA-256 of their content. */
+  keyArt: { path: string; sha256: string };
+  logo: { path: string; sha256: string };
+  keyArtFocus: [number, number];
+}
+
+/** The SHA-256 of a file's content, or null when it can't be read. */
+export function fileSha256(file: string): string | null {
+  try {
+    return crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex');
+  } catch {
+    return null;
+  }
+}
+
+/** The record an earlier build left in out/store, or null (none, from an older Gameshipper, or unreadable). */
+export function readStoreSource(dir: string): StoreSource | null {
+  try {
+    const s = JSON.parse(fs.readFileSync(path.join(dir, STORE_SOURCE_FILE), 'utf8')) as StoreSource;
+    const art = (a: unknown) => typeof a === 'object' && a !== null && typeof (a as { path: unknown }).path === 'string' && typeof (a as { sha256: unknown }).sha256 === 'string';
+    return art(s.keyArt) && art(s.logo) && Array.isArray(s.keyArtFocus) ? s : null;
+  } catch {
+    return null;
+  }
+}
+
 /**
- * Deletes the images (*.png) in out/store, leaving out/store/screenshots/ and anything else alone, so images from an
- * earlier build never outlive a change to keyArt or logo.
+ * Deletes the images (*.png) in out/store and the record of what they were made from, leaving out/store/screenshots/
+ * and anything else alone, so images from an earlier build never outlive a change to keyArt or logo.
  */
 function clearStoreImages(ctx: Ctx, dir: string): void {
   let names: string[];
@@ -72,7 +103,7 @@ function clearStoreImages(ctx: Ctx, dir: string): void {
   } catch {
     return;
   }
-  for (const name of names.filter((n) => /\.png$/i.test(n))) {
+  for (const name of names.filter((n) => /\.png$/i.test(n) || n === STORE_SOURCE_FILE)) {
     const file = path.join(dir, name);
     try {
       if (fs.statSync(file).isFile()) fs.rmSync(file, { force: true });
@@ -104,6 +135,12 @@ export async function makeStoreImages(ctx: Ctx, config: Config): Promise<StoreIm
   }
   const keyArtFile = path.join(ctx.projectDir, config.keyArt!);
   const logoFile = path.join(ctx.projectDir, config.logo!);
+  // Hashed before the images are made: art edited during the build then shows as out of date, never as current.
+  const source: StoreSource = {
+    keyArt: { path: config.keyArt!, sha256: fileSha256(keyArtFile) ?? '' },
+    logo: { path: config.logo!, sha256: fileSha256(logoFile) ?? '' },
+    keyArtFocus: [...config.keyArtFocus],
+  };
   try {
     const art = await inspectKeyArt(keyArtFile);
     const logo = await inspectLogo(logoFile);
@@ -137,6 +174,7 @@ export async function makeStoreImages(ctx: Ctx, config: Config): Promise<StoreIm
         ),
       );
     }
+    fs.writeFileSync(path.join(dir, STORE_SOURCE_FILE), `${JSON.stringify(source, null, 2)}\n`);
     result.status = 'built';
   } catch (e) {
     result.status = 'failed';

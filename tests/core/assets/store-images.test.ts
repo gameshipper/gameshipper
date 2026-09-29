@@ -1,3 +1,4 @@
+import * as crypto from 'node:crypto';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import sharp from 'sharp';
@@ -81,6 +82,17 @@ describe('makeStoreImages', () => {
     expect(await pixel(path.join(store, 'library_hero.png'), 100, 100)).toEqual([0, 0, 0, 255]);
     expect(await pixel(path.join(store, 'library_hero.png'), 100, 1200)).toEqual([255, 0, 0, 255]);
     expect(await pixel(path.join(store, 'header_capsule.png'), 5, 5)).toEqual([0, 0, 0, 255]);
+  });
+
+  it('records what the images were made from in out/store/.source.json', async () => {
+    const dir = project(await makeQuadrantPng(3840, 2160), await makeLogoPng(1400, 600));
+    await makeStoreImages(testCtx(dir), config({ keyArtFocus: [0.25, 0.75] }));
+    const sha256 = (rel: string) => crypto.createHash('sha256').update(fs.readFileSync(path.join(dir, rel))).digest('hex');
+    expect(JSON.parse(fs.readFileSync(path.join(dir, 'out', 'store', '.source.json'), 'utf8'))).toEqual({
+      keyArt: { path: 'art/key.png', sha256: sha256('art/key.png') },
+      logo: { path: 'art/logo.png', sha256: sha256('art/logo.png') },
+      keyArtFocus: [0.25, 0.75],
+    });
   });
 
   it('replaces every image from an earlier build, keeping the screenshots', async () => {

@@ -73,7 +73,7 @@ Launches the latest build for this computer once, for 15 seconds (`--seconds` to
 | Launch | it starts, has no console errors or missing files, draws a non-uniform frame (with a warning when it's mostly one colour, like a loading screen), and exits with code 0 when its window closes; builds for other operating systems are listed as built, not launched here |
 | Steam Deck | at 1280x800 nothing is cut off, no text runs past the screen edge and no scrollbars appear; it reads a gamepad (while running, or in its own code: engine and library files aren't searched); text fields are listed |
 | Review | a build for every desktop target, no `steam_appid.txt`, the Mac build signed and notarized, a custom icon, your own App ID |
-| Store | all eight images at their exact sizes and newer than the key art and logo, at least five 1920x1080 screenshots, and reminders about the trailer and Steam's AI disclosure |
+| Store | all eight images at their exact sizes and made from the current key art, logo and focus, at least five 1920x1080 screenshots, and reminders about the trailer and Steam's AI disclosure |
 
 Run it after `build`: it never builds anything itself. The Deck-size frame is saved as `.gameshipper/check/frame.png` and the full report as `.gameshipper/check/report.json`. Without Apple credentials a Mac build is only ad-hoc signed, so on a Mac `review.mac-signing` fails with `CHECK_MAC_NOT_NOTARIZED` until you [sign and notarize](#mac-signing-and-notarization) it.
 
@@ -224,7 +224,7 @@ Set `keyArt` (PNG or JPEG, 3840x2160 recommended, at least 1280x720) and `logo` 
 | `library_hero.png` | 3840x1240 | key art only |
 | `library_logo.png` | 1280x720 | the logo on a transparent background |
 
-Crops centre on `keyArtFocus`: `[x, y]` as fractions of the key art's width and height, `[0.5, 0.5]` by default. Transparent parts of the key art come out black. Unusable art fails the build with `KEYART_INVALID` (not a PNG or JPEG), `KEYART_TOO_SMALL`, `LOGO_INVALID` (not a PNG, or fully transparent) or `LOGO_NOT_TRANSPARENT` (exit code 2, like a bad icon); art that had to be enlarged gives `KEYART_LOW_RES` or `LOGO_LOW_RES`; without `keyArt` and `logo`, builds warn `STORE_IMAGES_SKIPPED`. Each build replaces the images in `out/store/`, and one that skips them or fails leaves none there, so `check` never passes old ones.
+Crops centre on `keyArtFocus`: `[x, y]` as fractions of the key art's width and height, `[0.5, 0.5]` by default. Transparent parts of the key art come out black. Unusable art fails the build with `KEYART_INVALID` (not a PNG or JPEG), `KEYART_TOO_SMALL`, `LOGO_INVALID` (not a PNG, or fully transparent) or `LOGO_NOT_TRANSPARENT` (exit code 2, like a bad icon); art that had to be enlarged gives `KEYART_LOW_RES` or `LOGO_LOW_RES`; without `keyArt` and `logo`, builds warn `STORE_IMAGES_SKIPPED`. Each build replaces the images in `out/store/` and records what they were made from (the key art's and logo's paths and content hashes, and the focus) in `out/store/.source.json`; one that skips them or fails leaves none there, so `check` never passes old ones.
 
 The key art and logo are left out of the game itself unless one of its HTML, JavaScript, CSS or JSON files mentions the file's name, or its name without the extension as a quoted string (`"Logo"` for `Logo.png`, as RPG Maker games do); then the game may show it, so it ships. If a `play --smoke` run finds the game asking for one that was left out, `GAME_FILE_MISSING` says so.
 
