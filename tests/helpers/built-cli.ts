@@ -12,9 +12,15 @@ export const HOST_TARGET = ({ darwin: 'mac', win32: 'windows', linux: 'linux' } 
 /** A fresh Electron download for each OS can take minutes; a single CLI call gets this long. */
 const CLI_TIMEOUT_MS = 14 * 60_000;
 
-/** Runs the built CLI with --json: one JSON Result on stdout. */
-export function cli(args: string[], cwd: string): { code: number | null; result: any } {
-  const r = spawnSync(process.execPath, [CLI, ...args, '--json'], { cwd, encoding: 'utf8', timeout: CLI_TIMEOUT_MS, maxBuffer: 64 * 1024 * 1024 });
+/** Runs the built CLI with --json: one JSON Result on stdout. `env` adds to (or overrides) this process's environment. */
+export function cli(args: string[], cwd: string, env: NodeJS.ProcessEnv = {}): { code: number | null; result: any } {
+  const r = spawnSync(process.execPath, [CLI, ...args, '--json'], {
+    cwd,
+    encoding: 'utf8',
+    timeout: CLI_TIMEOUT_MS,
+    maxBuffer: 64 * 1024 * 1024,
+    env: { ...process.env, ...env },
+  });
   if (r.error) throw new Error(`gameshipper ${args.join(' ')} didn't finish in ${cwd}: ${r.error.message}\n${r.stderr}`);
   let result: any;
   try {
