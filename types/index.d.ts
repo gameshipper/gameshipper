@@ -61,12 +61,19 @@ export interface GameshipperSteam {
 
   /** Reads a stat; `kind` defaults to trying int, then float. */
   getStat(name: string, kind?: 'int' | 'float'): Promise<number | null>;
-  /** Sets and saves a stat to Steam; whole numbers are written as int stats unless `kind` says otherwise. */
+  /**
+   * Sets and saves a stat to Steam. Without `kind`, a whole number from -2147483648 to 2147483647 is written
+   * as an int stat and anything else as a float stat. Steam keeps int stats in 32 bits, so an int outside
+   * that range isn't saved (resolves false, with a warning in `play --smoke`).
+   */
   setStat(name: string, value: number, kind?: 'int' | 'float'): Promise<boolean>;
   /** setStat already saves; kept for code written for other tools. */
   storeStats(): Promise<boolean>;
 
-  /** Uploads a score to an existing leaderboard, keeping the player's best. */
+  /**
+   * Uploads a score to an existing leaderboard, keeping the player's best. Scores are whole numbers from
+   * -2147483648 to 2147483647 (fractions are cut off); one outside that range isn't uploaded (resolves null).
+   */
   uploadLeaderboardScore(leaderboard: string, score: number): Promise<SteamScoreUpload | null>;
   /** The top `count` entries (default 10, at most 100). */
   getLeaderboardEntries(leaderboard: string, count?: number): Promise<SteamLeaderboardEntry[]>;

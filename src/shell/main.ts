@@ -209,7 +209,11 @@ function registerSaves(store: SaveStore): void {
 function registerSteam(): void {
   const deck = isSteamDeck(env);
   const client = steam?.client ?? null;
-  const api = createSteamApi({ client, isSteamDeck: deck });
+  const api = createSteamApi({
+    client,
+    isSteamDeck: deck,
+    warn: (message) => diagnostics.record({ kind: 'console', level: 'warning', message, source: '', line: 0 }),
+  });
   ipcMain.handle('gameshipper:steam', (event, op: unknown, args: unknown) => api.call(event.senderFrame?.url, op, args));
   if (!client || !deck) return;
   const keyboard = (event: Electron.IpcMainEvent, show: () => void): void => {

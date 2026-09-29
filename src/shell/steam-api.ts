@@ -41,10 +41,17 @@ export const OVERLAY_DIALOGS: Record<string, string> = {
 const LEADERBOARD_GLOBAL = 0;
 const UPLOAD_KEEP_BEST = 1;
 
+/** Steam keeps integer stats and leaderboard scores as signed 32-bit integers. */
+const INT32_MIN = -(2 ** 31);
+const INT32_MAX = 2 ** 31 - 1;
+const isInt32 = (n: number): boolean => Number.isInteger(n) && n >= INT32_MIN && n <= INT32_MAX;
+
 export interface SteamApiState {
   /** Null when Steam isn't available; every call then returns its "nothing happened" value. */
   client: SteamworksClient | null;
   isSteamDeck: boolean;
+  /** Records a mistake in the game's call that isn't worth rejecting (it shows up in `play --smoke`). */
+  warn?: (message: string) => void;
 }
 
 export interface SteamApi {
@@ -79,6 +86,12 @@ function statKind(args: unknown[], i: number): 'int' | 'float' | undefined {
  * is available, so mistakes show up while developing without Steam too.
  */
 export function createSteamApi(state: SteamApiState): SteamApi {
+  const warn = state.warn ?? (() => {});
+  /** An out-of-range number: warn, and the call does nothing, with or without Steam. */
+  const outOfRange = (call: string, what: string, outcome: string, fallback: unknown) => {
+    warn(`steam.${call}: ${what} must be whole numbers from ${INT32_MIN} to ${INT32_MAX} (Steam keeps them in 32 bits), so it was not ${outcome}.`);
+    return { fallback };
+  };
   const boards = new Map<string, bigint>();
   const board = async (c: SteamworksClient, name: string): Promise<bigint | null> => {
     const known = boards.get(name);
@@ -137,10 +150,14 @@ export function createSteamApi(state: SteamApiState): SteamApi {
       const name = text(a, 0, 'The stat name');
       const value = number(a, 1, 'The stat value');
       const kind = statKind(a, 2);
+      if (kind === 'int' && !isInt32(Math.trunc(value))) {
+        return outOfRange(`setStat(${JSON.stringify(name)}, ${value})`, 'integer stats', 'saved', false);
+      }
       return {
         fallback: false,
         run: async (c) => {
-          if (kind === 'int' || (kind === undefined && Number.isInteger(value))) {
+          // Without a kind, only a whole number that fits an int stat is tried as one; anything else is a float stat.
+          if (kind === 'int' || (kind === undefined && isInt32(value))) {
             if (await c.stats.setStatInt(name, Math.trunc(value))) return true;
             if (kind === 'int') return false;
           }
@@ -153,6 +170,7 @@ export function createSteamApi(state: SteamApiState): SteamApi {
     uploadLeaderboardScore: (a) => {
       const name = text(a, 0, 'The leaderboard name');
       const score = Math.trunc(number(a, 1, 'The score'));
+      if (!isInt32(score)) return outOfRange(`uploadLeaderboardScore(${JSON.stringify(name)}, ${score})`, 'leaderboard scores', 'uploaded', null);
       return {
         fallback: null,
         run: async (c) => {

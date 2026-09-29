@@ -45,6 +45,40 @@ describe('window.steam main-process API', () => {
     expect(await api.call(GAME, 'storeStats', [])).toBe(true);
   });
 
+  it('refuses integer stats and scores outside 32 bits, with a warning, with or without Steam', async () => {
+    const warnings: string[] = [];
+    const client = fakeSteamClient();
+    const api = createSteamApi({ client, isSteamDeck: false, warn: (m) => warnings.push(m) });
+    expect(await api.call(GAME, 'setStat', ['NumGames', 2 ** 31, 'int'])).toBe(false);
+    expect(await api.call(GAME, 'setStat', ['NumGames', -(2 ** 31) - 1, 'int'])).toBe(false);
+    expect(await api.call(GAME, 'uploadLeaderboardScore', ['Feet Traveled', 2 ** 31])).toBeNull();
+    expect(await api.call(GAME, 'uploadLeaderboardScore', ['Feet Traveled', -1e12])).toBeNull();
+    expect(client.calls.filter((c) => /^(setStat|uploadScore|findLeaderboard)/.test(c))).toEqual([]);
+    expect(warnings).toHaveLength(4);
+    expect(warnings[0]).toBe(
+      'steam.setStat("NumGames", 2147483648): integer stats must be whole numbers from -2147483648 to 2147483647 (Steam keeps them in 32 bits), so it was not saved.',
+    );
+    expect(warnings[2]).toContain('leaderboard scores must be whole numbers from -2147483648 to 2147483647');
+    // The edges fit.
+    expect(await api.call(GAME, 'setStat', ['NumGames', 2 ** 31 - 1, 'int'])).toBe(true);
+    expect(await api.call(GAME, 'uploadLeaderboardScore', ['Feet Traveled', -(2 ** 31)])).toMatchObject({ success: true, score: -(2 ** 31) });
+    const offline = createSteamApi({ client: null, isSteamDeck: false, warn: (m) => warnings.push(m) });
+    expect(await offline.call(GAME, 'setStat', ['NumGames', 2 ** 40, 'int'])).toBe(false);
+    expect(warnings).toHaveLength(5);
+  });
+
+  it('writes numbers without a kind that are fractional or too big for an int as float stats', async () => {
+    const { api, client } = withSteam();
+    expect(await api.call(GAME, 'setStat', ['FeetTraveled', 2 ** 31])).toBe(true);
+    expect(await api.call(GAME, 'setStat', ['FeetTraveled', -(2 ** 40)])).toBe(true);
+    expect(await api.call(GAME, 'setStat', ['FeetTraveled', 1.5])).toBe(true);
+    expect(client.calls.filter((c) => c.startsWith('setStat'))).toEqual([
+      'setStatFloat FeetTraveled 2147483648',
+      'setStatFloat FeetTraveled -1099511627776',
+      'setStatFloat FeetTraveled 1.5',
+    ]);
+  });
+
   it('uploads scores and reads the top entries, finding each board once', async () => {
     const { api, client } = withSteam();
     expect(await api.call(GAME, 'uploadLeaderboardScore', ['Feet Traveled', 1234.9])).toEqual({ success: true, score: 1234, changed: true, rank: 7, previousRank: 9 });
