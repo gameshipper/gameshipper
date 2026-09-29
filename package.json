@@ -5,12 +5,16 @@
   "license": "MIT",
   "type": "module",
   "bin": { "gameshipper": "bin/gameshipper.js" },
-  "files": ["bin", "dist"],
+  "exports": {
+    "./types": { "types": "./types/index.d.ts" },
+    "./package.json": "./package.json"
+  },
+  "files": ["bin", "dist", "types"],
   "engines": { "node": ">=22.12.0" },
   "scripts": {
     "build": "node -e \"require('fs').rmSync('dist',{recursive:true,force:true})\" && tsc -p tsconfig.json && node scripts/postbuild.mjs",
     "prepack": "npm run build",
-    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tests/types/tsconfig.json",
     "test": "vitest run",
     "test:integration": "npm run build && vitest run --config vitest.int.config.ts"
   },
