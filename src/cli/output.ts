@@ -21,6 +21,8 @@ const USAGE_CODES = new Set([
   // An error only under --frozen-lock (otherwise a warning).
   'CDN_CHANGED',
   'BUNDLE_ID_REQUIRED',
+  // mobile.bundleId has a part iOS or Android can't use (a Java keyword), or `init --bundle-id` got one.
+  'BUNDLE_ID_INVALID',
   // The Apple signing variables are half-set, or name a certificate that isn't in the keychain.
   'APPLE_CREDENTIALS_INVALID',
   'MAC_IDENTITY_NOT_FOUND',

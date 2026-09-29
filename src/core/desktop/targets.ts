@@ -15,7 +15,7 @@ export interface DesktopJob {
 export interface SkippedTarget {
   target: Target;
   reason: GsError;
-  /** true = the target failed; false = informational (e.g. not supported yet). */
+  /** true = the target failed (e.g. MAC_BUILD_HOST); false = informational. */
   fatal: boolean;
 }
 
@@ -98,13 +98,8 @@ export function planDesktopJobs(
           ),
         );
       }
-    } else {
-      plan.skipped.push({
-        target,
-        fatal: false,
-        reason: gsError('TARGET_NOT_YET_SUPPORTED', `${target} builds aren't available in this version yet.`, `Remove "${target}" from targets, or ignore this warning.`),
-      });
     }
+    // ios and android aren't packaged with Electron: runBuild hands them to buildMobileTargets.
   }
   return plan;
 }

@@ -41,6 +41,7 @@ export function buildSummary(r: Result<BuildData>, projectDir: string): string[]
   const lines = r.data.targets.map((t) => {
     const name = t.target.padEnd(8);
     if (t.status === 'built' && t.output) return `✓ ${name} ${rel(projectDir, t.output.executable)}${t.output.mac ? ` (${macSigningLabel(t.output.mac)})` : ''}`;
+    if (t.status === 'built' && t.mobile) return `✓ ${name} ${rel(projectDir, t.mobile.project)}`;
     if (t.status === 'failed') return `✗ ${name} failed (${t.errors.map((e) => e.code).join(', ')})`;
     return `- ${name} skipped`;
   });
@@ -53,6 +54,9 @@ export function buildSummary(r: Result<BuildData>, projectDir: string): string[]
   }
   if (r.data.targets.some((t) => t.status === 'built')) {
     lines.push('', 'Next: `npx gameshipper check` tests the build against Steam and Steam Deck requirements.');
+  }
+  if (r.data.targets.some((t) => t.mobile)) {
+    lines.push('Mobile: open out/ios/App/App.xcodeproj in Xcode, or out/android in Android Studio, to sign and upload.');
   }
   return lines;
 }

@@ -2,9 +2,10 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { cacheRoot } from './cache.js';
 import { loadConfig } from './config/load.js';
-import { DESKTOP_TARGETS, TARGETS, type Config, type DesktopTarget, type Target } from './config/schema.js';
+import { TARGETS, type Config, type DesktopTarget, type Target } from './config/schema.js';
 import { planDesktopJobs } from './desktop/targets.js';
 import { ELECTRON_VERSION } from './electron.js';
+import { MOBILE_TARGETS } from './mobile/build-mobile.js';
 import { GsFailure, ok, type GsError, type Result } from './result.js';
 import { readLastRuns, type LastRun } from './runs.js';
 import { findSteamSdk, sdkMissingWarning, type SdkSourceKind } from './steam/sdk.js';
@@ -18,7 +19,7 @@ export interface StatusData {
   config: Config | null;
   buildableHere: Target[];
   notBuildableHere: Array<{ target: Target; reason: GsError }>;
-  outputs: Array<{ target: DesktopTarget; dir: string; exists: boolean }>;
+  outputs: Array<{ target: Target; dir: string; exists: boolean }>;
   lastRuns: Record<string, LastRun>;
   /** The Steamworks SDK builds would use, or null: then builds have no Steam features. */
   steamSdk: { source: SdkSourceKind; path: string; version: string | null; targets: DesktopTarget[] } | null;
@@ -52,9 +53,10 @@ export function getStatus(projectDir: string, host: NodeJS.Platform = process.pl
     electronVersion: ELECTRON_VERSION,
     host: { platform: host, arch: process.arch },
     config: loaded.data ?? null,
-    buildableHere: plan.jobs.map((j) => j.target),
+    // Xcode and Android Studio projects are generated on any OS.
+    buildableHere: TARGETS.filter((t) => plan.jobs.some((j) => j.target === t) || (MOBILE_TARGETS as readonly Target[]).includes(t)),
     notBuildableHere: plan.skipped.map((s) => ({ target: s.target, reason: s.reason })),
-    outputs: DESKTOP_TARGETS.map((target) => {
+    outputs: TARGETS.map((target) => {
       const dir = path.join(projectDir, 'out', target);
       return { target, dir, exists: fs.existsSync(dir) };
     }),

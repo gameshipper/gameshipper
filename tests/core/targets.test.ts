@@ -20,10 +20,8 @@ describe('planDesktopJobs', () => {
       ['mac', 'darwin', 'universal'],
       ['linux', 'linux', 'x64'],
     ]);
-    expect(plan.skipped.map((s) => [s.target, s.reason.code, s.fatal])).toEqual([
-      ['ios', 'TARGET_NOT_YET_SUPPORTED', false],
-      ['android', 'TARGET_NOT_YET_SUPPORTED', false],
-    ]);
+    // ios and android aren't Electron packages: runBuild hands them to buildMobileTargets.
+    expect(plan.skipped).toEqual([]);
   });
 
   it('Linux host builds an arm64 Mac app with a warning', () => {

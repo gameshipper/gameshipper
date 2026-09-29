@@ -70,16 +70,15 @@ describe('getStatus', () => {
     expect(s.electronVersion).toBe('44.4.5');
     expect(s.host).toEqual({ platform: 'win32', arch: process.arch });
     expect(s.config?.name).toBe('x');
-    expect(s.buildableHere).toEqual(['windows', 'linux']);
-    expect(s.notBuildableHere.map((n) => [n.target, n.reason.code])).toEqual([
-      ['mac', 'MAC_BUILD_HOST'],
-      ['ios', 'TARGET_NOT_YET_SUPPORTED'],
-      ['android', 'TARGET_NOT_YET_SUPPORTED'],
-    ]);
+    // Xcode and Android Studio projects are generated on any OS.
+    expect(s.buildableHere).toEqual(['windows', 'linux', 'ios', 'android']);
+    expect(s.notBuildableHere.map((n) => [n.target, n.reason.code])).toEqual([['mac', 'MAC_BUILD_HOST']]);
     expect(s.outputs).toEqual([
       { target: 'windows', dir: path.join(dir, 'out', 'windows'), exists: false },
       { target: 'mac', dir: path.join(dir, 'out', 'mac'), exists: false },
       { target: 'linux', dir: path.join(dir, 'out', 'linux'), exists: true },
+      { target: 'ios', dir: path.join(dir, 'out', 'ios'), exists: false },
+      { target: 'android', dir: path.join(dir, 'out', 'android'), exists: false },
     ]);
     expect(Object.keys(s.lastRuns)).toEqual(['build']);
     expect(s.steamSdk).toBeNull();

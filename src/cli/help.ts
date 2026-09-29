@@ -75,8 +75,8 @@ export const COMMANDS: CommandHelp[] = [
   },
   {
     name: 'build',
-    summary: 'Build desktop apps into out/<target>.',
-    usage: 'npx gameshipper build [--target windows,mac,linux] [--frozen-lock] [--steam-sdk <path>]',
+    summary: 'Build desktop apps and iOS/Android projects into out/<target>.',
+    usage: 'npx gameshipper build [--target windows,mac,linux,ios,android] [--frozen-lock] [--steam-sdk <path>]',
     flags: [{ name: 'target', value: '<list>', description: 'Comma-separated subset of the configured targets.' }, FROZEN_LOCK, STEAM_SDK],
   },
   {

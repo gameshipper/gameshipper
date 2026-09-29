@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest';
 import { runBuild } from '../../src/core/build.js';
 import { parseConfig } from '../../src/core/config/load.js';
 import type { packageDesktop } from '../../src/core/desktop/package.js';
+import type { buildMobileTargets, MobileInput } from '../../src/core/mobile/build-mobile.js';
 import { GsFailure } from '../../src/core/result.js';
 import { testCtx } from '../helpers/ctx.js';
 import { makeSolidPng } from '../helpers/png.js';
@@ -16,6 +17,10 @@ const fakePack: Pack = async (_ctx, _config, _appDir, _icon, job) => ({
   executable: `/out/${job.target}/game`,
   warnings: job.warnings,
 });
+
+type Mobile = typeof buildMobileTargets;
+const fakeMobile: Mobile = async (_ctx, _config, targets) =>
+  targets.map((target) => ({ target, output: { target, dir: `/out/${target}`, project: `/out/${target}/project` } }));
 
 function project(): { dir: string; shellDir: string } {
   const dir = makeTmpDir();
@@ -43,16 +48,52 @@ describe('runBuild', () => {
     expect(r.data!.outDir).toBe(path.join(dir, 'out'));
   });
 
-  it('skips mobile targets listed in the config, with a warning', async () => {
+  it('hands iOS and Android the staged game and the icon, after the desktop targets', async () => {
     const { dir, shellDir } = project();
-    const r = await runBuild(testCtx(dir), config({ targets: ['linux', 'ios', 'android'] }), { shellDir, host: 'linux', pack: fakePack });
+    writeFiles(dir, { 'icon.png': makeSolidPng(1024, 1024) });
+    const seen: Array<{ targets: readonly string[]; input: MobileInput }> = [];
+    const mobile: Mobile = async (ctx, cfg, targets, input) => {
+      seen.push({ targets, input });
+      return fakeMobile(ctx, cfg, targets, input);
+    };
+    const r = await runBuild(testCtx(dir), config({ icon: 'icon.png', targets: ['linux', 'ios', 'android'] }), { shellDir, host: 'linux', pack: fakePack, mobile });
     expect(r.ok).toBe(true);
     expect(r.data!.targets.map((t) => [t.target, t.status])).toEqual([
       ['linux', 'built'],
-      ['ios', 'skipped'],
-      ['android', 'skipped'],
+      ['ios', 'built'],
+      ['android', 'built'],
     ]);
-    expect(r.warnings.map((w) => w.code)).toEqual(['ICON_MISSING', 'STEAM_SDK_MISSING', 'TARGET_NOT_YET_SUPPORTED', 'TARGET_NOT_YET_SUPPORTED', 'STORE_IMAGES_SKIPPED']);
+    expect(r.data!.targets[1].mobile).toEqual({ target: 'ios', dir: '/out/ios', project: '/out/ios/project' });
+    expect(seen).toEqual([
+      { targets: ['ios', 'android'], input: { stageDir: path.join(dir, '.gameshipper', 'stage'), iconPng: path.join(dir, '.gameshipper', 'icons', 'icon.png') } },
+    ]);
+    expect(r.warnings.map((w) => w.code)).toEqual(['STEAM_SDK_MISSING', 'STORE_IMAGES_SKIPPED']);
+  });
+
+  it('reports an error iOS and Android share once, and fails only those targets', async () => {
+    const { dir, shellDir } = project();
+    const mobile: Mobile = async (_ctx, _cfg, targets) => targets.map((target) => ({ target, error: { code: 'BUNDLE_ID_REQUIRED', message: 'no bundle ID', fix: 'set it' } }));
+    const r = await runBuild(testCtx(dir), config({ targets: ['linux', 'ios', 'android'] }), { shellDir, host: 'linux', pack: fakePack, mobile });
+    expect(r.data!.targets.map((t) => [t.target, t.status])).toEqual([
+      ['linux', 'built'],
+      ['ios', 'failed'],
+      ['android', 'failed'],
+    ]);
+    expect(r.errors.map((e) => e.code)).toEqual(['BUNDLE_ID_REQUIRED']);
+  });
+
+  it('a mobile-only build packages nothing and runs no desktop build hooks', async () => {
+    const { dir, shellDir } = project();
+    writeFiles(dir, { 'hooks.mjs': "import * as fs from 'node:fs';\nexport default { name: 'hooks', beforePackage(ctx) { fs.writeFileSync(ctx.projectDir + '/before.txt', 'ran'); } };\n" });
+    const pack: Pack = async () => {
+      throw new Error('nothing to package');
+    };
+    const r = await runBuild(testCtx(dir), config({ targets: ['ios'], plugins: ['hooks.mjs'] }), { shellDir, host: 'win32', pack, mobile: fakeMobile });
+    expect(r.errors).toEqual([]);
+    expect(r.data!.targets.map((t) => [t.target, t.status])).toEqual([['ios', 'built']]);
+    expect(fs.existsSync(path.join(dir, 'before.txt'))).toBe(false);
+    // No desktop app is made, so no Steamworks SDK is needed.
+    expect(r.warnings.map((w) => w.code)).toEqual(['ICON_MISSING', 'STORE_IMAGES_SKIPPED']);
   });
 
   it('--target limits the build', async () => {

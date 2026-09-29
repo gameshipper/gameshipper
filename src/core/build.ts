@@ -7,6 +7,7 @@ import { assembleApp } from './desktop/assemble.js';
 import { makeIcons } from './desktop/icons.js';
 import { macAppFor, packageDesktop, type DesktopOutput } from './desktop/package.js';
 import { planDesktopJobs, type HostTools } from './desktop/targets.js';
+import { buildMobileTargets, MOBILE_TARGETS, type MobileOutput, type MobileTarget } from './mobile/build-mobile.js';
 import { loadPlugins, runPluginHook, type LoadedPlugin, type PluginHookContext } from './plugins.js';
 import { bundleCdn } from './prepare/bundle-cdn.js';
 import { runBuildCommand, stageGame } from './prepare/stage.js';
@@ -20,6 +21,8 @@ export interface TargetResult {
   target: Target;
   status: 'built' | 'failed' | 'skipped';
   output?: DesktopOutput;
+  /** ios/android: the generated Xcode or Android Studio project. */
+  mobile?: MobileOutput;
   errors: GsError[];
   warnings: GsError[];
 }
@@ -53,10 +56,14 @@ export interface BuildOptions extends PrepareOptions {
   pack?: typeof packageDesktop;
   /** Injectable for tests; defaults to signing (and notarizing) the Mac app. */
   finishMac?: typeof finishMacApp;
+  /** Injectable for tests; defaults to generating the Capacitor projects. */
+  mobile?: typeof buildMobileTargets;
 }
 
 export interface PreparedApp {
   appDir: string;
+  /** The staged game after CDN bundling: the desktop app's game/ folder and the mobile projects' web files. */
+  stageDir: string;
   iconBase: string | null;
   warnings: GsError[];
   plugins: LoadedPlugin[];
@@ -117,7 +124,18 @@ export async function prepareApp(
   const sdk = sdkFound ? ensureSteamSdk(ctx, sdkFound) : null;
   const steam = await bundleSteam(ctx, appDir, sdk, natives, opts.koffi);
   warnings.push(...steam.warnings);
-  return { appDir, iconBase, warnings, plugins, steam };
+  return { appDir, stageDir: staged.stageDir, iconBase, warnings, plugins, steam };
+}
+
+/** One entry per code and message: iOS and Android often fail for the same reason (BUNDLE_ID_REQUIRED, say). */
+function uniqueIssues(issues: GsError[]): GsError[] {
+  const seen = new Set<string>();
+  return issues.filter((e) => {
+    const key = `${e.code}\u0000${e.message}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
 }
 
 /** Packages every wanted target. One target failing never stops the others. */
@@ -148,8 +166,8 @@ export async function runBuild(ctx: Ctx, config: Config, opts: BuildOptions): Pr
     const natives = plan.jobs.map((j) => ({ platform: j.platform, arch: j.arch }));
     prepared = await prepareApp(ctx, config, opts, 'build', natives);
     hookBase = { projectDir: ctx.projectDir, appDir: prepared.appDir, config, log: (m) => ctx.log(m) };
-    // May still change the app folder: it runs before any target is packaged.
-    await runPluginHook(prepared.plugins, 'beforePackage', { ...hookBase, targets: plan.jobs.map((j) => j.target) });
+    // May still change the app folder: it runs before any target is packaged. Hooks are for desktop apps only.
+    if (plan.jobs.length) await runPluginHook(prepared.plugins, 'beforePackage', { ...hookBase, targets: plan.jobs.map((j) => j.target) });
   } catch (e) {
     if (e instanceof GsFailure) return fail(e.error);
     throw e;
@@ -178,6 +196,15 @@ export async function runBuild(ctx: Ctx, config: Config, opts: BuildOptions): Pr
       targets.push({ target: job.target, status: 'failed', errors: [error], warnings: job.warnings });
     }
   }
+  const mobileTargets = wanted.filter((t): t is MobileTarget => (MOBILE_TARGETS as readonly Target[]).includes(t));
+  const iconPng = prepared.iconBase ? `${prepared.iconBase}.png` : null;
+  for (const r of await (opts.mobile ?? buildMobileTargets)(ctx, config, mobileTargets, { stageDir: prepared.stageDir, iconPng })) {
+    targets.push(
+      'output' in r
+        ? { target: r.target, status: 'built', mobile: r.output, errors: [], warnings: [] }
+        : { target: r.target, status: 'failed', errors: [r.error], warnings: [] },
+    );
+  }
   for (const s of plan.skipped) {
     targets.push(
       s.fatal
@@ -189,8 +216,8 @@ export async function runBuild(ctx: Ctx, config: Config, opts: BuildOptions): Pr
   // Made on every build, --target or not: it takes about a second, and `check` needs them.
   const store = await makeStoreImages(ctx, config);
 
-  const errors = [...targets.flatMap((t) => t.errors), ...store.errors];
-  const warnings = [...prepared.warnings, ...targets.flatMap((t) => t.warnings), ...store.warnings];
+  const errors = uniqueIssues([...targets.flatMap((t) => t.errors), ...store.errors]);
+  const warnings = uniqueIssues([...prepared.warnings, ...targets.flatMap((t) => t.warnings), ...store.warnings]);
   const data: BuildData = { targets, outDir, store };
   return errors.length ? fail(errors, warnings, data) : ok(data, warnings);
 }
