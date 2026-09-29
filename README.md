@@ -42,6 +42,7 @@ Runs the game in the same shell the builds use. The window stays a window even w
 | `--seconds <n>` | How long a smoke run lasts after the page loads (default 5). Implies `--smoke`. |
 | `--fullscreen` | Honour `window.fullscreen` from `gameshipper.json`. |
 | `--frozen-lock` | Fail instead of accepting changed or new CDN files; for CI. |
+| `--steam-sdk <path>` | Your Steamworks SDK zip or folder (see [Steam](#steam)). |
 
 ### `build`
 
@@ -51,12 +52,13 @@ Builds desktop apps into `out/<target>`. For a game named "Spinning Cube" that's
 |---|---|
 | `--target <list>` | Comma-separated subset of the configured targets, e.g. `--target windows,linux`. |
 | `--frozen-lock` | Fail instead of accepting changed or new CDN files; for CI. |
+| `--steam-sdk <path>` | Your Steamworks SDK zip or folder (see [Steam](#steam)). |
 
 `targets` defaults to `windows`, `mac` and `linux`. `ios` and `android` can be added to it, but this version skips them with a `TARGET_NOT_YET_SUPPORTED` warning.
 
 ### `status`
 
-Shows the config, what this computer can build, which `out/` folders exist, and the last result of `init`, `play` and `build` with their log paths. It succeeds for any existing folder, so it's the command to run first.
+Shows the config, what this computer can build, the Steamworks SDK builds will use, which `out/` folders exist, and the last result of `init`, `play` and `build` with their log paths. It succeeds for any existing folder, so it's the command to run first.
 
 ### `help`
 
@@ -95,11 +97,14 @@ The loop: `status --json`, `init --yes --json`, then `play --smoke --json` until
 | `SMOKE_NO_RESULT`, `SMOKE_TIMEOUT` | error | The game never reported back, or froze and had to be stopped. |
 | `GAME_USES_INTERNET` | warning | The game loaded something from the internet while running, so it won't work offline. |
 | `GAME_CONSOLE_WARNING` | warning | The game logged a warning. |
+| `STEAM_INIT_FAILED` | error | Steam is running but didn't start for the game's App ID (usually one the signed-in account doesn't own). |
+| `STEAM_NOT_RUNNING` | warning | Steam isn't running, so `window.steam` was a no-op. |
+| `PLUGIN_LOAD_FAILED` | error | A plugin's module failed to load in the game. |
 | `GAME_NAVIGATION_BLOCKED` | warning | The game tried to take its window to a page that isn't the game's, like `about:blank` or `file:`, or an embedded site tried to open a link. Web, mail and `steam:` links the game itself opens aren't reported: they open in the player's browser or app. |
 
 Each code lists at most 10 issues, then one more issue counting the rest. `data.smoke.summary.events` holds the first 100 diagnostic events; `data.smoke.eventsLog` names a JSON-lines file with all of them, including everything the game logged.
 
-Other problems have codes too, such as `CDN_FETCH_FAILED`, `CDN_CHANGED`, `ENTRY_MISSING`, `CONFIG_INVALID`, `ICON_TOO_SMALL`, `ICON_NOT_SQUARE` and `PACKAGE_FAILED` from a build, or `GAME_EXITED` when a game quits with an error during `play`, each with its fix. An icon problem only stops `build`: `play` warns with the same code and uses the default icon.
+Other problems have codes too, such as `CDN_FETCH_FAILED`, `CDN_CHANGED`, `ENTRY_MISSING`, `CONFIG_INVALID`, `ICON_TOO_SMALL`, `ICON_NOT_SQUARE`, `STEAM_SDK_MISSING`, `STEAM_SDK_INVALID`, `PLUGIN_HOOK_FAILED` and `PACKAGE_FAILED` from a build, or `GAME_EXITED` when a game quits with an error during `play`, each with its fix. An icon problem only stops `build`: `play` warns with the same code and uses the default icon.
 
 ### Files
 
@@ -108,6 +113,7 @@ Other problems have codes too, such as `CDN_FETCH_FAILED`, `CDN_CHANGED`, `ENTRY
 | `gameshipper.json` | The config. Commit it. |
 | `gameshipper.lock` | The URL and SHA-256 of every downloaded CDN file. Commit it. When a CDN file changes, `build` warns with `CDN_CHANGED` and updates the lock; `--frozen-lock` makes that an error. |
 | `out/<target>/` | The builds. |
+| `.sdk/` | Your Steamworks SDK zip. Don't commit it (`init` adds it to `.gitignore`). |
 | `.gameshipper/logs/` | Run logs (the newest 50 of each command), plus the events logs and smoke summaries of `play` runs (the newest 20). |
 | `.gameshipper/last/` | The last result of each command, which `status` reads. |
 
@@ -123,7 +129,8 @@ Other problems have codes too, such as `CDN_FETCH_FAILED`, `CDN_CHANGED`, `ENTRY
   "icon": "icon.png",
   "targets": ["windows", "mac", "linux"],
   "window": { "width": 1280, "height": 720, "fullscreen": true, "resizable": true },
-  "steam": { "appId": 480 }
+  "steam": { "appId": 480, "sdk": null, "overlay": "auto" },
+  "plugins": []
 }
 ```
 
@@ -147,6 +154,61 @@ const progress = await saves.load('slot1'); // null when there's no save
 
 Slot names are 1 to 64 letters, numbers, `-` or `_`, and the data must be JSON-serializable. Saves live in the game's folder in the OS app data folder (`~/Library/Application Support/<Name>/saves` on a Mac, `%APPDATA%\<Name>\saves` on Windows, `~/.config/<Name>/saves` on Linux).
 
+## Steam
+
+Your game gets `window.steam` in desktop builds and in `play`. It works with your own copy of Valve's Steamworks SDK; Gameshipper never ships Valve's files itself.
+
+1. Download the Steamworks SDK zip from https://partner.steamgames.com/downloads/list (you need a Steamworks partner login).
+2. Put it in your game folder's `.sdk/` folder, e.g. `.sdk/steamworks_sdk_165.zip`. `init` adds `.sdk/` to `.gitignore`: don't commit Valve's files. You can also set `steam.sdk` in gameshipper.json (relative to the game folder), set `GAMESHIPPER_STEAM_SDK`, or pass `--steam-sdk <path>`. Once a build has used an SDK, Gameshipper keeps its libraries in its cache and later projects find them there.
+3. `npx gameshipper status` shows which SDK builds will use. Without one, builds still work (with a `STEAM_SDK_MISSING` warning) and `window.steam.isAvailable()` resolves `false`.
+
+Each build gets only the Steam library its OS needs, copied from your SDK. Nobody needs a `steam_appid.txt`, and none is ever shipped.
+
+```js
+if (window.steam && (await steam.isAvailable())) {
+  await steam.unlockAchievement('FIRST_WIN');
+  await steam.setStat('WINS', 10);                 // saved to Steam right away
+  await steam.uploadLeaderboardScore('HIGH_SCORES', 12345);
+  const top = await steam.getLeaderboardEntries('HIGH_SCORES', 10);
+  await steam.setRichPresence('status', 'Level 3');
+  const name = await steam.getUserName();
+  steam.activateOverlay('achievements');
+}
+```
+
+Every method resolves to a harmless value (`false`, `null` or `[]`) when Steam isn't running, so the game never needs to guard each call. Also available: `getSteamId`, `getLanguage`, `isSteamDeck`, `clearAchievement`, `isAchievementUnlocked`, `listAchievements`, `getStat`, `storeStats`, `clearRichPresence`, `activateOverlayWebPage`, and GemShell-style names (`getPersonaName`, `getSteamID`, `getAchievement`, `getStatInt`, `setStatInt`, `getStatFloat`, `setStatFloat`, `requestStats`, `requestStatsAndWait`, `runCallbacks`), so GemShell games need few or no changes. Only the game's own pages can use `window.steam`.
+
+- **App ID.** `steam.appId` defaults to 480, Valve's Spacewar test app, which every Steam account can use. With your own App ID, a packaged build started outside Steam asks Steam to launch it (Valve's standard check).
+- **Overlay (Shift+Tab).** `steam.overlay` is `"auto"` by default. On macOS that uses a native window that mirrors the game so Steam's overlay can draw on it (only when Steam launched the game); on Windows and Linux it keeps a new frame coming 60 times a second. Set `"native"`, `"repaint"` or `"off"` to override.
+- **Steam Deck.** Steam's on-screen keyboard opens when a text field gets focus.
+- **Troubleshooting.** `play --smoke --json` reports `STEAM_NOT_RUNNING` (a warning: start Steam) or `STEAM_INIT_FAILED` (an error: usually an App ID the signed-in account doesn't own).
+
+## Plugins
+
+List module paths in `"plugins"` in gameshipper.json. A plugin is one file, or a folder with a package.json `main` or an `index.mjs`:
+
+```js
+export default {
+  name: 'myplugin',
+  // The game calls these as await gameshipper.plugins.myplugin.doThing(arg).
+  // They run in Electron's main process with full Node.js access.
+  main: { async doThing(arg) { return `did ${arg}`; } },
+  // Optional build hooks.
+  async beforePackage(ctx) { /* ctx.appDir, ctx.targets, ctx.config, ctx.log() */ },
+  async afterPackage(ctx) { /* ctx.target, ctx.outDir, ctx.executable */ },
+};
+```
+
+Plugin and function names use letters, digits and `_`. A plugin's files are never copied into the game itself. A failing `beforePackage` stops the build (`PLUGIN_HOOK_FAILED`); a failing `afterPackage` fails that target. Only use plugins you trust: they run with the same rights as the game.
+
+## TypeScript
+
+```ts
+/// <reference types="gameshipper/types" />
+```
+
+This types `window.steam` and `window.gameshipper` (both `undefined` in a normal browser).
+
 ## Building from each OS
 
 | Host | Windows | Linux | Mac |
@@ -159,7 +221,7 @@ Windows and Linux builds are x64. ¹ Universal Mac builds need Apple's command-l
 
 ## Coming in later versions
 
-Steam features (Steamworks, the overlay, Steam Deck keyboard), store images, `check`, `publish`, Mac signing and notarization, and iOS and Android builds.
+Store images, `check`, `publish`, Mac signing and notarization, and iOS and Android builds.
 
 ## License
 
