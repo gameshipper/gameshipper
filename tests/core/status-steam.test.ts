@@ -32,10 +32,13 @@ describe('status reports the Steamworks SDK', () => {
     expect(statusSummary(none)).toContain('Steam SDK: none, so builds have no Steam features (see the STEAM_SDK_MISSING fix)');
     const broken = getStatus(dir, 'darwin', { ...env(), GAMESHIPPER_STEAM_SDK: path.join(dir, 'missing.zip') });
     expect([broken.ok, broken.warnings.map((w) => w.code)]).toEqual([true, ['STEAM_SDK_INVALID']]);
+    const line = statusSummary(broken).find((l) => l.startsWith('Steam SDK:'));
+    expect(line).toBe('Steam SDK: not usable (see the STEAM_SDK_INVALID warning)');
   });
 
   it('says nothing about the SDK in a folder that is not a project', () => {
     const r = getStatus(makeTmpDir(), 'darwin', env());
     expect(r.warnings.map((w) => w.code)).toEqual(['CONFIG_MISSING']);
+    expect(statusSummary(r).find((l) => l.startsWith('Steam SDK:'))).toBe('Steam SDK: none found');
   });
 });
