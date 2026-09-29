@@ -1,6 +1,7 @@
 import { spawn } from 'node:child_process';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
+import { CAPTURE_ENV_NAMES, captureEnv, type CaptureSettings } from '../shell/capture.js';
 import { LOAD_BACKSTOP_EXTRA_SECONDS, LOAD_TIMEOUT_DESCRIPTION, type DiagEvent, type DiagSummary } from '../shell/diagnostics.js';
 import type { Ctx } from './context.js';
 import { killTree, OUTPUT_BUFFER_CHARS, outputTail, releaseAfterExit, stopWithGameshipper } from './proc.js';
@@ -41,6 +42,8 @@ export interface SmokeOptions {
    * from starting as an app.
    */
   env?: NodeJS.ProcessEnv;
+  /** What the shell captures during the run (`play --screenshot`, `check`); passed as its GAMESHIPPER_* variables. */
+  capture?: CaptureSettings;
 }
 
 /**
@@ -287,6 +290,8 @@ export function truncateSummary(summary: DiagSummary): SmokeSummary {
     events: summary.events.slice(0, MAX_SUMMARY_EVENTS).map(capEvent),
     droppedInfo: summary.droppedInfo,
     truncatedEvents: Math.max(0, summary.events.length - MAX_SUMMARY_EVENTS),
+    // A `check` run's measurements; the shell keeps them small (probe.ts cleanLayout).
+    ...(summary.probe ? { probe: summary.probe } : {}),
   };
 }
 
@@ -390,6 +395,8 @@ export function gameEnv(eventsLog: string, userDataDir: string, windowed: boolea
   delete env.ELECTRON_RUN_AS_NODE;
   delete env.GAMESHIPPER_SMOKE_SECONDS;
   delete env.GAMESHIPPER_SMOKE_OUT;
+  // Capture settings only ever come from the command that runs the game (captureEnv), never from the environment.
+  for (const name of CAPTURE_ENV_NAMES) delete env[name];
   return env;
 }
 
@@ -438,7 +445,11 @@ function readSummary(file: string): DiagSummary | 'missing' | 'unreadable' {
   }
   try {
     const parsed = JSON.parse(text) as Partial<DiagSummary> | null;
-    if (parsed && Array.isArray(parsed.events)) return { events: parsed.events, droppedInfo: parsed.droppedInfo ?? 0 };
+    if (parsed && Array.isArray(parsed.events)) {
+      const summary: DiagSummary = { events: parsed.events, droppedInfo: parsed.droppedInfo ?? 0 };
+      if (parsed.probe && typeof parsed.probe === 'object') summary.probe = parsed.probe;
+      return summary;
+    }
   } catch {
     // fall through
   }
@@ -456,6 +467,7 @@ export async function runSmoke(ctx: Ctx, opts: SmokeOptions): Promise<Result<Smo
     ...Object.fromEntries(extra),
     GAMESHIPPER_SMOKE_SECONDS: String(opts.seconds),
     GAMESHIPPER_SMOKE_OUT: outFile,
+    ...captureEnv(opts.capture ?? {}),
   };
   const timeoutMs = opts.timeoutMs ?? (opts.seconds + SMOKE_TIMEOUT_GRACE_SECONDS) * 1000;
   ctx.log(`smoke run: ${opts.command} ${opts.args.join(' ')} for ${opts.seconds}s`);
@@ -486,4 +498,31 @@ export async function runSmoke(ctx: Ctx, opts: SmokeOptions): Promise<Result<Smo
   const all = [...errors, ...timeout];
   const data: SmokeData = { summary: truncateSummary(summary), eventsLog, exitCode: run.exitCode };
   return all.length ? fail(all, warnings, data) : ok(data, warnings);
+}
+
+/**
+ * Every event of the given kinds in an events log (JSON lines), in order. A smoke result's summary keeps only the
+ * first MAX_SUMMARY_EVENTS events; the log has them all. Lines that aren't JSON (a run cut short mid-write) are
+ * skipped, and so is a log that can't be read.
+ */
+export function readLoggedEvents<K extends DiagEvent['kind']>(eventsLog: string, kinds: readonly K[]): Array<Extract<DiagEvent, { kind: K }>> {
+  let text: string;
+  try {
+    text = fs.readFileSync(eventsLog, 'utf8');
+  } catch {
+    return [];
+  }
+  const wanted = new Set<string>(kinds);
+  const found: Array<Extract<DiagEvent, { kind: K }>> = [];
+  for (const line of text.split('\n')) {
+    // Most lines are console messages: only parse lines that can be one of the wanted kinds.
+    if (!kinds.some((kind) => line.includes(`"kind":"${kind}"`))) continue;
+    try {
+      const event = JSON.parse(line) as DiagEvent;
+      if (wanted.has(event.kind)) found.push(event as Extract<DiagEvent, { kind: K }>);
+    } catch {
+      // A line cut short when the game stopped.
+    }
+  }
+  return found;
 }
