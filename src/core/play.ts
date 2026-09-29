@@ -44,7 +44,7 @@ export async function runPlay(ctx: Ctx, config: Config, opts: PlayOptions): Prom
     const run = await launch(ctx, electron, [prepared.appDir], { env: gameEnv(eventsLog, userDataDir, windowed), quitGraceMs: QUIT_GRACE_MS });
     const data: PlayData = { appDir: prepared.appDir, eventsLog };
     // Interactive play has no timeout, so any signal came from outside Gameshipper (a crash or a kill), or
-    // from stopping a game that didn't quit after Ctrl+C, which the CLI reports as INTERRUPTED instead.
+    // from stopping a game that didn't quit after Ctrl+C, which the CLI has already reported.
     if (run.exitCode === 0) return ok(data, prepared.warnings);
     const how = run.signal ? `stopped by ${run.signal}` : `exit code ${run.exitCode}`;
     const message = run.outputTail.trim()

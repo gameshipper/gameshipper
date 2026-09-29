@@ -1,4 +1,4 @@
 #!/usr/bin/env node
-import { main } from '../dist/cli/main.js';
+import { start } from './start.js';
 
-process.exitCode = await main(process.argv.slice(2));
+process.exitCode = await start(process.argv.slice(2), () => import('../dist/cli/main.js'));

@@ -154,6 +154,18 @@ describe('playSummary', () => {
     expect(playSummary(bad, { smoke: true })).toEqual(['✗ Found 2 problems while the game ran.', 'Events: /p/events.jsonl']);
     const one = fail(gsError('GAME_CONSOLE_ERROR', 'x'), [], { appDir: '/p/app', smoke });
     expect(playSummary(one, { smoke: true })[0]).toBe('✗ Found 1 problem while the game ran.');
+    // Each code lists 10 problems, then one entry counting the rest: those count as the problems they stand for.
+    const many = fail(
+      [
+        ...Array.from({ length: 10 }, (_, i) => gsError('GAME_CONSOLE_ERROR', `error ${i}`)),
+        gsError('GAME_CONSOLE_ERROR', '…and 2990 more like this (see the events log)', 'Every one is listed in /p/events.jsonl.'),
+        gsError('GAME_FILE_MISSING', 'y'),
+        gsError('SMOKE_TIMEOUT', 'z'),
+      ],
+      [],
+      { appDir: '/p/app', smoke },
+    );
+    expect(playSummary(many, { smoke: true })[0]).toBe('✗ Found 3002 problems while the game ran.');
     // The game never reported back: the errors say why, and there is nothing to summarize.
     expect(playSummary(fail(gsError('SMOKE_NO_RESULT', 'x'), [], { appDir: '/p/app' }), { smoke: true })).toEqual([]);
   });

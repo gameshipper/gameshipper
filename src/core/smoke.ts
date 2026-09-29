@@ -54,6 +54,14 @@ function formatSeconds(ms: number): string {
   return `${n} second${n === 1 ? '' : 's'}`;
 }
 
+/** The issue standing for the rest of a code's issues: "…and 19990 more like this (see the events log)". */
+const MORE_LIKE_THIS = /^…and (\d+) more like this /;
+
+/** How many problems `issues` stand for: an "…and N more like this" issue counts as N. */
+export function problemCount(issues: GsError[]): number {
+  return issues.reduce((n, issue) => n + (Number(MORE_LIKE_THIS.exec(issue.message)?.[1]) || 1), 0);
+}
+
 /** Compile-time check that every DiagEvent kind is handled. */
 const unhandled = (_event: never): void => {};
 

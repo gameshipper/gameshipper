@@ -75,6 +75,8 @@ interface RunState {
   /** build and play: the command and its run log, for the last-run record. */
   command?: string;
   ctx?: Ctx;
+  /** An interactive play session, which a person ends with Ctrl+C as often as by closing the window. */
+  interactivePlay?: boolean;
 }
 
 const str = (v: string | boolean | undefined) => (typeof v === 'string' ? v : undefined);
@@ -216,6 +218,7 @@ async function playCommand(projectDir: string, values: Values, io: CliIO, run: R
   if (!Number.isFinite(seconds) || seconds <= 0) return usage('--seconds must be a positive number.', 'For example: --seconds 10');
   const smoke = values.smoke === true || secondsRaw !== undefined;
   const ctx = startRun(projectDir, 'play', run);
+  run.interactivePlay = !smoke;
   const loaded = loadConfig(projectDir);
   let result: Result<unknown>;
   if (loaded.ok) {
@@ -299,11 +302,10 @@ async function dispatch(argv: string[], io: CliIO, run: RunState): Promise<numbe
 }
 
 /**
- * The Result for a run that ended abnormally (interrupted, or an unexpected error): logged, with the log
- * path, and recorded as the command's last run so `status` doesn't keep showing an earlier success.
+ * Finishes the Result for a run that ended abnormally (a signal, or an unexpected error): logged, with the
+ * log path, and recorded as the command's last run so `status` doesn't keep showing an earlier success.
  */
-function abnormalResult(run: RunState, error: GsError, details: string): Result<unknown> {
-  const result = fail(error);
+function abnormalResult(run: RunState, result: Result<unknown>, details: string): Result<unknown> {
   const { ctx, command } = run;
   if (ctx) {
     result.logPath = ctx.logPath;
@@ -330,7 +332,7 @@ function renderCrash(result: Result<unknown>, json: boolean): string {
 function crash(e: unknown, io: CliIO, run: RunState): number {
   if (run.done) return run.exitCode ?? 1;
   run.done = true;
-  const result = abnormalResult(run, internalError(e), errorDetails(e));
+  const result = abnormalResult(run, fail(internalError(e)), errorDetails(e));
   try {
     io.write(renderCrash(result, run.json));
   } catch {
@@ -361,7 +363,8 @@ function exitAfterWriting(text: string, code: number): void {
 }
 
 /**
- * While the real CLI runs a command: a signal ends it with an INTERRUPTED Result (exit 128 + signal number),
+ * While the real CLI runs a command: a signal ends it with an INTERRUPTED Result (exit 128 + signal number;
+ * Ctrl+C in an interactive play session is an ok Result with a PLAY_STOPPED warning, still exit 130),
  * and an uncaught error or unhandled rejection with an INTERNAL_ERROR Result (exit 1). Either is printed
  * once and recorded as the last run. The child-stopping handlers in core/proc.ts still stop builds and games
  * (an interactive game is first asked to quit), and leave the exit to these. Returns the function that
@@ -374,8 +377,12 @@ function watchProcess(run: RunState): () => void {
     if (run.done) process.exit(run.exitCode ?? code);
     run.done = true;
     run.exitCode = code;
-    const error = gsError('INTERRUPTED', `Stopped by ${signal} before finishing.`, 'Run the command again; nothing was published.');
-    const result = abnormalResult(run, error, `stopped by ${signal}`);
+    // Ctrl+C is one of the ways a person ends an interactive play session, not a failed play.
+    const outcome =
+      run.interactivePlay && signal === 'SIGINT'
+        ? ok(undefined, [gsError('PLAY_STOPPED', 'Stopped by Ctrl+C.')])
+        : fail(gsError('INTERRUPTED', `Stopped by ${signal} before finishing.`, "Run the command again when you're ready."));
+    const result = abnormalResult(run, outcome, `stopped by ${signal}`);
     exitAfterWriting(run.json ? renderJson(result) : `${renderHuman(result, [])}\n`, code);
   };
   const onUncaught = (e: unknown): void => {
@@ -383,7 +390,7 @@ function watchProcess(run: RunState): () => void {
     if (run.done) return;
     run.done = true;
     run.exitCode = 1;
-    exitAfterWriting(renderCrash(abnormalResult(run, internalError(e), errorDetails(e)), run.json), 1);
+    exitAfterWriting(renderCrash(abnormalResult(run, fail(internalError(e)), errorDetails(e)), run.json), 1);
   };
   for (const signal of INTERRUPT_SIGNALS) process.on(signal, onSignal);
   process.on('uncaughtException', onUncaught);

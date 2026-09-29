@@ -3,6 +3,7 @@ import type { BuildData } from '../core/build.js';
 import type { InitData } from '../core/config/init.js';
 import type { PlayData } from '../core/play.js';
 import type { Result } from '../core/result.js';
+import { problemCount } from '../core/smoke.js';
 import type { StatusData } from '../core/status.js';
 
 /** Human summary lines printed above a Result's errors, warnings and log path. Never used with --json. */
@@ -49,7 +50,9 @@ export function playSummary(r: Result<PlayData>, opts: { smoke: boolean }): stri
   if (opts.smoke) {
     const { smoke } = r.data;
     if (!smoke) return [];
-    return [r.ok ? '✓ The game ran with no errors.' : `✗ Found ${plural(r.errors.length, 'problem')} while the game ran.`, `Events: ${smoke.eventsLog}`];
+    // Each code lists a few problems, then one entry counting the rest.
+    const found = `✗ Found ${plural(problemCount(r.errors), 'problem')} while the game ran.`;
+    return [r.ok ? '✓ The game ran with no errors.' : found, `Events: ${smoke.eventsLog}`];
   }
   if (!r.ok) return [];
   return ['Game closed.', ...(r.data.eventsLog ? [`Events: ${r.data.eventsLog}`] : [])];
