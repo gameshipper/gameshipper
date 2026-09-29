@@ -4,7 +4,7 @@ export type ImportMap = Record<string, string>;
 
 export const VENDOR_ROOT = '_gameshipper/cdn';
 
-const KNOWN_EXT = /\.(m?js|css|json|wasm|png|jpe?g|gif|webp|svg|ico|woff2?|ttf|otf|mp3|ogg|wav|m4a|mp4|webm|glb|gltf|bin|hdr|ktx2|txt)$/i;
+const KNOWN_EXT = /\.(m?js|css|json|wasm|png|jpe?g|gif|webp|avif|svg|ico|woff2?|ttf|otf|mp3|ogg|wav|m4a|mp4|webm|glb|gltf|bin|hdr|ktx2|txt)$/i;
 
 const EXT_BY_TYPE: Array<[RegExp, string]> = [
   [/javascript|ecmascript/, '.js'],
@@ -14,8 +14,16 @@ const EXT_BY_TYPE: Array<[RegExp, string]> = [
   [/font\/woff2/, '.woff2'],
   [/font\/woff/, '.woff'],
   [/font\/ttf|font\/sfnt/, '.ttf'],
+  [/font\/otf/, '.otf'],
   [/image\/png/, '.png'],
   [/image\/svg/, '.svg'],
+  [/image\/jpeg/, '.jpg'],
+  [/image\/gif/, '.gif'],
+  [/image\/webp/, '.webp'],
+  [/image\/avif/, '.avif'],
+  [/audio\/mpeg/, '.mp3'],
+  [/audio\/ogg/, '.ogg'],
+  [/audio\/(x-)?wave?\b/, '.wav'],
 ];
 
 export function isRemote(spec: string): boolean {
@@ -45,8 +53,16 @@ function hostDir(u: URL): string {
   return u.host.replace(/[^A-Za-z0-9.-]/g, '_');
 }
 
+function decodedPath(u: URL): string {
+  try {
+    return decodeURIComponent(u.pathname);
+  } catch {
+    return u.pathname; // malformed escape like %ZZ
+  }
+}
+
 function pathSegments(u: URL): string[] {
-  return decodeURIComponent(u.pathname).split('/').filter(Boolean).map(cleanSegment);
+  return decodedPath(u).split('/').filter(Boolean).map(cleanSegment);
 }
 
 /** Where a downloaded URL is stored inside the staged game (posix path, no leading slash). */
@@ -73,7 +89,7 @@ export function vendorPrefixFor(urlPrefix: string): string {
 }
 
 export function resolveBare(spec: string, map: ImportMap): string | null {
-  if (map[spec] !== undefined) return map[spec];
+  if (Object.hasOwn(map, spec)) return map[spec];
   const prefix = Object.keys(map)
     .filter((k) => k.endsWith('/') && spec.startsWith(k))
     .sort((a, b) => b.length - a.length)[0];

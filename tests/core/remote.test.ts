@@ -30,6 +30,32 @@ describe('remote helpers', () => {
     expect(extForContentType(null)).toBe('');
   });
 
+  it('maps image, audio and font content types to extensions', () => {
+    const cases: Array<[string, string]> = [
+      ['image/jpeg', '.jpg'],
+      ['image/gif', '.gif'],
+      ['image/webp', '.webp'],
+      ['image/avif', '.avif'],
+      ['audio/mpeg', '.mp3'],
+      ['audio/ogg', '.ogg'],
+      ['audio/wav', '.wav'],
+      ['audio/x-wav', '.wav'],
+      ['audio/wave', '.wav'],
+      ['font/otf', '.otf'],
+    ];
+    for (const [type, ext] of cases) expect(extForContentType(type), type).toBe(ext);
+  });
+
+  it('does not double a known extension that has a content-type mapping', () => {
+    expect(vendorPathFor('https://x/img.avif', 'image/avif')).toBe('_gameshipper/cdn/x/img.avif');
+    expect(vendorPathFor('https://x/img', 'image/avif')).toBe('_gameshipper/cdn/x/img.avif');
+  });
+
+  it('falls back to the raw path when a percent-escape is malformed', () => {
+    expect(vendorPathFor('https://x/a%ZZ.js', null)).toBe('_gameshipper/cdn/x/a_ZZ.js');
+    expect(vendorPrefixFor('https://x/b%E4/')).toBe('_gameshipper/cdn/x/b_E4/');
+  });
+
   it('keeps known extensions and the URL path', () => {
     expect(vendorPathFor('https://unpkg.com/three@0.170.0/build/three.module.js', 'text/javascript')).toBe(
       '_gameshipper/cdn/unpkg.com/three@0.170.0/build/three.module.js',
@@ -59,5 +85,11 @@ describe('remote helpers', () => {
     expect(resolveBare('three', map)).toBe('https://x/three.js');
     expect(resolveBare('three/addons/controls/Orbit.js', map)).toBe('https://x/jsm/controls/Orbit.js');
     expect(resolveBare('lodash', map)).toBeNull();
+  });
+
+  it('ignores inherited properties when resolving bare specifiers', () => {
+    expect(resolveBare('constructor', {})).toBeNull();
+    expect(resolveBare('toString', { 'three/': 'https://x/three/' })).toBeNull();
+    expect(resolveBare('__proto__', {})).toBeNull();
   });
 });
