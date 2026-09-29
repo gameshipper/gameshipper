@@ -41,3 +41,12 @@ export function caseMismatch(gameRoot: string, parts: string[], listDir: (dir: s
   const real = actual.join('/');
   return real === parts.join('/') ? null : real;
 }
+
+/**
+ * The game's userData folder, where saves live. Play runs pass GAMESHIPPER_USER_DATA to keep them in the
+ * project; otherwise it's named after the file-safe productName, since the display name may not be a
+ * valid folder name ("Moon: Rising" on Windows).
+ */
+export function userDataDir(env: NodeJS.ProcessEnv, appDataDir: string, productName: string): string {
+  return env.GAMESHIPPER_USER_DATA || path.join(appDataDir, productName);
+}

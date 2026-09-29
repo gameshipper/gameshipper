@@ -1,7 +1,7 @@
 import * as path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { mimeType } from '../../src/shell/mime.js';
-import { caseMismatch, requestParts, resolveGamePath } from '../../src/shell/paths.js';
+import { caseMismatch, requestParts, resolveGamePath, userDataDir } from '../../src/shell/paths.js';
 
 describe('requestParts / resolveGamePath', () => {
   it('maps app:// URLs to files under the game root', () => {
@@ -48,5 +48,16 @@ describe('mimeType', () => {
     expect(mimeType('x.html')).toBe('text/html; charset=utf-8');
     expect(mimeType('x.glb')).toBe('model/gltf-binary');
     expect(mimeType('x.unknown')).toBe('application/octet-stream');
+  });
+});
+
+describe('userDataDir', () => {
+  it('uses GAMESHIPPER_USER_DATA when set (play runs keep saves in the project)', () => {
+    expect(userDataDir({ GAMESHIPPER_USER_DATA: '/p/.gameshipper/play-data' }, '/appdata', 'Moon- Rising')).toBe('/p/.gameshipper/play-data');
+  });
+
+  it("otherwise names the folder after the file-safe productName, under the OS's app data folder", () => {
+    expect(userDataDir({}, '/appdata', 'Moon- Rising')).toBe(path.join('/appdata', 'Moon- Rising'));
+    expect(userDataDir({ GAMESHIPPER_USER_DATA: '' }, '/appdata', 'Moon- Rising')).toBe(path.join('/appdata', 'Moon- Rising'));
   });
 });

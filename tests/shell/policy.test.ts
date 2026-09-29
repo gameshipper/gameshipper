@@ -5,6 +5,8 @@ import {
   isGameUrl,
   isPermissionAllowed,
   navigationAction,
+  RETURN_LOOP_MS,
+  returnToGame,
 } from '../../src/shell/policy.js';
 
 describe('isGameUrl', () => {
@@ -70,5 +72,22 @@ describe('CROSS_ORIGIN_ISOLATION_HEADERS', () => {
       'cross-origin-opener-policy': 'same-origin',
       'cross-origin-embedder-policy': 'credentialless',
     });
+  });
+});
+
+describe('returnToGame', () => {
+  it('returns the first time the game lands on a page that is not the game', () => {
+    expect(returnToGame(null, 1_000)).toBe(true);
+  });
+
+  it('stops when it lands there again within 5 seconds of the last return', () => {
+    expect(RETURN_LOOP_MS).toBe(5000);
+    expect(returnToGame(1_000, 1_000)).toBe(false);
+    expect(returnToGame(1_000, 5_999)).toBe(false);
+  });
+
+  it('returns again once 5 seconds have passed', () => {
+    expect(returnToGame(1_000, 6_000)).toBe(true);
+    expect(returnToGame(1_000, 60_000)).toBe(true);
   });
 });

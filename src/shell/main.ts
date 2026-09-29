@@ -12,13 +12,14 @@ import {
 import { chromiumSwitches } from './flags.js';
 import { isFullscreenToggle } from './keys.js';
 import { mimeType } from './mime.js';
-import { caseMismatch, requestParts } from './paths.js';
+import { caseMismatch, requestParts, userDataDir } from './paths.js';
 import {
   classifyLoadFailure,
   CROSS_ORIGIN_ISOLATION_HEADERS,
   isGameUrl,
   isPermissionAllowed,
   navigationAction,
+  returnToGame,
 } from './policy.js';
 import { planFileResponse } from './range.js';
 import { entryUrl, readRuntimeConfig } from './runtime-config.js';
@@ -89,7 +90,7 @@ for (const [name, value] of chromiumSwitches(process.platform)) app.commandLine.
 // Electron names the save folder after the app name the first time something asks for it, so pin it
 // to the file-safe productName from package.json ("Moon- Rising") before setName switches to the
 // display name ("Moon: Rising" isn't a valid folder name on Windows).
-app.setPath('userData', env.GAMESHIPPER_USER_DATA || path.join(app.getPath('appData'), app.getName()));
+app.setPath('userData', userDataDir(env, app.getPath('appData'), app.getName()));
 app.setName(config.name);
 protocol.registerSchemesAsPrivileged([
   {
@@ -173,6 +174,17 @@ function leaveGame(url: string): void {
   }
 }
 
+/**
+ * Loads the game page; true once it has loaded. A failed load is recorded by did-fail-load, so the
+ * rejection is only caught: left unhandled, it would end a smoke run as a crash.
+ */
+function loadGame(win: BrowserWindow): Promise<boolean> {
+  return win.loadURL(gameEntry).then(
+    () => true,
+    () => false,
+  );
+}
+
 function keepInGame(details: { url: string; isMainFrame: boolean; preventDefault(): void }): void {
   if (!details.isMainFrame || navigationAction(details.url) === 'allow') return;
   details.preventDefault();
@@ -228,11 +240,25 @@ function createWindow(): BrowserWindow {
   wc.on('will-redirect', keepInGame);
   // Some navigations (such as to about:blank) never fire will-navigate. did-navigate reports
   // every main-frame page that actually loads (not ones blocked above), so any page that isn't
-  // the game is replaced by the game again.
+  // the game is replaced by the game again, unless the game keeps leaving, which would reload it forever.
+  let lastReturn: number | null = null;
+  let stoppedReturning = false;
   wc.on('did-navigate', (_event, url) => {
-    if (isGameUrl(url)) return;
+    if (isGameUrl(url) || stoppedReturning) return;
+    const now = Date.now();
+    if (!returnToGame(lastReturn, now)) {
+      stoppedReturning = true;
+      diagnostics.record({ kind: 'blocked-navigation', url, action: 'blocked' });
+      const message = 'The game keeps navigating away; stopped returning to it.';
+      diagnostics.record({ kind: 'console', level: 'warning', message, source: '', line: 0 });
+      return;
+    }
+    lastReturn = now;
     leaveGame(url);
-    void win.loadURL(gameEntry);
+    // Clearing history afterwards keeps Back from leading to the page the game left for.
+    void loadGame(win).then((loaded) => {
+      if (loaded && !win.isDestroyed()) wc.navigationHistory.clear();
+    });
   });
   wc.setWindowOpenHandler(({ url }) => {
     leaveGame(url);
@@ -271,5 +297,5 @@ void app.whenReady().then(() => {
   watchRemoteRequests();
   const win = createWindow();
   if (smoke) armSmokeTest(win);
-  void win.loadURL(gameEntry);
+  void loadGame(win);
 });

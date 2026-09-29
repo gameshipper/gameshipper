@@ -1,3 +1,5 @@
+// Imported by core (src/core/smoke.ts) as well as the shell: it must never import `electron`, which
+// would load Electron into the CLI. Keep it to Node built-ins.
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 

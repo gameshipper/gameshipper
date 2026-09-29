@@ -24,6 +24,18 @@ export function navigationAction(url: string): NavigationAction {
   }
 }
 
+/** Landing off the game again this soon after being sent back counts as a loop. */
+export const RETURN_LOOP_MS = 5000;
+
+/**
+ * When the window lands on a page that isn't the game (about:blank, say), whether to load the game again.
+ * `lastReturn` is when it was last sent back (null if never): a game that keeps navigating away within
+ * RETURN_LOOP_MS would otherwise be reloaded forever.
+ */
+export function returnToGame(lastReturn: number | null, now: number): boolean {
+  return lastReturn === null || now - lastReturn >= RETURN_LOOP_MS;
+}
+
 /** Chromium's net::ERR_ABORTED: the load was stopped or cancelled, not broken. */
 export const ERR_ABORTED = -3;
 

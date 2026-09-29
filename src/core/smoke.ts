@@ -38,9 +38,9 @@ export interface SmokeOptions {
 /**
  * How long past the smoke duration a game may run before Gameshipper stops it. The shell ends a smoke
  * run itself by `seconds` + LOAD_BACKSTOP_EXTRA_SECONDS even when the page never loads, so this only
- * fires if the game hangs.
+ * fires if the game hangs. Defined from the backstop so it always comes after it.
  */
-export const SMOKE_TIMEOUT_GRACE_SECONDS = 45;
+export const SMOKE_TIMEOUT_GRACE_SECONDS = LOAD_BACKSTOP_EXTRA_SECONDS + 15;
 /** After the game exits, how long to wait for its helper processes to release its output. */
 const CLOSE_GRACE_MS = 2000;
 
