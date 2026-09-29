@@ -276,8 +276,13 @@ export async function stageGame(ctx: Ctx, config: Config, opts: StageOptions = {
     );
   }
 
-  for (const rel of listFiles(stageDir).filter((f) => TEXT_FILE.test(f))) {
-    if (fs.readFileSync(path.join(stageDir, rel), 'utf8').includes('node_modules/')) {
+  const staged = listFiles(stageDir);
+  const art = storeArt(ctx.projectDir, config);
+  /** Store art the game's own files mention by name, which it may show. */
+  const mentioned = new Set<string>();
+  for (const rel of staged.filter((f) => TEXT_FILE.test(f))) {
+    const text = fs.readFileSync(path.join(stageDir, rel), 'utf8');
+    if (text.includes('node_modules/')) {
       warnings.push(
         gsError(
           'NODE_MODULES_REFERENCED',
@@ -286,6 +291,46 @@ export async function stageGame(ctx: Ctx, config: Config, opts: StageOptions = {
         ),
       );
     }
+    for (const a of art) if (a.names.some((n) => text.includes(n))) mentioned.add(a.file);
   }
+  for (const a of art.filter((x) => !mentioned.has(x.file))) leaveOut(ctx, stageDir, staged, a);
   return { stageDir, warnings };
+}
+
+interface StoreArt {
+  /** Absolute path of keyArt or logo in the project. */
+  file: string;
+  /** How the game's code would name it: the file name, and the same URL-encoded. */
+  names: string[];
+}
+
+/** keyArt and logo, when set and present. */
+function storeArt(projectDir: string, config: Config): StoreArt[] {
+  const art: StoreArt[] = [];
+  for (const rel of [config.keyArt, config.logo]) {
+    if (!rel) continue;
+    const file = path.resolve(projectDir, rel);
+    if (!fs.existsSync(file) || !fs.statSync(file).isFile() || art.some((a) => a.file === file)) continue;
+    const name = path.basename(file);
+    art.push({ file, names: [...new Set([name, encodeURI(name)])] });
+  }
+  return art;
+}
+
+/**
+ * Removes the stage's copies of store art the game never mentions: keyArt and logo are for Steam's store images,
+ * not the game. A copy is a staged file with the art's name and content, wherever the game folder (or a build
+ * command) put it.
+ */
+function leaveOut(ctx: Ctx, stageDir: string, staged: string[], art: StoreArt): void {
+  const name = path.basename(art.file);
+  let content: Buffer | null = null;
+  for (const rel of staged.filter((f) => path.posix.basename(f) === name)) {
+    const copy = path.join(stageDir, rel);
+    if (fs.statSync(copy).size !== fs.statSync(art.file).size) continue;
+    content ??= fs.readFileSync(art.file);
+    if (!fs.readFileSync(copy).equals(content)) continue;
+    fs.rmSync(copy);
+    ctx.log(`left out ${rel}: it's store art (keyArt or logo) and the game's files never mention ${name}`);
+  }
 }

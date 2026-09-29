@@ -310,6 +310,39 @@ describe('stageGame', () => {
     expect(fs.existsSync(path.join(stageDir, 'src'))).toBe(false);
   });
 
+  it('leaves out the store key art and logo unless the game mentions them', async () => {
+    const dir = makeTmpDir();
+    writeFiles(dir, {
+      'index.html': '<link rel="stylesheet" href="css/menu.css"><script src="js/main.js"></script>',
+      'css/menu.css': '.title { background: url("../art/title-logo.png") }',
+      'js/main.js': 'console.log("hi")',
+      'art/key-art.png': 'key art',
+      'art/title-logo.png': 'logo',
+      'art/sprite.png': 'sprite',
+    });
+    const { stageDir } = await stageGame(testCtx(dir), cfg({ keyArt: 'art/key-art.png', logo: 'art/title-logo.png' }));
+    const exists = (rel: string) => fs.existsSync(path.join(stageDir, rel));
+    // The menu shows the logo, so it ships; nothing uses the key art.
+    expect([exists('art/key-art.png'), exists('art/title-logo.png'), exists('art/sprite.png')]).toEqual([false, true, true]);
+
+    writeFiles(dir, { 'js/main.js': 'const art = new Image(); art.src = "art/key-art.png";', 'css/menu.css': '' });
+    const again = await stageGame(testCtx(dir), cfg({ keyArt: 'art/key-art.png', logo: 'art/title-logo.png' }));
+    expect([fs.existsSync(path.join(again.stageDir, 'art/key-art.png')), fs.existsSync(path.join(again.stageDir, 'art/title-logo.png'))]).toEqual([true, false]);
+  });
+
+  it("leaves out a build's copy of the key art, but not another file with its name", async () => {
+    const dir = makeTmpDir();
+    writeFiles(dir, {
+      'public/key-art.png': 'key art',
+      'dist/index.html': '<html></html>',
+      'dist/key-art.png': 'key art',
+      'dist/levels/key-art.png': 'a level picture',
+    });
+    const { stageDir } = await stageGame(testCtx(dir), cfg({ game: { buildCommand: 'true', outputDir: 'dist' }, keyArt: 'public/key-art.png' }));
+    expect(fs.existsSync(path.join(stageDir, 'key-art.png'))).toBe(false);
+    expect(fs.existsSync(path.join(stageDir, 'levels', 'key-art.png'))).toBe(true);
+  });
+
   it('ENTRY_MISSING when the staged entry is absent', async () => {
     const dir = makeTmpDir();
     writeFiles(dir, { 'dist/other.html': '' });
