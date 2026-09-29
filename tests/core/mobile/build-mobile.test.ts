@@ -64,6 +64,27 @@ describe('buildMobileTargets', () => {
     expect(fs.existsSync(path.join(dir, 'out'))).toBe(false);
   });
 
+  it('an unexpected error fails only the mobile targets, with MOBILE_GENERATE_FAILED and the reason', async () => {
+    const { dir, stageDir } = project();
+    // The icon is gone: reading it throws a plain ENOENT error, not a Gameshipper one.
+    const results = await buildMobileTargets(testCtx(dir), mobileConfig(), ['ios', 'android'], { stageDir, iconPng: path.join(dir, 'gone.png') });
+    for (const r of results) {
+      expect(r, r.target).toMatchObject({ error: { code: 'MOBILE_GENERATE_FAILED', message: expect.stringContaining('ENOENT') } });
+      expect('error' in r && r.error.fix).toBeTruthy();
+    }
+    expect(results.map((r) => r.target)).toEqual(['ios', 'android']);
+  });
+
+  it('a workspace that cannot be prepared fails each mobile target instead of the whole build', async () => {
+    const dir = makeTmpDir();
+    const results = await buildMobileTargets(testCtx(dir), mobileConfig(), ['ios', 'android'], { stageDir: path.join(dir, 'no-stage'), iconPng: null });
+    expect(results.map((r) => [r.target, 'error' in r ? r.error.code : 'ok'])).toEqual([
+      ['ios', 'MOBILE_GENERATE_FAILED'],
+      ['android', 'MOBILE_GENERATE_FAILED'],
+    ]);
+    expect('error' in results[0] && results[0].error.message).toContain('ENOENT');
+  });
+
   it('no targets, no work', async () => {
     expect(await buildMobileTargets(testCtx(makeTmpDir()), mobileConfig(), [], { stageDir: '/nope', iconPng: null })).toEqual([]);
   });
