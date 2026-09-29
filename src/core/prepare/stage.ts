@@ -1,9 +1,10 @@
-import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
+import { spawn } from 'node:child_process';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import type { Config } from '../config/schema.js';
 import type { Ctx } from '../context.js';
 import { listFiles } from '../fsutil.js';
+import { killTree, stopWithGameshipper } from '../proc.js';
 import { GsFailure, gsError, type GsError } from '../result.js';
 
 const SKIP_ANYWHERE = new Set(['.git', '.DS_Store', 'Thumbs.db', 'steam_appid.txt']);
@@ -30,8 +31,6 @@ const OUTPUT_TAIL_LINES = 20;
 const OUTPUT_TAIL_MAX_CHARS = 4096;
 /** Enough to hold the last lines of output without buffering a whole build log. */
 const OUTPUT_BUFFER_CHARS = 64 * 1024;
-/** Signals that stop Gameshipper; the build command is stopped with it. */
-const STOP_SIGNALS: NodeJS.Signals[] = ['SIGINT', 'SIGTERM', 'SIGHUP'];
 
 const isEnvFile = (name: string): boolean => name === '.env' || name.startsWith('.env.');
 
@@ -53,22 +52,6 @@ function loopsBack(link: string, target: string, root: string): boolean {
   for (let dir = path.dirname(link); ; dir = path.dirname(dir)) {
     if (isWithin(fs.realpathSync(dir), target)) return true;
     if (dir === root || dir === path.dirname(dir)) return false;
-  }
-}
-
-/** Stop a build command and everything it started (e.g. the node process behind `npm run dev`). */
-function killTree(child: ChildProcess): void {
-  if (child.pid === undefined) return;
-  if (process.platform === 'win32') {
-    // Synchronous, because this also runs from signal and 'exit' handlers.
-    const result = spawnSync('taskkill', ['/pid', String(child.pid), '/T', '/F'], { stdio: 'ignore', windowsHide: true });
-    if (result.error) child.kill('SIGKILL');
-    return;
-  }
-  try {
-    process.kill(-child.pid, 'SIGKILL');
-  } catch {
-    child.kill('SIGKILL');
   }
 }
 
@@ -116,19 +99,8 @@ export async function runBuildCommand(ctx: Ctx, config: Config, opts: { timeoutM
       child.stdout.destroy();
       child.stderr.destroy();
     };
-    // If Gameshipper is stopped or exits mid-build, stop the build too, then die of the same signal.
-    const onSignal = (signal: NodeJS.Signals): void => {
-      detach();
-      killTree(child);
-      process.kill(process.pid, signal);
-    };
-    const onExit = (): void => killTree(child);
-    const detach = (): void => {
-      for (const signal of STOP_SIGNALS) process.off(signal, onSignal);
-      process.off('exit', onExit);
-    };
-    for (const signal of STOP_SIGNALS) process.on(signal, onSignal);
-    process.on('exit', onExit);
+    // If Gameshipper is stopped or exits mid-build, stop the build too.
+    const detach = stopWithGameshipper(child);
 
     let graceTimer: NodeJS.Timeout | undefined;
     const settle = (result: number | 'timeout' | Error): void => {
