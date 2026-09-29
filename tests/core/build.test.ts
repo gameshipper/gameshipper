@@ -39,7 +39,7 @@ describe('runBuild', () => {
       ['linux', 'built'],
     ]);
     expect(r.errors.map((e) => e.code)).toEqual(['MAC_BUILD_HOST']);
-    expect(r.warnings.map((w) => w.code)).toEqual(['ICON_MISSING', 'STEAM_SDK_MISSING']);
+    expect(r.warnings.map((w) => w.code)).toEqual(['ICON_MISSING', 'STEAM_SDK_MISSING', 'STORE_IMAGES_SKIPPED']);
     expect(r.data!.outDir).toBe(path.join(dir, 'out'));
   });
 
@@ -52,7 +52,7 @@ describe('runBuild', () => {
       ['ios', 'skipped'],
       ['android', 'skipped'],
     ]);
-    expect(r.warnings.map((w) => w.code)).toEqual(['ICON_MISSING', 'STEAM_SDK_MISSING', 'TARGET_NOT_YET_SUPPORTED', 'TARGET_NOT_YET_SUPPORTED']);
+    expect(r.warnings.map((w) => w.code)).toEqual(['ICON_MISSING', 'STEAM_SDK_MISSING', 'TARGET_NOT_YET_SUPPORTED', 'TARGET_NOT_YET_SUPPORTED', 'STORE_IMAGES_SKIPPED']);
   });
 
   it('--target limits the build', async () => {
@@ -109,7 +109,7 @@ describe('runBuild', () => {
     };
     const r = await runBuild(testCtx(dir), config({ icon: 'icon.png', targets: ['linux'] }), { shellDir, host: 'linux', pack });
     expect(r.ok).toBe(true);
-    expect(r.warnings.map((w) => w.code)).toEqual(['STEAM_SDK_MISSING']);
+    expect(r.warnings.map((w) => w.code)).toEqual(['STEAM_SDK_MISSING', 'STORE_IMAGES_SKIPPED']);
     const iconBase = path.join(dir, '.gameshipper', 'icons', 'icon');
     expect(icons).toEqual([iconBase]);
     expect(fs.existsSync(`${iconBase}.icns`)).toBe(true);

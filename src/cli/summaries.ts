@@ -35,6 +35,13 @@ export function buildSummary(r: Result<BuildData>, projectDir: string): string[]
     if (t.status === 'failed') return `✗ ${name} failed (${t.errors.map((e) => e.code).join(', ')})`;
     return `- ${name} skipped`;
   });
+  const store = r.data.store;
+  if (store) {
+    const name = 'store'.padEnd(8);
+    if (store.status === 'built') lines.push(`✓ ${name} ${rel(projectDir, store.dir)}/ (${plural(store.images.length, 'image')})`);
+    else if (store.status === 'failed') lines.push(`✗ ${name} failed (${store.errors.map((e) => e.code).join(', ')})`);
+    else lines.push(`- ${name} skipped (set keyArt and logo)`);
+  }
   if (r.data.targets.some((t) => t.status === 'built')) {
     lines.push('', 'Next: `npx gameshipper play --smoke` checks the game runs cleanly.');
   }

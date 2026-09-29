@@ -24,6 +24,11 @@ const USAGE_CODES = new Set([
   'ICON_TOO_SMALL',
   'ICON_NOT_SQUARE',
   'ICON_INVALID',
+  // keyArt or logo can't be used for the store images.
+  'KEYART_INVALID',
+  'KEYART_TOO_SMALL',
+  'LOGO_INVALID',
+  'LOGO_NOT_TRANSPARENT',
   'GAME_DIR_MISSING',
   'GAME_DIR_INVALID',
 ]);

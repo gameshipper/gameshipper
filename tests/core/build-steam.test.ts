@@ -67,7 +67,7 @@ describe('runBuild with Steam and plugins', () => {
       ['linux', 'failed'],
     ]);
     expect(r.errors).toEqual([expect.objectContaining({ code: 'PLUGIN_HOOK_FAILED', message: "Plugin recorder's afterPackage failed: no linux today" })]);
-    expect(r.warnings.map((w) => w.code)).toEqual(['ICON_MISSING']);
+    expect(r.warnings.map((w) => w.code)).toEqual(['ICON_MISSING', 'STORE_IMAGES_SKIPPED']);
     expect(readText(dir, 'before.txt')).toBe('windows,mac,linux');
     expect(readText(dir, 'after.txt')).toBe('windows /out/windows/game\nmac /out/mac/game\n');
 
@@ -100,7 +100,7 @@ describe('runBuild with Steam and plugins', () => {
   it("carries the plugins' warnings", async () => {
     const { dir, shellDir } = project({ 'helper.mjs': 'export const x = 1;', 'single.mjs': "import { x } from './helper.mjs';\nexport default { name: 'single', main: { x: () => x } };" });
     const r = await runBuild(testCtx(dir), config({ targets: ['linux'], plugins: ['single.mjs'] }), { shellDir, host: 'linux', pack: fakePack, env: {}, koffi });
-    expect(r.warnings.map((w) => w.code)).toEqual(['PLUGIN_IMPORTS_NOT_COPIED', 'ICON_MISSING']);
+    expect(r.warnings.map((w) => w.code)).toEqual(['PLUGIN_IMPORTS_NOT_COPIED', 'ICON_MISSING', 'STORE_IMAGES_SKIPPED']);
   });
 
   it('a failing beforePackage stops the build', async () => {
@@ -144,7 +144,7 @@ describe('runBuild with Steam and plugins', () => {
     writeFiles(dir, { 'index.html': '' });
     writeFiles(shellDir, { 'main.js': '' });
     const r = await runBuild(testCtx(dir), config({ targets: ['linux'] }), { shellDir, host: 'linux', pack: fakePack, env: {} });
-    expect(r.warnings.map((w) => w.code)).toEqual(['ICON_MISSING', 'STEAM_SDK_MISSING']);
+    expect(r.warnings.map((w) => w.code)).toEqual(['ICON_MISSING', 'STEAM_SDK_MISSING', 'STORE_IMAGES_SKIPPED']);
     expect(r.warnings[1].fix).toContain('https://partner.steamgames.com/downloads/list');
     expect(fs.existsSync(path.join(dir, '.gameshipper', 'app', 'node_modules'))).toBe(false);
   });

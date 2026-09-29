@@ -1,5 +1,6 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
+import { makeStoreImages, type StoreImagesResult } from './assets/store-images.js';
 import { TARGETS, type Config, type Target } from './config/schema.js';
 import type { Ctx } from './context.js';
 import { assembleApp } from './desktop/assemble.js';
@@ -25,6 +26,8 @@ export interface TargetResult {
 export interface BuildData {
   targets: TargetResult[];
   outDir: string;
+  /** The store images in out/store, made after the desktop targets. */
+  store?: StoreImagesResult;
 }
 
 export interface PrepareOptions {
@@ -171,9 +174,11 @@ export async function runBuild(ctx: Ctx, config: Config, opts: BuildOptions): Pr
     );
   }
   targets.sort((a, b) => TARGETS.indexOf(a.target) - TARGETS.indexOf(b.target));
+  // Made on every build, --target or not: it takes about a second, and `check` needs them.
+  const store = await makeStoreImages(ctx, config);
 
-  const errors = targets.flatMap((t) => t.errors);
-  const warnings = [...prepared.warnings, ...targets.flatMap((t) => t.warnings)];
-  const data: BuildData = { targets, outDir };
+  const errors = [...targets.flatMap((t) => t.errors), ...store.errors];
+  const warnings = [...prepared.warnings, ...targets.flatMap((t) => t.warnings), ...store.warnings];
+  const data: BuildData = { targets, outDir, store };
   return errors.length ? fail(errors, warnings, data) : ok(data, warnings);
 }

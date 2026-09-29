@@ -26,6 +26,13 @@ describe('exitCodeFor', () => {
     }
   });
 
+  it('treats unusable store art as a config fix', () => {
+    for (const code of ['KEYART_INVALID', 'KEYART_TOO_SMALL', 'LOGO_INVALID', 'LOGO_NOT_TRANSPARENT']) {
+      expect(exitCodeFor(fail(gsError(code, 'x')))).toBe(2);
+    }
+    expect(exitCodeFor(fail(gsError('STORE_IMAGE_FAILED', 'x')))).toBe(1);
+  });
+
   it('treats a game that quit or misbehaved as a failure', () => {
     for (const code of ['GAME_EXITED', 'GAME_CONSOLE_ERROR', 'GAME_CRASHED', 'GAME_LOAD_FAILED', 'SMOKE_NO_RESULT', 'INTERNAL_ERROR']) {
       expect(exitCodeFor(fail(gsError(code, 'x')))).toBe(1);
@@ -115,6 +122,23 @@ describe('buildSummary', () => {
       '',
       'Next: `npx gameshipper play --smoke` checks the game runs cleanly.',
     ]);
+  });
+
+  it('shows the store images after the desktop targets', () => {
+    const targets = [
+      { target: 'linux' as const, status: 'built' as const, output: { target: 'linux' as const, dir: '/p/out/linux', executable: '/p/out/linux/g', warnings: [] }, errors: [], warnings: [] },
+    ];
+    const store = (status: 'built' | 'skipped' | 'failed') => ({
+      status,
+      dir: '/p/out/store',
+      images: status === 'built' ? Array.from({ length: 8 }, () => ({ id: 'library-hero' as const, file: 'f', width: 1, height: 1 })) : [],
+      errors: status === 'failed' ? [gsError('KEYART_TOO_SMALL', 'x')] : [],
+      warnings: [],
+    });
+    const lines = (status: 'built' | 'skipped' | 'failed') => buildSummary(ok({ outDir: '/p/out', targets, store: store(status) }), '/p').slice(0, 2);
+    expect(lines('built')).toEqual(['✓ linux    out/linux/g', '✓ store    out/store/ (8 images)']);
+    expect(lines('skipped')[1]).toBe('- store    skipped (set keyArt and logo)');
+    expect(lines('failed')[1]).toBe('✗ store    failed (KEYART_TOO_SMALL)');
   });
 
   it('is empty when the build never got as far as targets', () => {
