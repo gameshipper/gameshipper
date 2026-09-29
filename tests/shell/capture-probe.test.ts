@@ -15,7 +15,7 @@ import {
   type CaptureSettings,
 } from '../../src/shell/capture.js';
 import { isFullscreenToggle, isScreenshotKey } from '../../src/shell/keys.js';
-import { cleanCounters, cleanLayout, layoutProbe, PROBE_ARG, READ_COUNTERS_JS } from '../../src/shell/probe.js';
+import { cleanCounters, cleanLayout, LAYOUT_PROBE_JS, layoutProbe, PROBE_ARG, READ_COUNTERS_JS, screenCut, type LayoutProbe } from '../../src/shell/probe.js';
 
 describe('capture settings', () => {
   it('parseSize reads WxH', () => {
@@ -103,35 +103,103 @@ interface FakeEl {
   id?: string;
   className?: string;
   text?: string;
+  /** Where the element's own text is drawn, as a Range around it measures it. Default: inside its box. */
+  textRect?: Rect;
   style?: Record<string, string>;
+  /** Index of the parent element in `elements`; default: body. */
+  parent?: number;
 }
 
-function fakeDom(opts: { html?: Record<string, string>; body?: Record<string, string>; elements: FakeEl[]; inputs?: number; scroll?: [number, number] }): void {
-  const style = (s: Record<string, string> = {}) => ({ visibility: 'visible', opacity: '1', overflowX: 'visible', overflowY: 'visible', ...s });
-  const elements = opts.elements.map((e) => ({
-    tagName: e.tag.toUpperCase(),
-    id: e.id ?? '',
-    className: e.className ?? '',
-    textContent: e.text ?? '',
-    childNodes: e.text ? [{ nodeType: 3, textContent: e.text }] : [],
-    getBoundingClientRect: () => ({ left: e.rect[0], top: e.rect[1], right: e.rect[2], bottom: e.rect[3], width: e.rect[2] - e.rect[0], height: e.rect[3] - e.rect[1] }),
-    style: style(e.style),
-  }));
+function fakeDom(opts: {
+  html?: Record<string, string>;
+  body?: Record<string, string>;
+  bodyRect?: Rect;
+  elements: FakeEl[];
+  inputs?: number;
+  scroll?: [number, number];
+}): void {
+  const style = (s: Record<string, string> = {}) => ({
+    visibility: 'visible',
+    opacity: '1',
+    overflowX: 'visible',
+    overflowY: 'visible',
+    position: 'static',
+    transform: 'none',
+    ...s,
+  });
+  const domRect = (r: Rect) => ({ left: r[0], top: r[1], right: r[2], bottom: r[3], width: r[2] - r[0], height: r[3] - r[1] });
   const [sw, sh] = opts.scroll ?? [1280, 800];
-  const documentElement = { scrollWidth: sw, scrollHeight: sh, style: style(opts.html) };
-  const body = { style: style(opts.body), querySelectorAll: () => elements };
+  const documentElement = { scrollWidth: sw, scrollHeight: sh, style: style(opts.html), parentElement: null };
+  const body: Record<string, unknown> = { style: style(opts.body), parentElement: documentElement, getBoundingClientRect: () => domRect(opts.bodyRect ?? [0, 0, 1280, 800]) };
+  const elements: Record<string, unknown>[] = [];
+  for (const e of opts.elements) {
+    elements.push({
+      tagName: e.tag.toUpperCase(),
+      id: e.id ?? '',
+      className: e.className ?? '',
+      textContent: e.text ?? '',
+      childNodes: e.text ? [{ nodeType: 3, textContent: e.text, drawnAt: e.textRect ?? e.rect }] : [],
+      getBoundingClientRect: () => domRect(e.rect),
+      style: style(e.style),
+      parentElement: e.parent === undefined ? body : elements[e.parent],
+    });
+  }
+  body.querySelectorAll = () => elements;
+  const createRange = () => {
+    let node: { drawnAt: Rect } | null = null;
+    return { selectNodeContents: (n: { drawnAt: Rect }) => (node = n), getBoundingClientRect: () => domRect(node!.drawnAt) };
+  };
   vi.stubGlobal('window', { innerWidth: 1280, innerHeight: 800 });
   vi.stubGlobal('Node', { TEXT_NODE: 3 });
   vi.stubGlobal('getComputedStyle', (el: { style: object }) => el.style);
-  vi.stubGlobal('document', { documentElement, body, querySelectorAll: () => ({ length: opts.inputs ?? 0 }) });
+  vi.stubGlobal('document', { documentElement, body, createRange, querySelectorAll: () => ({ length: opts.inputs ?? 0 }) });
 }
+
+/** Runs the probe the way main.ts does: as source text in the page. */
+const probeInPage = () => (new Function(`return ${LAYOUT_PROBE_JS};`) as () => unknown)();
+
+describe('screenCut', () => {
+  const deck = { width: 1280, height: 800 };
+  const noClip = { x: false, y: false };
+  // A HUD at right: 20px, width: 320px, white-space: nowrap, whose text is longer than its box.
+  const hud = { box: [940, 20, 1260, 57] as Rect, text: [940, 20, 1720, 57] as Rect, media: false, clip: noClip };
+
+  it('finds text running past the screen edge from a box that fits', () => {
+    expect(screenCut(deck, hud, [])).toBe('text');
+    expect(screenCut(deck, { ...hud, text: [940, 20, 1250, 57] }, [])).toBeNull();
+  });
+
+  it('text its own box, or a box inside the screen, clips is not cut off by the screen', () => {
+    expect(screenCut(deck, { ...hud, clip: { x: true, y: false } }, [])).toBeNull();
+    expect(screenCut(deck, hud, [{ rect: [900, 0, 1270, 100], x: true, y: false }])).toBeNull();
+    // Clipping on the other axis doesn't help.
+    expect(screenCut(deck, hud, [{ rect: [900, 0, 1270, 100], x: false, y: true }])).toBe('text');
+    // A box that clips at (or past) the screen edge leaves the text cut off at the screen edge.
+    expect(screenCut(deck, hud, [{ rect: [0, 0, 1280, 800], x: true, y: true }])).toBe('text');
+    expect(screenCut(deck, hud, [{ rect: [-100, 0, 1500, 800], x: true, y: true }])).toBe('text');
+  });
+
+  it('finds elements that stick out, when they have text or are media', () => {
+    const canvas = { box: [8, 8, 1288, 808] as Rect, text: null, media: true, clip: noClip };
+    expect(screenCut(deck, canvas, [])).toBe('box');
+    expect(screenCut(deck, { ...canvas, media: false }, [])).toBeNull();
+    expect(screenCut(deck, { box: [1200, 700, 1300, 900] as Rect, text: [1200, 700, 1250, 720] as Rect, media: false, clip: noClip }, [])).toBe('box');
+    expect(screenCut(deck, canvas, [{ rect: [0, 0, 1000, 700], x: true, y: true }])).toBeNull();
+  });
+
+  it('ignores anything entirely off screen and a couple of pixels of overhang', () => {
+    expect(screenCut(deck, { box: [-9999, 0, -9000, 20], text: [-9999, 0, -9000, 20], media: false, clip: noClip }, [])).toBeNull();
+    expect(screenCut(deck, { ...hud, text: [940, 20, 1282, 57] }, [])).toBeNull();
+    expect(screenCut(deck, { ...hud, text: [940, 760, 1200, 830] }, [])).toBe('text');
+  });
+});
 
 describe('layoutProbe', () => {
   afterEach(() => vi.unstubAllGlobals());
 
   it('reports nothing for a game that fills the screen and hides overflow', () => {
     fakeDom({ html: { overflowX: 'hidden', overflowY: 'hidden' }, elements: [{ tag: 'canvas', rect: [0, 0, 1280, 800] }], scroll: [1280, 804] });
-    expect(layoutProbe()).toEqual({
+    expect(probeInPage()).toEqual({
       viewport: { width: 1280, height: 800 },
       scroll: { width: 1280, height: 804 },
       overflowHidden: { x: true, y: true },
@@ -152,30 +220,63 @@ describe('layoutProbe', () => {
         { tag: 'div', rect: [1200, 0, 1400, 20] },
       ],
     });
-    const probe = layoutProbe();
+    const probe = probeInPage() as LayoutProbe;
     expect(probe.overflowHidden).toEqual({ x: false, y: true });
     expect(probe.textInputs).toBe(2);
     expect(probe.offscreen).toEqual([
-      { element: 'div#hud.hud.top', text: 'Score: 0 | Lives: 3', rect: [900, 20, 1487, 57] },
-      { element: 'canvas', text: '', rect: [8, 8, 1288, 808] },
+      { element: 'div#hud.hud.top', text: 'Score: 0 | Lives: 3', rect: [900, 20, 1487, 57], cut: 'box' },
+      { element: 'canvas', text: '', rect: [8, 8, 1288, 808], cut: 'box' },
     ]);
+  });
+
+  it('finds HUD text that runs off the screen from a box that fits, unless something inside the screen clips it', () => {
+    const long = 'Score: 000000 · Lives: 3 · Level: 1 · Best: 999999';
+    fakeDom({
+      // With html's overflow visible, body's overflow is the screen's (CSS overflow propagation): body clips nothing.
+      body: { overflowX: 'hidden', overflowY: 'hidden' },
+      bodyRect: [8, 8, 1272, 792],
+      elements: [
+        { tag: 'div', id: 'hud', text: long, rect: [940, 20, 1260, 57], textRect: [940, 20, 1712, 57], style: { position: 'absolute' } },
+        { tag: 'div', className: 'title', text: long, rect: [100, 100, 400, 140], textRect: [100, 100, 1500, 140], style: { overflowX: 'hidden', overflowY: 'hidden' } },
+        { tag: 'div', id: 'panel', rect: [800, 200, 1200, 600], style: { overflowX: 'auto', overflowY: 'auto' } },
+        { tag: 'p', text: long, rect: [820, 220, 1180, 260], textRect: [820, 220, 1400, 260], parent: 2 },
+        { tag: 'span', id: 'toast', text: long, rect: [900, 700, 1200, 740], textRect: [900, 700, 1600, 740], style: { position: 'fixed' }, parent: 2 },
+      ],
+    });
+    expect((probeInPage() as LayoutProbe).offscreen).toEqual([
+      { element: 'div#hud', text: long.slice(0, 60), rect: [940, 20, 1712, 57], cut: 'text' },
+      // A fixed element isn't clipped by the scrolling panel it sits in.
+      { element: 'span#toast', text: long.slice(0, 60), rect: [900, 700, 1600, 740], cut: 'text' },
+    ]);
+  });
+
+  it('counts body as a box that clips when its overflow is its own', () => {
+    fakeDom({
+      html: { overflowX: 'hidden', overflowY: 'hidden' },
+      body: { overflowX: 'hidden', overflowY: 'hidden' },
+      bodyRect: [8, 8, 1272, 792],
+      elements: [{ tag: 'div', id: 'hud', text: 'Score', rect: [940, 20, 1260, 57], textRect: [940, 20, 1712, 57] }],
+    });
+    expect((probeInPage() as LayoutProbe).offscreen).toEqual([]);
   });
 
   it('is self-contained, so it can run in the page as source text', () => {
     fakeDom({ elements: [{ tag: 'div', text: 'Score', rect: [1200, 0, 1400, 20] }] });
     // new Function sees only globals, as the page does: using anything else from probe.ts would throw here.
-    const inPage = new Function(`return (${layoutProbe.toString()})();`) as () => unknown;
-    expect(inPage()).toEqual(layoutProbe());
+    expect(probeInPage()).toEqual(layoutProbe(screenCut));
   });
 });
 
 describe('cleaning what the page answered', () => {
   it('keeps a well-formed layout as it is', () => {
-    const layout = {
+    const layout: LayoutProbe = {
       viewport: { width: 1280, height: 800 },
       scroll: { width: 1300, height: 800 },
       overflowHidden: { x: false, y: true },
-      offscreen: [{ element: 'div#hud', text: 'Score', rect: [900, 20, 1487, 57] as Rect }],
+      offscreen: [
+        { element: 'div#hud', text: 'Score', rect: [900, 20, 1487, 57], cut: 'box' },
+        { element: 'div#hud2', text: 'Lives', rect: [900, 60, 1487, 97], cut: 'text' },
+      ],
       textInputs: 1,
     };
     expect(cleanLayout(layout)).toEqual(layout);
@@ -186,7 +287,7 @@ describe('cleaning what the page answered', () => {
       viewport: { width: '1280', height: 800.4 },
       scroll: null,
       overflowHidden: { x: 'yes' },
-      offscreen: Array.from({ length: 50 }, () => ({ element: 'x'.repeat(5000), text: 'y'.repeat(5000), rect: [1, 'two', 3.6] })),
+      offscreen: Array.from({ length: 50 }, () => ({ element: 'x'.repeat(5000), text: 'y'.repeat(5000), rect: [1, 'two', 3.6], cut: 'everything' })),
       textInputs: -4,
     };
     const clean = cleanLayout(raw)!;
@@ -194,7 +295,7 @@ describe('cleaning what the page answered', () => {
     expect(clean.scroll).toEqual({ width: 0, height: 0 });
     expect(clean.overflowHidden).toEqual({ x: false, y: false });
     expect(clean.offscreen).toHaveLength(10);
-    expect(clean.offscreen[0]).toEqual({ element: 'x'.repeat(100), text: 'y'.repeat(60), rect: [1, 0, 4, 0] });
+    expect(clean.offscreen[0]).toEqual({ element: 'x'.repeat(100), text: 'y'.repeat(60), rect: [1, 0, 4, 0], cut: 'box' });
     expect(clean.textInputs).toBe(0);
     expect(cleanLayout('nope')).toBeNull();
     expect(cleanCounters({ getGamepads: 3, gamepadListeners: 'x' })).toEqual({ getGamepads: 3, gamepadListeners: 0 });

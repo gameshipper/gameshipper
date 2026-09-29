@@ -35,7 +35,12 @@ export type DiagEvent =
   | { kind: 'blocked-request'; url: string }
   /** F12 or `play --screenshot` saved a store screenshot. */
   | { kind: 'screenshot'; file: string; width: number; height: number }
-  | { kind: 'screenshot-failed'; error: string };
+  | { kind: 'screenshot-failed'; error: string }
+  /**
+   * A smoke run's window closed before the run ended (the game closed it, or a person did): `seconds` after the
+   * page loaded, or null if it hadn't loaded.
+   */
+  | { kind: 'window-closed'; seconds: number | null };
 
 export interface DiagSummary {
   events: DiagEvent[];

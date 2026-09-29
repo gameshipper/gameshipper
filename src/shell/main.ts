@@ -38,7 +38,7 @@ import {
   newWindowSource,
   returnToGame,
 } from './policy.js';
-import { cleanCounters, cleanLayout, layoutProbe, PROBE_ARG, READ_COUNTERS_JS, type ProbeReport } from './probe.js';
+import { cleanCounters, cleanLayout, LAYOUT_PROBE_JS, PROBE_ARG, READ_COUNTERS_JS, type ProbeReport } from './probe.js';
 import { planFileResponse } from './range.js';
 import { entryUrl, readRuntimeConfig } from './runtime-config.js';
 import { callSaveStore, createSaveStore, type SaveStore } from './saves.js';
@@ -574,7 +574,7 @@ async function runProbe(wc: WebContents, camera: PageCamera, dir: string): Promi
     });
   }
   // The page answers with plain data, but it may have replaced the functions the probe uses: clean it.
-  report.layout = cleanLayout(await attempt('measuring the page', () => wc.executeJavaScript(`(${layoutProbe.toString()})()`) as Promise<unknown>));
+  report.layout = cleanLayout(await attempt('measuring the page', () => wc.executeJavaScript(LAYOUT_PROBE_JS) as Promise<unknown>));
   report.counters = cleanCounters(await attempt('reading the gamepad counters', () => wc.executeJavaScript(READ_COUNTERS_JS) as Promise<unknown>));
   return report;
 }
@@ -608,9 +608,11 @@ async function endSmoke(win: BrowserWindow, camera: PageCamera): Promise<void> {
 
 function armSmokeTest(win: BrowserWindow, camera: PageCamera): void {
   const wc = win.webContents;
+  let loadedAt: number | null = null;
   const runFullDuration = (): void => {
     if (pageLoaded) return;
     pageLoaded = true;
+    loadedAt = Date.now();
     setTimeout(() => void endSmoke(win, camera), smokeSeconds * 1000);
   };
   wc.on('did-finish-load', runFullDuration);
@@ -619,8 +621,15 @@ function armSmokeTest(win: BrowserWindow, camera: PageCamera): void {
     if (failure === 'fatal') setTimeout(() => finishSmoke(0), 500);
     else if (failure === 'stopped') runFullDuration();
   });
-  // A game that closes its own window (window.close()) still gets a summary.
-  win.on('closed', () => finishSmoke(0));
+  // A game that closes its own window (window.close()) still gets a summary, which says when that happened. The
+  // shell closes the window itself only after finishSmoke.
+  win.on('closed', () => {
+    if (!smokeDone) {
+      const seconds = loadedAt === null ? null : Math.round((Date.now() - loadedAt) / 100) / 10;
+      diagnostics.record({ kind: 'window-closed', seconds });
+    }
+    finishSmoke(0);
+  });
 }
 
 app.on('window-all-closed', () => app.quit());

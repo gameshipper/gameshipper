@@ -17,11 +17,12 @@ const PROBE: ProbeReport = {
 };
 
 describe('summaryToIssues for capture events', () => {
-  it('a failed screenshot is a warning; saved screenshots and blocked requests are not issues', () => {
+  it('a failed screenshot is a warning; saved screenshots, blocked requests and a closed window are not issues', () => {
     const events: DiagEvent[] = [
       { kind: 'screenshot', file: '/p/out/store/screenshots/a.png', width: 1920, height: 1080 },
       { kind: 'screenshot-failed', error: 'taking the screenshot timed out after 5 s' },
       { kind: 'blocked-request', url: 'wss://example.com/live' },
+      { kind: 'window-closed', seconds: 2.5 },
     ];
     const { errors, warnings } = summaryToIssues({ droppedInfo: 0, events });
     expect(errors).toEqual([]);

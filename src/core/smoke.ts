@@ -266,6 +266,9 @@ export function summaryToIssues(
       case 'screenshot':
         // A saved screenshot is a result, not a problem: `play` lists them from the events log.
         break;
+      case 'window-closed':
+        // A game may quit by itself; `check` reads this event to report how long the game really ran.
+        break;
       case 'screenshot-failed':
         add(warnings, gsError('SCREENSHOT_FAILED', `A screenshot couldn't be saved: ${e.error}`, 'Try again. If it keeps failing, run with --verbose and report the run log.'));
         break;
@@ -513,11 +516,16 @@ export async function runSmoke(ctx: Ctx, opts: SmokeOptions): Promise<Result<Smo
  * skipped, and so is a log that can't be read.
  */
 export function readLoggedEvents<K extends DiagEvent['kind']>(eventsLog: string, kinds: readonly K[]): Array<Extract<DiagEvent, { kind: K }>> {
+  return loggedEvents(eventsLog, kinds) ?? [];
+}
+
+/** Like readLoggedEvents, but null when the events log can't be read. */
+export function loggedEvents<K extends DiagEvent['kind']>(eventsLog: string, kinds: readonly K[]): Array<Extract<DiagEvent, { kind: K }>> | null {
   let text: string;
   try {
     text = fs.readFileSync(eventsLog, 'utf8');
   } catch {
-    return [];
+    return null;
   }
   const wanted = new Set<string>(kinds);
   const found: Array<Extract<DiagEvent, { kind: K }>> = [];
