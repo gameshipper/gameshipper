@@ -7,6 +7,8 @@ export type DesktopTarget = (typeof DESKTOP_TARGETS)[number];
 /** How the Steam overlay (Shift+Tab) gets frames to draw on; see src/shell/overlay.ts. */
 export const STEAM_OVERLAY_SETTINGS = ['auto', 'native', 'repaint', 'off'] as const;
 export type SteamOverlaySetting = (typeof STEAM_OVERLAY_SETTINGS)[number];
+/** mobile.bundleId: dot-separated parts of letters and digits, each starting with a letter (iOS and Android both accept it). */
+export const BUNDLE_ID_PATTERN = /^[A-Za-z][A-Za-z0-9]*(\.[A-Za-z][A-Za-z0-9]*)+$/;
 
 const relPath = z.string().min(1);
 
@@ -55,7 +57,7 @@ export const ConfigSchema = z.strictObject({
     .strictObject({
       bundleId: z
         .string()
-        .regex(/^[A-Za-z][A-Za-z0-9]*(\.[A-Za-z][A-Za-z0-9]*)+$/, 'must look like com.yourname.yourgame')
+        .regex(BUNDLE_ID_PATTERN, 'must look like com.yourname.yourgame')
         .nullable()
         .default(null),
       orientation: z.enum(['landscape', 'portrait']).default('landscape'),
