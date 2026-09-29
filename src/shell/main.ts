@@ -80,7 +80,10 @@ if (smoke) {
 
 // Everything below must happen before the app is ready.
 for (const [name, value] of chromiumSwitches(process.platform)) app.commandLine.appendSwitch(name, value);
-if (env.GAMESHIPPER_USER_DATA) app.setPath('userData', env.GAMESHIPPER_USER_DATA);
+// Electron names the save folder after the app name the first time something asks for it, so pin it
+// to the file-safe productName from package.json ("Moon- Rising") before setName switches to the
+// display name ("Moon: Rising" isn't a valid folder name on Windows).
+app.setPath('userData', env.GAMESHIPPER_USER_DATA || path.join(app.getPath('appData'), app.getName()));
 app.setName(config.name);
 protocol.registerSchemesAsPrivileged([
   {

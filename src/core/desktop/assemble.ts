@@ -2,7 +2,7 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import type { RuntimeConfig } from '../../shell/runtime-config.js';
 import type { Config } from '../config/schema.js';
-import { slugify } from '../names.js';
+import { fileSafeName, slugify } from '../names.js';
 
 export interface AssembleInput {
   stageDir: string;
@@ -21,7 +21,9 @@ export function assembleApp(projectDir: string, config: Config, input: AssembleI
   fs.rmSync(appDir, { recursive: true, force: true });
   fs.mkdirSync(appDir, { recursive: true });
 
-  const pkg = { name: slugify(config.name), productName: config.name, version: config.version, main: 'shell/main.js', private: true };
+  // Electron names the save folder (userData) after productName before the shell runs, so it must be a
+  // valid folder name on every OS ("Moon: Rising" isn't on Windows). The shell still shows config.name.
+  const pkg = { name: slugify(config.name), productName: fileSafeName(config.name), version: config.version, main: 'shell/main.js', private: true };
   fs.writeFileSync(path.join(appDir, 'package.json'), `${JSON.stringify(pkg, null, 2)}\n`);
 
   const shellOut = path.join(appDir, 'shell');

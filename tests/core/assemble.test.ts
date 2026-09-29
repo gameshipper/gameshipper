@@ -37,6 +37,15 @@ describe('assembleApp', () => {
     expect(fs.existsSync(path.join(appDir, 'game/js/game.js'))).toBe(true);
   });
 
+  it('uses a file-safe productName, which Electron names the save folder after', () => {
+    const root = makeTmpDir();
+    writeFiles(root, { 'shell/main.js': '', 'stage/index.html': '' });
+    const config = parseConfig({ name: 'Moon: Rising', version: '1.0.0' }).data!;
+    const appDir = assembleApp(root, config, { shellDir: path.join(root, 'shell'), stageDir: path.join(root, 'stage'), iconPng: null });
+    expect(JSON.parse(readText(appDir, 'package.json'))).toMatchObject({ name: 'moon-rising', productName: 'Moon- Rising' });
+    expect(JSON.parse(readText(appDir, 'shell/config.json')).name).toBe('Moon: Rising');
+  });
+
   it('works without an icon and clears the previous app folder', () => {
     const root = makeTmpDir();
     writeFiles(root, { 'shell/main.js': '', 'stage/index.html': '', '.gameshipper/app/stale.txt': '' });
