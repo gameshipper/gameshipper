@@ -1,0 +1,75 @@
+import * as path from 'node:path';
+import type { BuildData } from '../core/build.js';
+import type { InitData } from '../core/config/init.js';
+import type { PlayData } from '../core/play.js';
+import type { Result } from '../core/result.js';
+import type { StatusData } from '../core/status.js';
+
+/** Human summary lines printed above a Result's errors, warnings and log path. Never used with --json. */
+
+const rel = (projectDir: string, p: string) => path.relative(projectDir, p).split(path.sep).join('/');
+
+export function initSummary(r: Result<InitData>): string[] {
+  if (!r.ok || !r.data) return [];
+  const { config } = r.data;
+  const built = config.game.buildCommand ? ` (built with \`${config.game.buildCommand}\` into ${config.game.outputDir})` : '';
+  return [
+    `✓ Wrote gameshipper.json for "${config.name}"`,
+    `  Entry: ${config.game.entry}${built}`,
+    `  Icon: ${config.icon ?? 'none'}`,
+    `  Steam App ID: ${config.steam.appId}`,
+    '',
+    'Next: `npx gameshipper play` to try it, or `npx gameshipper play --smoke` for a quick automatic check.',
+  ];
+}
+
+export function buildSummary(r: Result<BuildData>, projectDir: string): string[] {
+  if (!r.data) return [];
+  const lines = r.data.targets.map((t) => {
+    const name = t.target.padEnd(8);
+    if (t.status === 'built' && t.output) return `✓ ${name} ${rel(projectDir, t.output.executable)}`;
+    if (t.status === 'failed') return `✗ ${name} failed (${t.errors.map((e) => e.code).join(', ')})`;
+    return `- ${name} skipped`;
+  });
+  if (r.data.targets.some((t) => t.status === 'built')) {
+    lines.push('', 'Next: `npx gameshipper play --smoke` checks the game runs cleanly.');
+  }
+  return lines;
+}
+
+/**
+ * `smoke` says which kind of run it was: a smoke run that never reported back has no `data.smoke`,
+ * and must not read as a normal close. Failures (GAME_EXITED, SMOKE_NO_RESULT) explain themselves.
+ */
+export function playSummary(r: Result<PlayData>, opts: { smoke: boolean }): string[] {
+  if (!r.data) return [];
+  if (opts.smoke) {
+    const { smoke } = r.data;
+    if (!smoke) return [];
+    return [r.ok ? '✓ The game ran with no errors.' : `✗ Found ${r.errors.length} problem(s) while the game ran.`, `Events: ${smoke.eventsLog}`];
+  }
+  if (!r.ok) return [];
+  return ['Game closed.', ...(r.data.eventsLog ? [`Events: ${r.data.eventsLog}`] : [])];
+}
+
+export function statusSummary(r: Result<StatusData>): string[] {
+  const s = r.data;
+  if (!s) return [];
+  const config = s.config
+    ? `"${s.config.name}" v${s.config.version}, Steam App ID ${s.config.steam.appId}, targets ${s.config.targets.join(', ')}`
+    : 'none (run `npx gameshipper init`)';
+  const lines = [
+    `Gameshipper ${s.gameshipperVersion} (Electron ${s.electronVersion}) on ${s.host.platform}/${s.host.arch}`,
+    `Project: ${s.projectDir}`,
+    `Config: ${config}`,
+    `Can build here: ${s.buildableHere.join(', ') || 'nothing'}`,
+  ];
+  if (s.notBuildableHere.length) {
+    lines.push(`Can't build here: ${s.notBuildableHere.map((n) => `${n.target} (${n.reason.code})`).join(', ')}`);
+  }
+  for (const o of s.outputs) lines.push(`out/${o.target}: ${o.exists ? 'built' : '—'}`);
+  for (const run of Object.values(s.lastRuns)) {
+    lines.push(`Last ${run.command}: ${run.ok ? '✓' : '✗'} ${run.at}${run.logPath ? ` (${run.logPath})` : ''}`);
+  }
+  return lines;
+}
