@@ -1,10 +1,10 @@
 import { spawn } from 'node:child_process';
-import * as nodeModule from 'node:module';
 import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { ok } from '../../src/core/result.js';
 import { saveLastRun } from '../../src/core/runs.js';
+import { canRunTs, noteIfTsTestsSkipped } from '../helpers/node-features.js';
 import { makeTmpDir, readText, writeFiles } from '../helpers/tmp.js';
 
 /** These run the real CLI in its own process: signals and process-level errors can't be tested in-process. */
@@ -57,7 +57,7 @@ function startCli(args: string[], failure: 'none' | 'rejection' | 'exception' = 
   return { child, closed, stdout: () => stdout, stderr: () => stderr };
 }
 
-const canRunTs = typeof nodeModule.registerHooks === 'function' && Boolean(process.features.typescript);
+noteIfTsTestsSkipped('the CLI process tests');
 
 describe.skipIf(process.platform === 'win32' || !canRunTs)('the CLI process', () => {
   it.each([

@@ -1,12 +1,12 @@
 import { spawn } from 'node:child_process';
 import * as fs from 'node:fs';
-import * as nodeModule from 'node:module';
 import * as path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { parseConfig } from '../../src/core/config/load.js';
 import { runBuildCommand, stageGame } from '../../src/core/prepare/stage.js';
 import { GsFailure } from '../../src/core/result.js';
 import { testCtx } from '../helpers/ctx.js';
+import { canRunTs, noteIfTsTestsSkipped } from '../helpers/node-features.js';
 import { makeTmpDir, writeFiles } from '../helpers/tmp.js';
 
 const cfg = (extra: object = {}) => parseConfig({ name: 'x', version: '1.0.0', ...extra }).data!;
@@ -424,7 +424,7 @@ const ctx = { projectDir: dir, cacheDir: dir, logPath: dir + '/build.log', log()
 await runBuildCommand(ctx, { game: { buildCommand: command } });
 `;
 
-const canRunTs = typeof nodeModule.registerHooks === 'function' && Boolean(process.features.typescript);
+noteIfTsTestsSkipped('the runBuildCommand subprocess tests');
 
 describe.skipIf(process.platform === 'win32' || !canRunTs)('runBuildCommand when Gameshipper itself stops', () => {
   it.each([
