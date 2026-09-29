@@ -1,19 +1,22 @@
-import { spawnSync } from 'node:child_process';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { describe, expect, it } from 'vitest';
+import { afterAll, describe, expect, it } from 'vitest';
 import { listFiles } from '../../src/core/fsutil.js';
 import { runSmoke } from '../../src/core/smoke.js';
 import type { DiagEvent } from '../../src/shell/diagnostics.js';
 import { cli, ROOT } from '../helpers/built-cli.js';
 import { testCtx } from '../helpers/ctx.js';
 import { makeSolidPng } from '../helpers/png.js';
+import { screenLock, type ScreenLock } from '../helpers/screen.js';
 import { makeTmpDir, writeFiles } from '../helpers/tmp.js';
 
-// The first test runs everywhere. The others are opt-in (GAMESHIPPER_STEAM_E2E=1): they need macOS, a running,
-// signed-in Steam client, network access, and a Steamworks SDK zip (GAMESHIPPER_STEAM_E2E_SDK, or the newest in
-// the repo's .sdk/ folder). They unlock and then clear Spacewar's ACH_WIN_ONE_GAME on the signed-in account.
+// The first two describe blocks run everywhere. The last is opt-in (GAMESHIPPER_STEAM_E2E=1): it needs macOS, a
+// running, signed-in Steam client, network access, and a Steamworks SDK zip (GAMESHIPPER_STEAM_E2E_SDK, or the newest
+// in the repo's .sdk/ folder). On the signed-in account it unlocks and then clears Spacewar's ACH_WIN_ONE_GAME, and
+// sets Spacewar's NumGames stat one higher and back. Run it with --reporter=verbose to see each test's outcome:
+//   GAMESHIPPER_STEAM_E2E=1 GAMESHIPPER_STEAM_E2E_SDK=<zip> npm run test:integration -- tests/integration/steam.int.test.ts --reporter=verbose
+// Whether Steam's overlay hooks the game can only be checked on an unlocked screen; that test is skipped otherwise.
 const ENABLED = process.env.GAMESHIPPER_STEAM_E2E === '1' && process.platform === 'darwin';
 const OVERLAY_DYLIB = path.join(os.homedir(), 'Library/Application Support/Steam/Steam.AppBundle/Steam/Contents/MacOS/gameoverlayrenderer.dylib');
 
@@ -24,11 +27,6 @@ function sdkZip(): string {
   const zips = fs.existsSync(folder) ? fs.readdirSync(folder).filter((n) => /^steamworks_sdk.*\.zip$/i.test(n)).sort() : [];
   if (!zips.length) throw new Error('No Steamworks SDK zip: set GAMESHIPPER_STEAM_E2E_SDK or put one in .sdk/.');
   return path.join(folder, zips[zips.length - 1]);
-}
-
-/** On a locked screen nothing is drawn, so Steam's overlay can't hook a game. macOS reports the lock through ioreg. */
-function screenLocked(): boolean {
-  return /"CGSSessionScreenIsLocked"=Yes/.test(spawnSync('ioreg', ['-n', 'Root', '-d1'], { encoding: 'utf8' }).stdout ?? '');
 }
 
 /** The "steam-e2e:<step>:<json>" lines the fixture game logs, as { step: value }. */
@@ -53,6 +51,9 @@ const EXPECTED_REPORT = {
   achievements: expect.any(Number),
   presence: true,
   stat: 'number',
+  statRoundTrip: { set: true, stored: true, readBack: true },
+  // Putting NumGames back fails if Spacewar only lets it grow; that's not what the test checks.
+  statRestored: expect.any(Boolean),
   save: { level: 2 },
   plugin: 'HI',
   done: true,
@@ -100,6 +101,7 @@ describe('the Steam fixture without an SDK', () => {
       achievements: 0,
       presence: false,
       stat: 'object',
+      statRoundTrip: null,
       save: { level: 2 },
       plugin: 'HI',
       done: true,
@@ -137,20 +139,42 @@ describe('a game with globals of its own named steam and gameshipper', () => {
 describe.skipIf(!ENABLED)('Steam on this Mac with App ID 480', () => {
   // A fresh cache, so SDK extraction and the Intel Mac koffi download really happen.
   const env = { GAMESHIPPER_CACHE: makeTmpDir('gs-steam-cache-') };
+  const dirs: string[] = [];
+  afterAll(() => {
+    for (const dir of dirs) fs.rmSync(dir, { recursive: true, force: true, maxRetries: 3 });
+  });
+  /** Set by the first test: the project and its packaged Mac app. */
+  let project: { dir: string; executable: string } | undefined;
+  /** Set by the injected-overlay run: its events, and the screen lock read before and after it. */
+  let injected: { events: DiagEvent[]; lock: Array<{ state: ScreenLock; raw: string }> } | undefined;
 
-  it('play --smoke, the packaged app, and the injected overlay all work', async () => {
+  const report = (events: DiagEvent[]) => {
+    const r = gameReport(events);
+    expect(r).toEqual(EXPECTED_REPORT);
+    expect(r.achievements).toBeGreaterThan(0);
+  };
+  const smoke = (extraEnv: NodeJS.ProcessEnv) => {
+    const { dir, executable } = project!;
+    return runSmoke(testCtx(dir), { command: executable, args: [], seconds: 8, userDataDir: path.join(dir, '.gameshipper', 'int-data'), windowed: true, env: extraEnv });
+  };
+
+  it('status, play --smoke, the Mac build and the packaged app all use Steam', async (ctx) => {
     const dir = newProject(env);
+    dirs.push(dir);
 
     const status = cli(['status'], dir, env);
-    expect(status.result.data.steamSdk).toMatchObject({ source: 'project', version: expect.stringMatching(/^1\.\d+$/), targets: ['windows', 'mac', 'linux'] });
+    expect(status.result.data.steamSdk).toMatchObject({ source: 'project', version: expect.stringMatching(/^1\.\d+[a-z]?$/), targets: ['windows', 'mac', 'linux'] });
     expect(status.result.warnings).toEqual([]);
 
     const play = cli(['play', '--smoke', '--seconds', '8'], dir, env);
     expect(play.result.errors).toEqual([]);
+    expect(play.code).toBe(0);
+    expect(play.result.data.smoke.exitCode).toBe(0);
     expect(play.result.warnings.filter((w: { code: string }) => w.code.startsWith('STEAM_'))).toEqual([]);
     const devEvents: DiagEvent[] = play.result.data.smoke.summary.events;
     expect(steamEvent(devEvents)).toMatchObject({ state: 'ready', appId: 480, overlay: 'none' });
-    expect(gameReport(devEvents)).toEqual(EXPECTED_REPORT);
+    report(devEvents);
+    await ctx.annotate(`Spacewar's NumGames put back after the round-trip: ${gameReport(devEvents).statRestored}`);
     // Extracted once into <cache>/steamworks-sdk/<version>-<start of the zip's SHA-256>.
     const version = status.result.data.steamSdk.version;
     const cached = fs.readdirSync(path.join(env.GAMESHIPPER_CACHE, 'steamworks-sdk')).filter((n) => !n.startsWith('.'));
@@ -175,32 +199,42 @@ describe.skipIf(!ENABLED)('Steam on this Mac with App ID 480', () => {
     );
     expect(files.filter((f) => /win64|linux64|win32|linux-x64|linux_x64/.test(f))).toEqual([]);
     expect(listFiles(mac.dir).filter((f) => f.endsWith('steam_appid.txt'))).toEqual([]);
+    project = { dir, executable: mac.executable };
 
-    const smoke = (extraEnv: NodeJS.ProcessEnv) =>
-      runSmoke(testCtx(dir), { command: mac.executable, args: [], seconds: 8, userDataDir: path.join(dir, '.gameshipper', 'int-data'), windowed: true, env: extraEnv });
     const packaged = await smoke({});
     expect(packaged.errors).toEqual([]);
     expect(packaged.data!.exitCode).toBe(0);
     expect(steamEvent(packaged.data!.summary.events)).toMatchObject({ state: 'ready', overlay: 'none' });
-    expect(gameReport(packaged.data!.summary.events)).toEqual(EXPECTED_REPORT);
+    report(packaged.data!.summary.events);
+  });
 
+  it('the packaged app starts its native overlay window when Steam injects its overlay renderer', async (ctx) => {
+    if (!fs.existsSync(OVERLAY_DYLIB)) ctx.skip(`Steam's overlay renderer isn't installed (${OVERLAY_DYLIB} doesn't exist)`);
+    expect(project, 'the packaged app from the previous test').toBeDefined();
     // Launched by Steam, a game gets Steam's overlay renderer injected; this emulates that.
-    if (fs.existsSync(OVERLAY_DYLIB)) {
-      const injected = await smoke({ DYLD_INSERT_LIBRARIES: OVERLAY_DYLIB, SteamAppId: '480', SteamGameId: '480', SteamOverlayGameId: '480' });
-      expect(injected.errors).toEqual([]);
-      expect(injected.data!.exitCode).toBe(0);
-      const events = injected.data!.summary.events;
-      expect(steamEvent(events)).toMatchObject({ state: 'ready', overlay: 'native' });
-      if (screenLocked()) console.warn("The screen is locked, so Steam's overlay can't hook the game: whether it did wasn't checked.");
-      else expect(events).toContainEqual({ kind: 'steam-overlay', enabled: true });
-    } else {
-      console.warn(`Skipped the injected-overlay run: ${OVERLAY_DYLIB} doesn't exist.`);
-    }
-    fs.rmSync(dir, { recursive: true, force: true, maxRetries: 3 });
+    const before = screenLock();
+    const run = await smoke({ DYLD_INSERT_LIBRARIES: OVERLAY_DYLIB, SteamAppId: '480', SteamGameId: '480', SteamOverlayGameId: '480' });
+    const after = screenLock();
+    injected = { events: run.data?.summary.events ?? [], lock: [before, after] };
+    await ctx.annotate(`screen during the injected run: ${before.state} (${before.raw}) → ${after.state} (${after.raw})`);
+    expect(run.errors).toEqual([]);
+    expect(run.warnings.filter((w) => w.code === 'STEAM_OVERLAY_FAILED')).toEqual([]);
+    expect(run.data!.exitCode).toBe(0);
+    expect(steamEvent(injected.events)).toMatchObject({ state: 'ready', overlay: 'native' });
+    report(injected.events);
+  });
+
+  it("Steam's overlay hooks the injected game (needs an unlocked screen)", (ctx) => {
+    if (!fs.existsSync(OVERLAY_DYLIB)) ctx.skip(`Steam's overlay renderer isn't installed (${OVERLAY_DYLIB} doesn't exist)`);
+    expect(injected, 'the injected run from the previous test').toBeDefined();
+    const notUnlocked = injected!.lock.find((l) => l.state !== 'unlocked');
+    if (notUnlocked) ctx.skip(`the screen was ${notUnlocked.state} during the injected run (${notUnlocked.raw}), so Steam's overlay couldn't hook the game`);
+    expect(injected!.events).toContainEqual({ kind: 'steam-overlay', enabled: true });
   });
 
   it('cross-builds Windows and Linux with only their own Steam files', () => {
     const dir = newProject(env);
+    dirs.push(dir);
     const build = cli(['build', '--target', 'windows,linux'], dir, env);
     expect(build.result.errors).toEqual([]);
     const own = {
@@ -214,6 +248,5 @@ describe.skipIf(!ENABLED)('Steam on this Mac with App ID 480', () => {
       expect(files.filter((f) => other.test(f)), target).toEqual([]);
       expect(listFiles(path.join(dir, 'out', target)).filter((f) => f.endsWith('steam_appid.txt'))).toEqual([]);
     }
-    fs.rmSync(dir, { recursive: true, force: true, maxRetries: 3 });
   });
 });

@@ -25,7 +25,19 @@ async function run() {
   report('cleared', !(await steam.isAchievementUnlocked(ACHIEVEMENT)));
   report('achievements', (await steam.listAchievements()).length);
   report('presence', await steam.setRichPresence('status', 'Testing Gameshipper'));
-  report('stat', typeof (await steam.getStat('NumGames')));
+  // A round-trip on one of Spacewar's int stats: set, store, read back, then put the old value back.
+  const games = await steam.getStat('NumGames', 'int');
+  report('stat', typeof games);
+  if (typeof games === 'number') {
+    const set = await steam.setStat('NumGames', games + 1, 'int');
+    const stored = await steam.storeStats();
+    const readBack = (await steam.getStat('NumGames', 'int')) === games + 1;
+    report('statRoundTrip', { set, stored, readBack });
+    await steam.setStat('NumGames', games, 'int');
+    report('statRestored', (await steam.getStat('NumGames', 'int')) === games);
+  } else {
+    report('statRoundTrip', null);
+  }
   await gameshipper.saves.save('progress', { level: 2 });
   report('save', await gameshipper.saves.load('progress'));
   report('plugin', await gameshipper.plugins.echo.shout('hi'));
