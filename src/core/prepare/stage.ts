@@ -29,8 +29,10 @@ const BUILD_TIMEOUT_MS = 10 * 60 * 1000;
 const CLOSE_GRACE_MS = 2000;
 
 const isEnvFile = (name: string): boolean => name === '.env' || name.startsWith('.env.');
+/** The Steamworks SDK (a steamworks_sdk/ folder or steamworks_sdk_165.zip) is Valve's, licensed to the developer: never game content. */
+const isSteamworksSdk = (name: string): boolean => /^steamworks_sdk/i.test(name);
 /** Names never staged, wherever they are. Also checked against the name a link points at. */
-const isSkippedAnywhere = (name: string): boolean => SKIP_ANYWHERE.has(name) || isEnvFile(name);
+const isSkippedAnywhere = (name: string): boolean => SKIP_ANYWHERE.has(name) || isEnvFile(name) || isSteamworksSdk(name);
 
 /** `rel` is relative to the game folder. */
 function isSkipped(rel: string): boolean {
@@ -183,11 +185,13 @@ export async function stageGame(ctx: Ctx, config: Config): Promise<{ stageDir: s
     return false;
   };
   const LOOP_FIX = 'Remove the link, or replace it with a copy of the folder.';
+  // Plugins run in Electron's main process; core/plugins.ts copies them into the app separately.
+  const pluginPaths = new Set(config.plugins.map((p) => path.resolve(ctx.projectDir, p)));
   // Called for every path before it's copied (links not yet followed).
   const keep = (src: string): boolean => {
     const rel = path.relative(source, src);
     if (rel === '') return true;
-    if (isSkipped(rel)) return false;
+    if (isSkipped(rel) || pluginPaths.has(src)) return false;
     if (!fs.lstatSync(src).isSymbolicLink()) return true;
     let target: string;
     try {

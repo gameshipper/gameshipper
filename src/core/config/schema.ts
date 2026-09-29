@@ -4,6 +4,9 @@ export const TARGETS = ['windows', 'mac', 'linux', 'ios', 'android'] as const;
 export type Target = (typeof TARGETS)[number];
 export const DESKTOP_TARGETS = ['windows', 'mac', 'linux'] as const;
 export type DesktopTarget = (typeof DESKTOP_TARGETS)[number];
+/** How the Steam overlay (Shift+Tab) gets frames to draw on; see src/shell/overlay.ts. */
+export const STEAM_OVERLAY_SETTINGS = ['auto', 'native', 'repaint', 'off'] as const;
+export type SteamOverlaySetting = (typeof STEAM_OVERLAY_SETTINGS)[number];
 
 const relPath = z.string().min(1);
 
@@ -43,6 +46,9 @@ export const ConfigSchema = z.strictObject({
           linux: z.number().int().positive().nullable().default(null),
         })
         .prefault({}),
+      /** The developer's own Steamworks SDK: a zip or folder, relative to the project. null: found automatically. */
+      sdk: relPath.nullable().default(null),
+      overlay: z.enum(STEAM_OVERLAY_SETTINGS).default('auto'),
     })
     .prefault({}),
   mobile: z
