@@ -327,3 +327,81 @@ describe('runSmoke', () => {
     expect(counts()).toEqual(before);
   });
 });
+
+describe('bounded smoke output for noisy games', () => {
+  const consoleError = (i: number): DiagEvent => ({ kind: 'console', level: 'error', message: `error ${i}`, source: 'app://game/main.js', line: i });
+
+  it('reports at most 10 issues per code, then one issue counting the rest', () => {
+    const events: DiagEvent[] = Array.from({ length: 20_000 }, (_, i) => consoleError(i));
+    const { errors } = summaryToIssues({ droppedInfo: 0, events }, { eventsLog: '/p/events.jsonl' });
+    expect(errors).toHaveLength(11);
+    expect(errors.slice(0, 10).map((e) => e.message)).toEqual(Array.from({ length: 10 }, (_, i) => `error ${i} (main.js:${i})`));
+    expect(errors[10]).toEqual({
+      code: 'GAME_CONSOLE_ERROR',
+      message: '…and 19990 more like this (see the events log)',
+      fix: 'Every one is listed in /p/events.jsonl.',
+    });
+  });
+
+  it('caps each code on its own and keeps the count next to its code', () => {
+    const events: DiagEvent[] = [];
+    for (let i = 0; i < 5000; i++) {
+      events.push(
+        consoleError(i),
+        { kind: 'missing-file', url: `app://game/img/${i}.png` },
+        { kind: 'remote-request', url: `https://cdn.example.com/${i}.js`, status: 200, error: null },
+        { kind: 'console', level: 'warning', message: `warning ${i}`, source: '', line: 0 },
+      );
+    }
+    const { errors, warnings } = summaryToIssues({ droppedInfo: 0, events });
+    const shape = (list: { code: string; message: string }[]) => list.map((e) => (e.message.startsWith('…and') ? `${e.code} +` : e.code));
+    // Issues keep the order the game hit them in; each count follows the last issue with its code.
+    const pairs = (a: string, b: string) => [...Array.from({ length: 9 }, () => [a, b]).flat(), a, `${a} +`, b, `${b} +`];
+    expect(shape(errors)).toEqual(pairs('GAME_CONSOLE_ERROR', 'GAME_FILE_MISSING'));
+    expect(shape(warnings)).toEqual(pairs('GAME_USES_INTERNET', 'GAME_CONSOLE_WARNING'));
+    const more = errors.find((e) => e.message.startsWith('…and'))!;
+    expect(more).toEqual({ code: 'GAME_CONSOLE_ERROR', message: '…and 4990 more like this (see the events log)', fix: 'Every one is listed in the events log.' });
+  });
+
+  it('keeps the first 100 events in the result, with counts, and the full detail on disk', async () => {
+    const { dir, shellDir } = project(`
+      const events = [];
+      for (let i = 0; i < 20000; i++) events.push({ kind: 'console', level: 'error', message: 'error ' + i + ' ' + 'x'.repeat(100), source: 'app://game/main.js', line: i });
+      require('fs').writeFileSync(process.env.GAMESHIPPER_SMOKE_OUT, JSON.stringify({ droppedInfo: 7, events }));
+    `);
+    const r = await runPlay(testCtx(dir), config, { shellDir, smokeSeconds: 1, electronPath: process.execPath });
+    const smoke = r.data!.smoke!;
+    expect(smoke.summary.events).toHaveLength(100);
+    expect(smoke.summary.events[0]).toMatchObject({ message: expect.stringMatching(/^error 0 /) });
+    expect(smoke.summary.truncatedEvents).toBe(19_900);
+    expect(smoke.summary.droppedInfo).toBe(7);
+    expect(fs.existsSync(smoke.eventsLog)).toBe(true);
+    expect(r.errors).toHaveLength(11);
+    expect(r.errors[10].fix).toBe(`Every one is listed in ${smoke.eventsLog}.`);
+    expect(JSON.stringify(r).length).toBeLessThan(40_000);
+  });
+
+  it('reports truncatedEvents 0 when nothing was left out', async () => {
+    const { dir, shellDir } = project(`require('fs').writeFileSync(process.env.GAMESHIPPER_SMOKE_OUT, JSON.stringify({ droppedInfo: 0, events: [] }));`);
+    const r = await runPlay(testCtx(dir), config, { shellDir, smokeSeconds: 1, electronPath: process.execPath });
+    expect(r.data!.smoke!.summary).toEqual({ events: [], droppedInfo: 0, truncatedEvents: 0 });
+  });
+});
+
+describe('events log', () => {
+  it('exists from the start of every run, even when the game records nothing', async () => {
+    const smoke = project(`require('fs').writeFileSync(process.env.GAMESHIPPER_SMOKE_OUT, JSON.stringify({ droppedInfo: 0, events: [] }));`);
+    const s = await runPlay(testCtx(smoke.dir), config, { shellDir: smoke.shellDir, smokeSeconds: 1, electronPath: process.execPath });
+    expect(fs.readFileSync(s.data!.smoke!.eventsLog, 'utf8')).toBe('');
+
+    const play = project('');
+    const p = await runPlay(testCtx(play.dir), config, { shellDir: play.shellDir, electronPath: process.execPath });
+    expect(fs.existsSync(p.data!.eventsLog!)).toBe(true);
+
+    // A game that never reports back still leaves the log its errors point at.
+    const silent = project('process.exitCode = 4;');
+    const n = await runPlay(testCtx(silent.dir), config, { shellDir: silent.shellDir, smokeSeconds: 1, electronPath: process.execPath });
+    const logPath = /Details: (\S+\.jsonl) and/.exec(n.errors[0].fix!)![1];
+    expect(fs.existsSync(logPath)).toBe(true);
+  });
+});

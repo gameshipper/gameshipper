@@ -6,8 +6,19 @@ import type { Ctx } from './context.js';
 import { killTree, OUTPUT_BUFFER_CHARS, outputTail, stopWithGameshipper } from './proc.js';
 import { fail, GsFailure, gsError, ok, type GsError, type Result } from './result.js';
 
+/** Per code, how many issues a smoke run lists before one more issue counts the rest. */
+export const MAX_ISSUES_PER_CODE = 10;
+/** How many diagnostic events a smoke result carries; the events log keeps every one. */
+export const MAX_SUMMARY_EVENTS = 100;
+
+/** The shell's summary, cut to its first MAX_SUMMARY_EVENTS events so a noisy game's result stays small. */
+export interface SmokeSummary extends DiagSummary {
+  /** Events left out of `events`; all of them are in the events log. */
+  truncatedEvents: number;
+}
+
 export interface SmokeData {
-  summary: DiagSummary;
+  summary: SmokeSummary;
   /** Every diagnostic event as JSON lines, including chatty console output. */
   eventsLog: string;
   /** null when the game was stopped by a signal, including Gameshipper's own timeout. */
@@ -44,16 +55,30 @@ function formatSeconds(ms: number): string {
 /** Compile-time check that every DiagEvent kind is handled. */
 const unhandled = (_event: never): void => {};
 
-/** `seconds` is the smoke run's duration, used to say how long the page had to load. */
-export function summaryToIssues(summary: DiagSummary, opts: { seconds?: number } = {}): { errors: GsError[]; warnings: GsError[] } {
+/**
+ * `seconds` is the smoke run's duration, used to say how long the page had to load. `eventsLog` is named in
+ * the issue that counts what's left out: each code lists at most MAX_ISSUES_PER_CODE issues.
+ */
+export function summaryToIssues(
+  summary: DiagSummary,
+  opts: { seconds?: number; eventsLog?: string } = {},
+): { errors: GsError[]; warnings: GsError[] } {
   const errors: GsError[] = [];
   const warnings: GsError[] = [];
   const seen = new Set<string>();
+  const perCode = new Map<string, { list: GsError[]; shown: number; more: number }>();
   const add = (list: GsError[], issue: GsError): void => {
     const key = `${issue.code}\u0000${issue.message}`;
     if (seen.has(key)) return;
     seen.add(key);
-    list.push(issue);
+    const count = perCode.get(issue.code) ?? { list, shown: 0, more: 0 };
+    perCode.set(issue.code, count);
+    if (count.shown < MAX_ISSUES_PER_CODE) {
+      count.shown++;
+      list.push(issue);
+    } else {
+      count.more++;
+    }
   };
   // The shell records a wrong-case request as both case-mismatch and missing-file (it 404s).
   const realName = new Map<string, string>();
@@ -150,7 +175,23 @@ export function summaryToIssues(summary: DiagSummary, opts: { seconds?: number }
         unhandled(e);
     }
   }
+  for (const [code, { list, more }] of perCode) {
+    if (!more) continue;
+    const where = opts.eventsLog ? `Every one is listed in ${opts.eventsLog}.` : 'Every one is listed in the events log.';
+    // Right after the last issue with this code, so the count reads as part of that group.
+    const last = list.findLastIndex((i) => i.code === code);
+    list.splice(last + 1, 0, gsError(code, `…and ${more} more like this (see the events log)`, where));
+  }
   return { errors, warnings };
+}
+
+/** Keeps the first MAX_SUMMARY_EVENTS events; the rest are only counted. */
+export function truncateSummary(summary: DiagSummary): SmokeSummary {
+  return {
+    events: summary.events.slice(0, MAX_SUMMARY_EVENTS),
+    droppedInfo: summary.droppedInfo,
+    truncatedEvents: Math.max(0, summary.events.length - MAX_SUMMARY_EVENTS),
+  };
 }
 
 export interface LaunchOptions {
@@ -250,9 +291,11 @@ export function gameEnv(eventsLog: string, userDataDir: string, windowed: boolea
   return env;
 }
 
+/** Creates this run's (empty) events log and returns its path, so the path in a result always exists. */
 export function eventsLogPath(projectDir: string, now: Date = new Date()): string {
   const file = path.join(projectDir, '.gameshipper', 'logs', `events-${now.toISOString().replace(/[:.]/g, '-')}.jsonl`);
   fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, '', { flag: 'a' });
   return file;
 }
 
@@ -303,8 +346,8 @@ export async function runSmoke(ctx: Ctx, opts: SmokeOptions): Promise<Result<Smo
       summary === 'missing' ? `The game didn't report back (${ended}).` : `The game's report ${outFile} couldn't be read (${ended}).`;
     return fail([gsError('SMOKE_NO_RESULT', message, `Run \`npx gameshipper play\` to watch it start. ${details}`), ...timeout]);
   }
-  const { errors, warnings } = summaryToIssues(summary, { seconds: opts.seconds });
+  const { errors, warnings } = summaryToIssues(summary, { seconds: opts.seconds, eventsLog });
   const all = [...errors, ...timeout];
-  const data: SmokeData = { summary, eventsLog, exitCode: run.exitCode };
+  const data: SmokeData = { summary: truncateSummary(summary), eventsLog, exitCode: run.exitCode };
   return all.length ? fail(all, warnings, data) : ok(data, warnings);
 }
