@@ -15,7 +15,8 @@ export async function findJsSpecifiers(code: string): Promise<JsSpecifier[]> {
   for (const imp of imports) {
     if (imp.type === 'static' || imp.type === 'reexport-star') {
       out.push({ specifier: imp.specifier, start: imp.start, end: imp.end, quoted: false });
-    } else if (imp.type === 'dynamic' && typeof imp.specifier === 'string') {
+    } else if (imp.type === 'dynamic' && typeof imp.specifier === 'string' && !imp.glob) {
+      // A glob is a template literal with substitutions (`./chunks/${n}.js`), not a URL we can fetch.
       out.push({ specifier: imp.specifier, start: imp.start, end: imp.end, quoted: true });
     }
   }

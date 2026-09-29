@@ -33,6 +33,13 @@ describe('rewrite-js', () => {
     expect(out).toContain('await import(url)');
   });
 
+  it('skips template-literal dynamic imports with substitutions', async () => {
+    const code = 'const a = await import(`./chunks/${n}.js`);\nconst b = await import(`./plain.js`);';
+    const specs = await findJsSpecifiers(code);
+    expect(specs.map((s) => s.specifier)).toEqual(['./plain.js']);
+    expect(rewriteJs(code, specs, () => '/v/x.js')).toBe('const a = await import(`./chunks/${n}.js`);\nconst b = await import("/v/x.js");');
+  });
+
   it('returns the code unchanged when nothing maps', async () => {
     expect(rewriteJs(SRC, await findJsSpecifiers(SRC), () => null)).toBe(SRC);
   });
