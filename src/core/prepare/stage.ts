@@ -36,6 +36,14 @@ function isWithin(child: string, parent: string): boolean {
   return rel === '' || (rel !== '..' && !rel.startsWith(`..${path.sep}`) && !path.isAbsolute(rel));
 }
 
+/** A link to a folder loops when that folder contains one of the folders the link sits in. */
+function loopsBack(link: string, target: string, root: string): boolean {
+  for (let dir = path.dirname(link); ; dir = path.dirname(dir)) {
+    if (isWithin(fs.realpathSync(dir), target)) return true;
+    if (dir === root || dir === path.dirname(dir)) return false;
+  }
+}
+
 /** Stop a build command and everything it started (e.g. the node process behind `npm run dev`). */
 function killTree(child: ChildProcess): void {
   if (child.pid === undefined) return;
@@ -187,28 +195,40 @@ export async function stageGame(ctx: Ctx, config: Config): Promise<{ stageDir: s
   }
   const stageDir = stageDirFor(ctx.projectDir);
   fs.rmSync(stageDir, { recursive: true, force: true });
+  const warnings: GsError[] = [];
+  const skipLink = (link: string, problem: string): false => {
+    warnings.push(
+      gsError(
+        'BROKEN_SYMLINK',
+        `${path.relative(ctx.projectDir, link)} ${problem}, so it wasn't staged.`,
+        'Remove the link or point it at a real file.',
+      ),
+    );
+    return false;
+  };
+  // Called for every path before it's copied (links not yet followed).
   const keep = (src: string): boolean => {
     const rel = path.relative(source, src);
-    return rel === '' || !isSkipped(rel);
-  };
-  const warnings: GsError[] = [];
-  // Copy entry by entry: when the game lives in the project root, stageDir is inside `source`,
-  // and fs.cpSync refuses to copy a folder into its own subdirectory.
-  fs.mkdirSync(stageDir, { recursive: true });
-  for (const item of fs.readdirSync(source, { withFileTypes: true })) {
-    const from = path.join(source, item.name);
-    if (!keep(from)) continue;
-    if (item.isSymbolicLink() && !fs.existsSync(from)) {
-      warnings.push(
-        gsError(
-          'BROKEN_SYMLINK',
-          `${path.relative(ctx.projectDir, from)} is a link to something that doesn't exist, so it wasn't staged.`,
-          'Remove the link or point it at a real file.',
-        ),
-      );
-      continue;
+    if (rel === '') return true;
+    if (isSkipped(rel)) return false;
+    if (!fs.lstatSync(src).isSymbolicLink()) return true;
+    let target: string;
+    try {
+      target = fs.realpathSync(src);
+    } catch {
+      return skipLink(src, "is a link to something that doesn't exist");
     }
-    fs.cpSync(from, path.join(stageDir, item.name), { recursive: true, filter: keep });
+    if (fs.statSync(target).isDirectory() && loopsBack(src, target, source)) {
+      return skipLink(src, 'links to a folder that contains it');
+    }
+    return true;
+  };
+  // Copy entry by entry: when the game lives in the project root, stageDir is inside `source`,
+  // and fs.cpSync refuses to copy a folder into its own subdirectory. Links are copied as the
+  // files they point to, so the stage never links back into the developer's disk.
+  fs.mkdirSync(stageDir, { recursive: true });
+  for (const name of fs.readdirSync(source)) {
+    fs.cpSync(path.join(source, name), path.join(stageDir, name), { recursive: true, dereference: true, filter: keep });
   }
   ctx.log(`staged ${source} → ${stageDir}`);
 

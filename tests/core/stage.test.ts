@@ -39,6 +39,16 @@ async function waitFor(check: () => boolean, ms = 5000): Promise<boolean> {
   return check();
 }
 
+/** Like fs.existsSync, but true for a link even when its target is missing. */
+const present = (file: string): boolean => {
+  try {
+    fs.lstatSync(file);
+    return true;
+  } catch {
+    return false;
+  }
+};
+
 const killIfAlive = (pid: number | null): void => {
   if (pid !== null && alive(pid)) process.kill(pid, 'SIGKILL');
 };
@@ -114,6 +124,59 @@ describe('stageGame', () => {
     expect(warnings).toHaveLength(1);
     expect(warnings[0]).toMatchObject({ code: 'BROKEN_SYMLINK', fix: 'Remove the link or point it at a real file.' });
     expect(warnings[0].message).toContain('lib.js');
+  });
+
+  it('copies symlinked files and folders as real files', async () => {
+    const dir = makeTmpDir();
+    const outside = makeTmpDir();
+    writeFiles(outside, { 'music.ogg': 'ogg' });
+    writeFiles(dir, { 'index.html': '', 'shared/tex.png': 'png', 'lib/real.js': 'x' });
+    fs.symlinkSync('shared', path.join(dir, 'assets'));
+    fs.symlinkSync('real.js', path.join(dir, 'lib', 'alias.js'));
+    fs.symlinkSync(path.join(outside, 'music.ogg'), path.join(dir, 'lib', 'music.ogg'));
+    const { stageDir, warnings } = await stageGame(testCtx(dir), cfg());
+    expect(warnings).toEqual([]);
+    expect(fs.lstatSync(path.join(stageDir, 'assets')).isDirectory()).toBe(true);
+    for (const [rel, content] of [
+      ['assets/tex.png', 'png'],
+      ['lib/alias.js', 'x'],
+      ['lib/music.ogg', 'ogg'],
+    ]) {
+      expect(fs.lstatSync(path.join(stageDir, rel)).isFile(), rel).toBe(true);
+      expect(fs.readFileSync(path.join(stageDir, rel), 'utf8'), rel).toBe(content);
+    }
+  });
+
+  it('skips broken symlinks in subfolders with a BROKEN_SYMLINK warning', async () => {
+    const dir = makeTmpDir();
+    writeFiles(dir, { 'index.html': '', 'js/main.js': '' });
+    fs.symlinkSync('missing.js', path.join(dir, 'js', 'lib.js'));
+    fs.symlinkSync('self', path.join(dir, 'js', 'self'));
+    const { stageDir, warnings } = await stageGame(testCtx(dir), cfg());
+    expect(present(path.join(stageDir, 'js', 'main.js'))).toBe(true);
+    expect(present(path.join(stageDir, 'js', 'lib.js'))).toBe(false);
+    expect(present(path.join(stageDir, 'js', 'self'))).toBe(false);
+    expect(warnings.map((w) => w.code)).toEqual(['BROKEN_SYMLINK', 'BROKEN_SYMLINK']);
+    const messages = warnings.map((w) => w.message).join('\n');
+    expect(messages).toContain(path.join('js', 'lib.js'));
+    expect(messages).toContain(path.join('js', 'self'));
+  });
+
+  it('skips symlinks that loop back to a folder above them', async () => {
+    const dir = makeTmpDir();
+    writeFiles(dir, { 'index.html': '', 'a/a.txt': '', 'b/b.txt': '', 'sub/s.txt': '' });
+    fs.symlinkSync('..', path.join(dir, 'sub', 'up'));
+    fs.symlinkSync('../b', path.join(dir, 'a', 'to-b'));
+    fs.symlinkSync('../a', path.join(dir, 'b', 'to-a'));
+    const { stageDir, warnings } = await stageGame(testCtx(dir), cfg());
+    expect(present(path.join(stageDir, 'sub', 's.txt'))).toBe(true);
+    expect(present(path.join(stageDir, 'sub', 'up'))).toBe(false);
+    // Each link is followed once; the link back is where the loop is cut.
+    expect(fs.readdirSync(path.join(stageDir, 'a', 'to-b'))).toEqual(['b.txt']);
+    expect(fs.readdirSync(path.join(stageDir, 'b', 'to-a'))).toEqual(['a.txt']);
+    expect(warnings.map((w) => w.code)).toEqual(['BROKEN_SYMLINK', 'BROKEN_SYMLINK', 'BROKEN_SYMLINK']);
+    const messages = warnings.map((w) => w.message).join('\n');
+    for (const link of [['sub', 'up'], ['a', 'to-b', 'to-a'], ['b', 'to-a', 'to-b']]) expect(messages).toContain(path.join(...link));
   });
 
   it('GAME_DIR_INVALID when game.dir is a file', async () => {
