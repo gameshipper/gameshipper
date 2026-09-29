@@ -8,7 +8,7 @@
   "files": ["bin", "dist"],
   "engines": { "node": ">=22.12.0" },
   "scripts": {
-    "build": "tsc -p tsconfig.json && node scripts/postbuild.mjs",
+    "build": "node -e \"require('fs').rmSync('dist',{recursive:true,force:true})\" && tsc -p tsconfig.json && node scripts/postbuild.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
     "test:integration": "npm run build && vitest run --config vitest.int.config.ts"
