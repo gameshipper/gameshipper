@@ -82,6 +82,8 @@ interface RunState {
 }
 
 const str = (v: string | boolean | undefined) => (typeof v === 'string' ? v : undefined);
+/** A path answer where "none" means no file: --key-art none, --logo none. */
+const pathOrNone = (v: string | undefined) => (v === undefined ? undefined : v === 'none' ? null : v);
 /** --steam-sdk, as an absolute path: like --dir, it's relative to the current folder, not the game's. */
 const steamSdkFlag = (values: Values) => {
   const raw = str(values['steam-sdk']);
@@ -181,6 +183,8 @@ async function initCommand(projectDir: string, values: Values, io: CliIO, run: R
   const iconFlag = str(values.icon);
   const flags: InitAnswers = {
     icon: iconFlag === undefined ? undefined : iconFlag === 'none' ? null : iconFlag,
+    keyArt: pathOrNone(str(values['key-art'])),
+    logo: pathOrNone(str(values.logo)),
     entry: str(values.entry),
     buildCommand: str(values['build-command']),
     outputDir: str(values['output-dir']),
@@ -202,12 +206,22 @@ async function initCommand(projectDir: string, values: Values, io: CliIO, run: R
   }
   const iconDefault = detected.icon ?? 'none';
   const iconAnswer = flags.icon !== undefined || !interactive ? undefined : await prompt.ask('Icon PNG, 1024x1024 ("none" to skip)', iconDefault);
+  const keyArtAnswer =
+    flags.keyArt !== undefined || !interactive
+      ? undefined
+      : await prompt.ask('Key art for the store images, PNG or JPEG, 3840x2160 ("none" to skip)', detected.keyArt ?? 'none');
+  const logoAnswer =
+    flags.logo !== undefined || !interactive
+      ? undefined
+      : await prompt.ask('Logo for the store images, PNG with a transparent background ("none" to skip)', detected.logo ?? 'none');
   const result = initProject(projectDir, {
     ...flags,
     name,
     appId,
     // Accepting the default keeps what was detected, including the warning about an icon that didn't qualify.
     ...(iconAnswer === undefined || iconAnswer === iconDefault ? {} : { icon: iconAnswer === 'none' ? null : iconAnswer }),
+    ...(keyArtAnswer === undefined ? {} : { keyArt: pathOrNone(keyArtAnswer) }),
+    ...(logoAnswer === undefined ? {} : { logo: pathOrNone(logoAnswer) }),
   });
   if (result.ok) recordRun(projectDir, 'init', result);
   return { result, human: initSummary(result) };

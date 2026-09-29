@@ -20,6 +20,8 @@ describe('detectProject', () => {
       outputDir: null,
       icon: 'icon.png',
       unsuitableIcon: null,
+      keyArt: null,
+      logo: null,
     });
   });
 
@@ -45,7 +47,7 @@ describe('detectProject', () => {
 
   it('a missing folder detects nothing instead of throwing', () => {
     const dir = path.join(makeTmpDir(), 'nope');
-    expect(detectProject(dir)).toEqual({ name: 'Nope', entry: null, buildCommand: null, outputDir: null, icon: null, unsuitableIcon: null });
+    expect(detectProject(dir)).toEqual({ name: 'Nope', entry: null, buildCommand: null, outputDir: null, icon: null, unsuitableIcon: null, keyArt: null, logo: null });
   });
 
   it('Vite project with a build script', () => {

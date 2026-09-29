@@ -21,6 +21,7 @@ export function initSummary(r: Result<InitData>): string[] {
     `✓ Wrote gameshipper.json for "${config.name}"`,
     `  Entry: ${config.game.entry}${built}`,
     `  Icon: ${config.icon ?? 'none'}`,
+    `  Store art: key art ${config.keyArt ?? 'none'}, logo ${config.logo ?? 'none'}`,
     `  Steam App ID: ${config.steam.appId}`,
     '',
     'Next: `npx gameshipper play` to try it, or `npx gameshipper play --smoke` for a quick automatic check.',

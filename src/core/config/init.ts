@@ -11,6 +11,9 @@ export interface InitAnswers {
   name?: string;
   appId?: number;
   icon?: string | null;
+  /** Key art and logo for the store images: a path relative to the game folder, or null for none. Left out: what was detected. */
+  keyArt?: string | null;
+  logo?: string | null;
   entry?: string;
   buildCommand?: string | null;
   outputDir?: string | null;
@@ -62,6 +65,8 @@ interface InitPlan {
   buildCommand: string | null;
   outputDir: string | null;
   icon: string | null;
+  keyArt: string | null;
+  logo: string | null;
   /** Problems that stop init before it writes anything. */
   errors: GsError[];
   warnings: GsError[];
@@ -97,7 +102,20 @@ function planInit(dir: string, answers: InitAnswers, detected: Detected): InitPl
     else if (problem) warnings.push(unsuitableIcon(answers.icon, problem.found));
     else icon = answers.icon;
   }
-  return { entry, buildCommand, outputDir, icon, errors, warnings };
+
+  // Store art given explicitly must exist; its content is checked when `build` makes the store images.
+  const art = [
+    ['keyArt', '--key-art', answers.keyArt],
+    ['logo', '--logo', answers.logo],
+  ] as const;
+  for (const [key, flag, value] of art) {
+    if (value && !fs.existsSync(path.join(dir, value))) {
+      errors.push(gsError('ASSET_MISSING', `${key}: ${value} doesn't exist.`, `Pass ${flag} with a path relative to your game folder, or ${flag} none.`));
+    }
+  }
+  const keyArt = answers.keyArt !== undefined ? answers.keyArt : detected.keyArt;
+  const logo = answers.logo !== undefined ? answers.logo : detected.logo;
+  return { entry, buildCommand, outputDir, icon, keyArt, logo, errors, warnings };
 }
 
 /**
@@ -119,6 +137,8 @@ export function initProject(dir: string, answers: InitAnswers = {}): Result<Init
     version: '1.0.0',
     game: { dir: '.', entry: plan.entry, buildCommand: plan.buildCommand, outputDir: plan.outputDir },
     icon: plan.icon,
+    keyArt: plan.keyArt,
+    logo: plan.logo,
     steam: { appId: answers.appId ?? 480 },
   });
   if (!parsed.ok) return fail(parsed.errors);

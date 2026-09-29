@@ -13,10 +13,17 @@ export interface Detected {
   icon: string | null;
   /** When no candidate qualifies, the first one found and what it is instead ("is 512x512"). */
   unsuitableIcon: { path: string; found: string } | null;
+  /** Key art and logo for the store images, found only under unambiguous names (KEY_ART_CANDIDATES, LOGO_CANDIDATES). */
+  keyArt: string | null;
+  logo: string | null;
 }
 
 const BUNDLER_OUTPUT: Record<string, string> = { vite: 'dist', parcel: 'dist', webpack: 'dist', esbuild: 'dist', rollup: 'dist' };
 const ICON_CANDIDATES = ['icon.png', 'art/icon.png', 'assets/icon.png', 'public/icon.png'];
+// Store art is only picked up under names that can't mean anything else: a game's own logo.png is often an
+// opaque in-game image, which the store images can't use (LOGO_NOT_TRANSPARENT).
+const KEY_ART_CANDIDATES = ['art/key-art.png', 'art/key-art.jpg', 'key-art.png', 'key-art.jpg'];
+const LOGO_CANDIDATES = ['art/logo.png', 'art/store-logo.png', 'store-logo.png'];
 
 interface PackageJson {
   name?: unknown;
@@ -44,6 +51,10 @@ function findIcon(dir: string): Pick<Detected, 'icon' | 'unsuitableIcon'> {
     unsuitableIcon ??= { path: candidate, found: problem.found };
   }
   return { icon: null, unsuitableIcon };
+}
+
+function firstExisting(dir: string, candidates: string[]): string | null {
+  return candidates.find((c) => fs.existsSync(path.join(dir, c))) ?? null;
 }
 
 function findEntry(dir: string): string | null {
@@ -79,5 +90,7 @@ export function detectProject(dir: string): Detected {
     buildCommand,
     outputDir,
     ...findIcon(dir),
+    keyArt: firstExisting(dir, KEY_ART_CANDIDATES),
+    logo: firstExisting(dir, LOGO_CANDIDATES),
   };
 }
