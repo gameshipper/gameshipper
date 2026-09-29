@@ -30,6 +30,16 @@ function sdkZip(): string {
   return path.join(folder, zips[zips.length - 1]);
 }
 
+/** What `lsof` lists as open by the running process whose command is exactly `executable` (the main process). */
+function openFilesOf(executable: string): string {
+  const ps = spawnSync('ps', ['-axo', 'pid=,command='], { encoding: 'utf8' }).stdout;
+  const pids = ps.split('\n').flatMap((line) => {
+    const m = /^\s*(\d+) (.*)$/.exec(line);
+    return m && m[2] === executable ? [m[1]] : [];
+  });
+  return pids.map((pid) => spawnSync('lsof', ['-p', pid], { encoding: 'utf8' }).stdout).join('\n');
+}
+
 /** The "steam-e2e:<step>:<json>" lines the fixture game logs, as { step: value }. */
 function gameReport(events: DiagEvent[]): Record<string, unknown> {
   const out: Record<string, unknown> = {};
@@ -211,6 +221,10 @@ describe.skipIf(!ENABLED)('Steam on this Mac with App ID 480', () => {
     expect(mac.mac).toEqual({ signing: 'adhoc', notarized: false });
     const app = path.join(mac.dir, 'Steam Test.app');
     expect(spawnSync('codesign', ['--verify', '--deep', '--strict', app]).status).toBe(0);
+    // The build has Steam, so its main process gets Steam's entitlements (and only it gets the DYLD one).
+    const entitlements = (file: string) => spawnSync('codesign', ['-d', '--entitlements', '-', '--xml', file], { encoding: 'utf8' }).stdout;
+    for (const key of ['allow-jit', 'disable-library-validation', 'allow-dyld-environment-variables']) expect(entitlements(app)).toContain(`com.apple.security.cs.${key}`);
+    expect(entitlements(path.join(app, 'Contents', 'Frameworks', 'Steam Test Helper (Renderer).app'))).not.toContain('allow-dyld-environment-variables');
     for (const file of [app, ...files.filter((f) => /\.(node|dylib)$/.test(f)).map((f) => path.join(unpacked, f))]) {
       expect(spawnSync('codesign', ['-dv', file], { encoding: 'utf8' }).stderr, file).toContain('flags=0x10002(adhoc,runtime)');
     }
@@ -228,8 +242,14 @@ describe.skipIf(!ENABLED)('Steam on this Mac with App ID 480', () => {
     expect(project, 'the packaged app from the previous test').toBeDefined();
     // Launched by Steam, a game gets Steam's overlay renderer injected; this emulates that.
     const before = screenLock();
-    const run = await smoke({ DYLD_INSERT_LIBRARIES: OVERLAY_DYLIB, SteamAppId: '480', SteamGameId: '480', SteamOverlayGameId: '480' });
+    const running = smoke({ DYLD_INSERT_LIBRARIES: OVERLAY_DYLIB, SteamAppId: '480', SteamGameId: '480', SteamOverlayGameId: '480' });
+    // The Steam build's main process allows DYLD variables, so the overlay renderer is mapped into it.
+    await new Promise((r) => setTimeout(r, 4_000));
+    const mapped = openFilesOf(project!.executable);
+    const run = await running;
     const after = screenLock();
+    expect(mapped).toContain('Electron Framework');
+    expect(mapped).toContain('gameoverlayrenderer.dylib');
     injected = { events: run.data?.summary.events ?? [], lock: [before, after] };
     await ctx.annotate(`screen during the injected run: ${before.state} (${before.raw}) → ${after.state} (${after.raw})`);
     expect(run.errors).toEqual([]);

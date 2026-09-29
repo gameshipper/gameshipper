@@ -40,13 +40,14 @@ const config = (extra: object = {}) => parseConfig({ name: 'Moon Game', version:
 describe('runBuild signs the Mac app', () => {
   it('after its afterPackage hooks, and reports how it was signed', async () => {
     const { dir, shellDir } = project();
-    const finishMac: typeof finishMacApp = async (ctx, _config, app, plan) => {
-      fs.appendFileSync(path.join(ctx.projectDir, 'order.txt'), `sign ${plan.kind} ${app}\n`);
+    const finishMac: typeof finishMacApp = async (ctx, _config, app, plan, deps) => {
+      fs.appendFileSync(path.join(ctx.projectDir, 'order.txt'), `sign ${plan.kind} ${app} steam=${deps?.steam}\n`);
       return { signing: 'adhoc', notarized: false, warnings: [gsError('MAC_UNSIGNED', 'only ad-hoc', 'set the variables')] };
     };
     const r = await runBuild(testCtx(dir), config({ targets: ['mac', 'linux'] }), { shellDir, host: 'darwin', tools, pack: fakePack, env: {}, finishMac });
     expect(r.errors).toEqual([]);
-    expect(readText(dir, 'order.txt')).toBe('afterPackage mac\nsign adhoc /out/mac/Moon Game.app\nafterPackage linux\n');
+    // No Steamworks SDK, so no Steam in the app and none of Steam's entitlements.
+    expect(readText(dir, 'order.txt')).toBe('afterPackage mac\nsign adhoc /out/mac/Moon Game.app steam=false\nafterPackage linux\n');
     const [mac, linux] = r.data!.targets;
     expect(mac.output).toMatchObject({ mac: { signing: 'adhoc', notarized: false } });
     expect(mac.warnings.map((w) => w.code)).toEqual(['MAC_UNSIGNED']);

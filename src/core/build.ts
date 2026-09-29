@@ -183,7 +183,8 @@ export async function runBuild(ctx: Ctx, config: Config, opts: BuildOptions): Pr
       let output = packaged;
       // Signing comes last: the hooks may still change the .app, and any change after signing breaks the signature.
       if (job.target === 'mac' && macSigning) {
-        const signed = await (opts.finishMac ?? finishMacApp)(ctx, config, macAppFor(config, packaged.dir), macSigning);
+        const steam = prepared.steam.targets.includes('mac');
+        const signed = await (opts.finishMac ?? finishMacApp)(ctx, config, macAppFor(config, packaged.dir), macSigning, { steam });
         output = { ...packaged, mac: { signing: signed.signing, notarized: signed.notarized }, warnings: [...packaged.warnings, ...signed.warnings] };
       }
       targets.push({ target: job.target, status: 'built', output, errors: [], warnings: output.warnings });

@@ -5,7 +5,7 @@ import { sign } from '@electron/osx-sign';
 import type { Ctx } from '../context.js';
 import { createRunLog } from '../log.js';
 import { GsFailure } from '../result.js';
-import { isMainCode, writeEntitlementFiles } from './entitlements.js';
+import { codeRole, writeEntitlementFiles } from './entitlements.js';
 
 const run = promisify(execFile);
 
@@ -86,16 +86,22 @@ export function writeToolLog(ctx: Ctx, tool: string, text: string): string {
   return log.path;
 }
 
+export interface SignOptions {
+  /** The app bundles Steam: its main process gets the entitlements Steam's libraries and overlay need. */
+  steam?: boolean;
+}
+
 /**
- * Signs a Mac .app with the hardened runtime and Steam-compatible entitlements: the bundle, its helper apps,
- * frameworks and every native file in it (koffi.node, steam-overlay.node, libsteam_api.dylib). osx-sign then
- * runs `codesign --verify --deep --strict`. `identity` null signs ad-hoc (no Apple account: runs on this Mac,
- * can't be notarized). Throws MAC_SIGN_FAILED.
+ * Signs a Mac .app with the hardened runtime and the fewest entitlements that work (see entitlements.ts): the
+ * bundle, its helper apps, frameworks and every native file in it (koffi.node, steam-overlay.node,
+ * libsteam_api.dylib). osx-sign then runs `codesign --verify --deep --strict`. `identity` null signs ad-hoc (no
+ * Apple account: runs on this Mac, can't be notarized). Throws MAC_SIGN_FAILED.
  */
-export async function signMacApp(ctx: Ctx, appPath: string, identity: SigningIdentity | null): Promise<void> {
-  const files = writeEntitlementFiles(path.join(ctx.projectDir, '.gameshipper', 'sign'));
+export async function signMacApp(ctx: Ctx, appPath: string, identity: SigningIdentity | null, opts: SignOptions = {}): Promise<void> {
+  const steam = opts.steam ?? false;
+  const files = writeEntitlementFiles(path.join(ctx.projectDir, '.gameshipper', 'sign'), { adhoc: !identity, steam });
   // By SHA-1: the identity's name holds a person's legal name, and run logs get shared.
-  ctx.log(`signing ${appPath} ${identity ? `with the identity ${identity.hash}` : 'ad-hoc'} (hardened runtime)`);
+  ctx.log(`signing ${appPath} ${identity ? `with the identity ${identity.hash}` : 'ad-hoc'} (hardened runtime, ${steam ? 'with' : 'without'} Steam's entitlements)`);
   try {
     await sign({
       app: appPath,
@@ -107,7 +113,7 @@ export async function signMacApp(ctx: Ctx, appPath: string, identity: SigningIde
       preAutoEntitlements: false,
       optionsForFile: (file) => ({
         hardenedRuntime: true,
-        entitlements: isMainCode(file, appPath) ? files.main : files.helper,
+        entitlements: files[codeRole(file, appPath)],
         // Apple's timestamp server only accepts Developer ID signatures.
         ...(identity ? {} : { timestamp: 'none' }),
       }),

@@ -40,6 +40,8 @@ export async function planMacSigning(
 }
 
 export interface FinishMacDeps {
+  /** The app bundles Steam (see signMacApp). */
+  steam?: boolean;
   /** Injectable for tests. */
   sign?: typeof signMacApp;
   notarize?: typeof notarizeMacApp;
@@ -50,8 +52,9 @@ const HOW_TO_SIGN =
 
 /**
  * The last step of a Mac target (spec §7.3 step 6), after its afterPackage hooks: sign with the hardened runtime
- * and Steam's entitlements, then notarize and staple when a notary login is set. Nothing may change the .app
- * afterwards. Throws GsFailure when Developer ID signing or notarization fails; ad-hoc trouble is a warning.
+ * (with Steam's entitlements when `deps.steam`), then notarize and staple when a notary login is set. Nothing may
+ * change the .app afterwards. Throws GsFailure when Developer ID signing or notarization fails; ad-hoc trouble is a
+ * warning.
  */
 export async function finishMacApp(ctx: Ctx, config: Config, appPath: string, plan: MacSigningPlan, deps: FinishMacDeps = {}): Promise<MacSignResult> {
   const sign = deps.sign ?? signMacApp;
@@ -73,7 +76,7 @@ export async function finishMacApp(ctx: Ctx, config: Config, appPath: string, pl
 
   if (plan.kind === 'adhoc') {
     try {
-      await sign(ctx, appPath, null);
+      await sign(ctx, appPath, null, { steam: deps.steam });
     } catch (e) {
       const reason = e instanceof GsFailure ? e.error.message : e instanceof Error ? e.message : String(e);
       return {
@@ -93,7 +96,7 @@ export async function finishMacApp(ctx: Ctx, config: Config, appPath: string, pl
     };
   }
 
-  await sign(ctx, appPath, plan.identity);
+  await sign(ctx, appPath, plan.identity, { steam: deps.steam });
   const warnings: GsError[] = [];
   if (!config.mobile.bundleId) {
     warnings.push(

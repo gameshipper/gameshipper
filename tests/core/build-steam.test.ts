@@ -63,7 +63,14 @@ const config = (extra: object = {}) => parseConfig({ name: 'x', version: '1.0.0'
 describe('runBuild with Steam and plugins', () => {
   it('bundles Steam for every target and runs plugin hooks around packaging', async () => {
     const { dir, shellDir } = project({ 'recorder.mjs': RECORDER });
-    const r = await runBuild(testCtx(dir), config({ plugins: ['recorder.mjs'] }), { shellDir, host: 'darwin', tools, pack: fakePack, env: {}, koffi, finishMac });
+    const signed: Array<boolean | undefined> = [];
+    const finishMacSteam: typeof finishMacApp = async (ctx, cfg, app, plan, deps) => {
+      signed.push(deps?.steam);
+      return finishMac(ctx, cfg, app, plan, deps);
+    };
+    const r = await runBuild(testCtx(dir), config({ plugins: ['recorder.mjs'] }), { shellDir, host: 'darwin', tools, pack: fakePack, env: {}, koffi, finishMac: finishMacSteam });
+    // The Mac app bundles Steam, so it's signed with Steam's entitlements.
+    expect(signed).toEqual([true]);
     expect(r.data!.targets.map((t) => [t.target, t.status])).toEqual([
       ['windows', 'built'],
       ['mac', 'built'],

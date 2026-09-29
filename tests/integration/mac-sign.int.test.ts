@@ -29,7 +29,7 @@ function freshGame(): string {
 
 // The Apple variables are set empty for every test run (vitest.int.config.ts), so builds here are ad-hoc signed.
 describe.runIf(process.platform === 'darwin')('Mac signing on this Mac', () => {
-  it("build → hardened ad-hoc signature → the game runs → Steam's overlay can be injected → fake notarization", async (ctx) => {
+  it("build → hardened ad-hoc signature → the game runs → no DYLD injection without Steam → fake notarization", async (ctx) => {
     const dir = freshGame();
 
     // 1. Without Apple credentials the app is ad-hoc signed with the hardened runtime.
@@ -41,18 +41,28 @@ describe.runIf(process.platform === 'darwin')('Mac signing on this Mac', () => {
     const exe: string = mac.executable;
     const app = path.join(mac.dir, 'Spinning Cube.app');
 
-    // 2. The signature is valid, hardened, and carries Steam's entitlements; the DYLD one on the main app only.
+    // 2. The signature is valid and hardened. This build has no Steam, so none of Steam's entitlements: JIT, and
+    // library validation off only because it's ad-hoc (Electron couldn't load its own framework otherwise).
     expect(codesign('--verify', '--deep', '--strict', app).code).toBe(0);
     expect(codesign('-dv', app).text).toContain('flags=0x10002(adhoc,runtime)');
-    const main = codesign('-d', '--entitlements', '-', '--xml', app).text;
-    for (const key of ['allow-jit', 'disable-library-validation', 'allow-dyld-environment-variables']) expect(main).toContain(`com.apple.security.cs.${key}`);
-    expect(main).not.toContain('app-sandbox');
+    const entitlements = (file: string) => codesign('-d', '--entitlements', '-', '--xml', file).text;
+    const main = entitlements(app);
+    for (const key of ['cs.allow-jit', 'cs.disable-library-validation', 'device.audio-input']) expect(main).toContain(`com.apple.security.${key}`);
+    for (const key of ['allow-dyld-environment-variables', 'app-sandbox', 'device.usb', 'device.bluetooth']) expect(main).not.toContain(key);
     const helpers = fs.readdirSync(path.join(app, 'Contents', 'Frameworks')).filter((f) => f.endsWith('.app'));
     expect(helpers.length).toBeGreaterThanOrEqual(4);
     for (const helper of helpers) {
       const h = path.join(app, 'Contents', 'Frameworks', helper);
       expect(codesign('-dv', h).text, helper).toContain('flags=0x10002(adhoc,runtime)');
-      expect(codesign('-d', '--entitlements', '-', '--xml', h).text, helper).not.toContain('allow-dyld-environment-variables');
+      const text = entitlements(h);
+      expect(text, helper).toContain('com.apple.security.cs.disable-library-validation');
+      expect(text, helper).not.toMatch(/allow-dyld-environment-variables|device\.usb|device\.bluetooth/);
+    }
+    // Electron's crash reporter and Squirrel's updater: hardened, with no entitlements.
+    for (const rel of ['Electron Framework.framework/Versions/A/Helpers/chrome_crashpad_handler', 'Squirrel.framework/Versions/A/Resources/ShipIt']) {
+      const file = path.join(app, 'Contents', 'Frameworks', ...rel.split('/'));
+      expect(codesign('-dv', file).text, rel).toContain('runtime');
+      expect(entitlements(file), rel).not.toContain('<key>');
     }
 
     // 3. The hardened app still runs the game: JIT in the renderer, WebGL on the in-process GPU, the preload bridge, saves.
@@ -65,7 +75,8 @@ describe.runIf(process.platform === 'darwin')('Mac signing on this Mac', () => {
     expect(messages).toContain(BRIDGE_OK);
     expect(Number(/^gameshipper-frames:(\d+)$/m.exec(messages.join('\n'))?.[1] ?? 0)).toBeGreaterThan(10);
 
-    // 4. Steam injects its overlay with DYLD_INSERT_LIBRARIES; the main app's entitlement lets the library load.
+    // 4. Without Steam in the build, the main app doesn't allow DYLD variables: macOS ignores DYLD_INSERT_LIBRARIES,
+    // and the game still runs. (steam.int.test.ts checks that a build with Steam takes the overlay.)
     if (fs.existsSync(STEAM_OVERLAY)) {
       const summary = path.join(dir, '.gameshipper', 'overlay-smoke.json');
       const child = spawn(exe, [], {
@@ -83,7 +94,8 @@ describe.runIf(process.platform === 'darwin')('Mac signing on this Mac', () => {
       await new Promise((r) => setTimeout(r, 3_000));
       const mapped = spawnSync('lsof', ['-p', String(child.pid)], { encoding: 'utf8' }).stdout;
       const exitCode = await new Promise((r) => child.on('close', r));
-      expect(mapped).toContain('gameoverlayrenderer.dylib');
+      expect(mapped).toContain('Electron Framework');
+      expect(mapped).not.toContain('gameoverlayrenderer.dylib');
       expect(exitCode).toBe(0);
       expect(fs.existsSync(summary)).toBe(true);
     } else {

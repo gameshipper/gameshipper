@@ -4,7 +4,7 @@ import * as path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { findSigningIdentity, matchIdentity, parseIdentities, signMacApp } from '../../../src/core/sign/sign.js';
 import { testCtx } from '../../helpers/ctx.js';
-import { makeMiniApp, MINI_NATIVE } from '../../helpers/mac-bundle.js';
+import { makeMiniApp, MINI_CRASHPAD, MINI_NATIVE } from '../../helpers/mac-bundle.js';
 import { makeTmpDir } from '../../helpers/tmp.js';
 
 const H1 = '0123456789ABCDEF0123456789ABCDEF01234567';
@@ -55,18 +55,38 @@ describe('signing identities', () => {
 });
 
 describe.runIf(process.platform === 'darwin')('signMacApp (macOS)', () => {
+  const entitlementsOf = (file: string) => codesignText('-d', '--entitlements', '-', '--xml', file);
+
   it('ad-hoc signs everything, native modules included, with the hardened runtime and Steam entitlements', async () => {
     const dir = makeTmpDir();
     const app = makeMiniApp(dir);
-    await signMacApp(testCtx(dir), app, null);
+    await signMacApp(testCtx(dir), app, null, { steam: true });
     expect(spawnSync('codesign', ['--verify', '--deep', '--strict', app]).status).toBe(0);
     expect(codesignText('-dv', app)).toContain('flags=0x10002(adhoc,runtime)');
     // Notarization rejects any Mach-O file without the hardened runtime, such as koffi.node or libsteam_api.dylib.
     expect(codesignText('-dv', path.join(app, ...MINI_NATIVE.split('/')))).toContain('flags=0x10002(adhoc,runtime)');
-    expect(codesignText('-d', '--entitlements', '-', '--xml', app)).toContain('com.apple.security.cs.allow-dyld-environment-variables');
-    const helper = codesignText('-d', '--entitlements', '-', '--xml', `${app}/Contents/Frameworks/Mini Helper.app`);
+    const main = entitlementsOf(app);
+    expect(main).toContain('com.apple.security.cs.allow-dyld-environment-variables');
+    expect(main).toContain('com.apple.security.cs.disable-library-validation');
+    const helper = entitlementsOf(`${app}/Contents/Frameworks/Mini Helper.app`);
     expect(helper).toContain('com.apple.security.cs.disable-library-validation');
     expect(helper).not.toContain('allow-dyld-environment-variables');
+    // Electron's crash reporter: the hardened runtime, and no entitlements at all.
+    expect(codesignText('-dv', path.join(app, ...MINI_CRASHPAD.split('/')))).toContain('flags=0x10002(adhoc,runtime)');
+    expect(entitlementsOf(path.join(app, ...MINI_CRASHPAD.split('/')))).not.toContain('<key>');
+  });
+
+  it('without Steam, the main process gets no DYLD entitlement', async () => {
+    const dir = makeTmpDir();
+    const app = makeMiniApp(dir);
+    await signMacApp(testCtx(dir), app, null);
+    expect(spawnSync('codesign', ['--verify', '--deep', '--strict', app]).status).toBe(0);
+    const main = entitlementsOf(app);
+    expect(main).toContain('com.apple.security.cs.allow-jit');
+    expect(main).not.toContain('allow-dyld-environment-variables');
+    // Ad-hoc: without it the app couldn't load Electron's framework.
+    expect(main).toContain('com.apple.security.cs.disable-library-validation');
+    expect(main).not.toMatch(/device\.usb|device\.bluetooth/);
   });
 
   it("the run log names a Developer ID by its SHA-1, never by its name", async () => {

@@ -41,7 +41,7 @@ describe('planMacSigning', () => {
 function recorder() {
   const calls: string[] = [];
   const deps: FinishMacDeps = {
-    sign: async (_ctx, app, identity) => void calls.push(`sign ${identity?.name ?? 'ad-hoc'} ${app}`),
+    sign: async (_ctx, app, identity, opts) => void calls.push(`sign ${identity?.name ?? 'ad-hoc'} ${app}${opts?.steam ? ' +steam' : ''}`),
     notarize: async (_ctx, app, auth) => void calls.push(`notarize ${auth.kind} ${app}`),
   };
   return { calls, deps };
@@ -61,6 +61,13 @@ describe('finishMacApp', () => {
     expect(r).toMatchObject({ signing: 'adhoc', notarized: false });
     expect(r.warnings.map((w) => w.code)).toEqual(['MAC_UNSIGNED']);
     expect(r.warnings[0].fix).toContain('GAMESHIPPER_MAC_IDENTITY');
+  });
+
+  it("passes on whether the app bundles Steam, which decides the entitlements", async () => {
+    const { calls, deps } = recorder();
+    await finishMacApp(testCtx(makeTmpDir()), config(), '/o/Moon.app', { kind: 'adhoc' }, { ...deps, steam: true });
+    await finishMacApp(testCtx(makeTmpDir()), config(), '/o/Moon.app', developerId(false), { ...deps, steam: true });
+    expect(calls).toEqual(['sign ad-hoc /o/Moon.app +steam', `sign ${ID} /o/Moon.app +steam`]);
   });
 
   it('signs with the Developer ID, then notarizes', async () => {
