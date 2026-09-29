@@ -108,6 +108,32 @@ describe('bundleCdn', () => {
     expect(fs.existsSync(path.join(projectDir, 'gameshipper.lock'))).toBe(false);
   });
 
+  it('adds exact import-map entries for modules reached through a prefix', async () => {
+    // Served without an extension: the vendored copy is saved as client.js / server.js.
+    server.routes['/react-dom@18/client'] = { body: "import { s } from 'react-dom/server';\nexport const c = s;", type: 'text/javascript' };
+    server.routes['/react-dom@18/server'] = { body: 'export const s = 1;', type: 'text/javascript' };
+    const projectDir = makeTmpDir();
+    const stageDir = path.join(projectDir, 'stage');
+    writeFiles(stageDir, {
+      'index.html': `<script type="importmap">{"imports":{"react-dom/":"${server.base}/react-dom@18/"}}</script>\n<script type="module" src="./main.js"></script>`,
+      'main.js': "import { c } from 'react-dom/client';\nconsole.log(c);",
+    });
+
+    const result = await bundleCdn(testCtx(projectDir), stageDir);
+
+    expect(result.warnings).toEqual([]);
+    const html = readText(stageDir, 'index.html');
+    const map = JSON.parse(/<script type="importmap">([\s\S]*?)<\/script>/.exec(html)?.[1] ?? '{}') as { imports: object };
+    expect(map.imports).toEqual({
+      'react-dom/': `${V}/react-dom@18/`,
+      'react-dom/client': `${V}/react-dom@18/client.js`,
+      'react-dom/server': `${V}/react-dom@18/server.js`,
+    });
+    expect(readText(stageDir, `${V.slice(1)}/react-dom@18/client.js`)).toContain("from 'react-dom/server'");
+    expect(readText(stageDir, `${V.slice(1)}/react-dom@18/server.js`)).toBe('export const s = 1;');
+    expect(readText(stageDir, 'main.js')).toContain("from 'react-dom/client'");
+  });
+
   it('warns about bare imports the import map does not define', async () => {
     const projectDir = makeTmpDir();
     const stageDir = path.join(projectDir, 'stage');

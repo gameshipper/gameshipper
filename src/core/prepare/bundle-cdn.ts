@@ -79,9 +79,14 @@ export async function bundleCdn(ctx: Ctx, stageDir: string): Promise<BundleResul
     queued.add(u);
     queue.push(u);
   };
+  // Bare specifiers that resolve through a prefix key ("react-dom/" + "client"). Their vendored file may be
+  // named differently from what the prefix implies (".js" added, query hashed), so each gets an exact entry.
+  const viaPrefix = new Set<string>();
   const viaImportMap = (spec: string): string | null => {
     const mapped = resolveBare(spec, importMap);
-    return mapped !== null && isRemote(mapped) ? normalizeRemote(mapped) : null;
+    if (mapped === null || !isRemote(mapped)) return null;
+    if (!Object.hasOwn(importMap, spec)) viaPrefix.add(spec);
+    return normalizeRemote(mapped);
   };
   const unresolvedBare = (spec: string, where: string): GsError =>
     gsError(
@@ -162,13 +167,20 @@ export async function bundleCdn(ctx: Ctx, stageDir: string): Promise<BundleResul
   }
 
   // 4. Point the game's own files at the local copies.
-  const rewriteImportMap = (map: ImportMap): ImportMap =>
-    Object.fromEntries(
-      Object.entries(map).map(([key, value]) => {
-        if (!isRemote(value)) return [key, value];
-        return [key, key.endsWith('/') ? `/${vendorPrefixFor(value)}` : (local(value) ?? value)];
-      }),
-    );
+  const rewriteImportMap = (map: ImportMap): ImportMap => {
+    const entries = Object.entries(map).map(([key, value]): [string, string] => {
+      if (!isRemote(value)) return [key, value];
+      return [key, key.endsWith('/') ? `/${vendorPrefixFor(value)}` : (local(value) ?? value)];
+    });
+    // Exact entries win over prefixes, so these point each prefix-resolved import at its real file.
+    for (const spec of [...viaPrefix].sort()) {
+      if (Object.hasOwn(map, spec)) continue;
+      const target = resolveBare(spec, map);
+      const file = target !== null && isRemote(target) ? local(target) : null;
+      if (file) entries.push([spec, file]);
+    }
+    return Object.fromEntries(entries);
+  };
   const rewriteGameJs = async (code: string) => rewriteJs(code, await quietSpecifiers(code), gameUrl);
 
   for (const [rel, scan] of scans) {
