@@ -1,6 +1,6 @@
 import { spawn } from 'node:child_process';
 import { describe, expect, it, vi } from 'vitest';
-import { stopWithGameshipper } from '../../src/core/proc.js';
+import { releaseAfterExit, stopWithGameshipper } from '../../src/core/proc.js';
 
 const alive = (pid: number): boolean => {
   try {
@@ -32,6 +32,38 @@ describe.skipIf(process.platform === 'win32')('stopWithGameshipper', () => {
     } finally {
       process.off('SIGINT', cli);
       detach();
+      child.kill('SIGKILL');
+    }
+  });
+});
+
+describe('releaseAfterExit', () => {
+  const sleeper = () =>
+    spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { detached: process.platform !== 'win32', stdio: ['ignore', 'pipe', 'pipe'] });
+
+  it("on Windows only lets go of the output: the exited game's PID may already belong to another process", async () => {
+    const child = sleeper();
+    try {
+      releaseAfterExit(child, 'win32');
+      expect(child.stdout.destroyed).toBe(true);
+      expect(child.stderr.destroyed).toBe(true);
+      // Nothing was killed: taskkill /T on a reused PID would stop an unrelated program.
+      await new Promise((r) => setTimeout(r, 300));
+      expect(child.exitCode).toBeNull();
+      expect(alive(child.pid!)).toBe(true);
+    } finally {
+      child.kill('SIGKILL');
+    }
+  });
+
+  it.skipIf(process.platform === 'win32')('elsewhere also stops the rest of the process group', async () => {
+    const child = sleeper();
+    const exited = new Promise<NodeJS.Signals | null>((resolve) => child.on('exit', (_code, signal) => resolve(signal)));
+    try {
+      releaseAfterExit(child, 'linux');
+      expect(child.stdout.destroyed).toBe(true);
+      expect(await exited).toBe('SIGKILL');
+    } finally {
       child.kill('SIGKILL');
     }
   });

@@ -3,7 +3,7 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { LOAD_BACKSTOP_EXTRA_SECONDS, LOAD_TIMEOUT_DESCRIPTION, type DiagSummary } from '../shell/diagnostics.js';
 import type { Ctx } from './context.js';
-import { killTree, OUTPUT_BUFFER_CHARS, outputTail, stopWithGameshipper } from './proc.js';
+import { killTree, OUTPUT_BUFFER_CHARS, outputTail, releaseAfterExit, stopWithGameshipper } from './proc.js';
 import { fail, GsFailure, gsError, ok, type GsError, type Result } from './result.js';
 
 /** Per code, how many issues a smoke run lists before one more issue counts the rest. */
@@ -275,7 +275,7 @@ export function launch(ctx: Ctx, command: string, args: string[], opts: LaunchOp
       if (settled) return;
       exit = { code, signal };
       graceTimer = setTimeout(() => {
-        stop();
+        releaseAfterExit(child);
         settle();
       }, CLOSE_GRACE_MS);
     });

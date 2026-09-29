@@ -37,6 +37,18 @@ export function killTree(child: ChildProcess): void {
 }
 
 /**
+ * For a child that has exited while something it started still holds its output open (a build command's
+ * background process, Electron's helpers): let go of the output and, on POSIX, stop the rest of its process
+ * group. On Windows the tree can only be found through the child's PID, which may already belong to an
+ * unrelated program, so nothing is killed there.
+ */
+export function releaseAfterExit(child: ChildProcess, platform: NodeJS.Platform = process.platform): void {
+  if (platform !== 'win32') killTree(child);
+  child.stdout?.destroy();
+  child.stderr?.destroy();
+}
+
+/**
  * While `child` runs, stop its whole tree if Gameshipper is stopped or exits. A detached child doesn't
  * get the terminal's Ctrl+C itself. After stopping the child, Gameshipper dies of the same signal,
  * unless something else listens for it (the CLI does, to report the interrupted run and pick the exit

@@ -4,7 +4,7 @@ import * as path from 'node:path';
 import type { Config } from '../config/schema.js';
 import type { Ctx } from '../context.js';
 import { listFiles } from '../fsutil.js';
-import { killTree, OUTPUT_BUFFER_CHARS, outputTail, stopWithGameshipper } from '../proc.js';
+import { killTree, OUTPUT_BUFFER_CHARS, outputTail, releaseAfterExit, stopWithGameshipper } from '../proc.js';
 import { GsFailure, gsError, type GsError } from '../result.js';
 
 const SKIP_ANYWHERE = new Set(['.git', '.DS_Store', 'Thumbs.db', 'steam_appid.txt']);
@@ -93,8 +93,11 @@ export async function runBuildCommand(ctx: Ctx, config: Config, opts: { timeoutM
     // If Gameshipper is stopped or exits mid-build, stop the build too.
     const detach = stopWithGameshipper(child);
 
+    let settled = false;
     let graceTimer: NodeJS.Timeout | undefined;
     const settle = (result: number | 'timeout' | Error): void => {
+      if (settled) return;
+      settled = true;
       clearTimeout(timer);
       clearTimeout(graceTimer);
       detach();
@@ -109,8 +112,10 @@ export async function runBuildCommand(ctx: Ctx, config: Config, opts: { timeoutM
     // A background process started by the command can keep its output open (and 'close' from
     // firing) long after the command itself exits. Give it a moment, then stop it.
     child.on('exit', (code) => {
+      // After a timeout the run has already settled; the kill's own exit needs no grace period.
+      if (settled) return;
       graceTimer = setTimeout(() => {
-        stop();
+        releaseAfterExit(child);
         settle(code ?? 1);
       }, CLOSE_GRACE_MS);
     });
