@@ -77,7 +77,7 @@ Launches the latest build for this computer once, for 15 seconds (`--seconds` to
 
 Run it after `build`: it never builds anything itself. The Deck-size frame is saved as `.gameshipper/check/frame.png` and the full report as `.gameshipper/check/report.json`. Without Apple credentials a Mac build is only ad-hoc signed, so on a Mac `review.mac-signing` fails with `CHECK_MAC_NOT_NOTARIZED` until you [sign and notarize](#mac-signing-and-notarization) it.
 
-The network block stops the game's requests (each is listed in `offline.requests`) and its WebRTC connections (not listed). It doesn't cover WebTransport, or networking a [plugin](#plugins) does in Electron's main process: `offline.requests` never sees those.
+The network block stops the game's requests (each is listed in `offline.requests`) and its WebRTC connections (not listed). A [plugin](#plugins)'s requests through Electron's `net` module are blocked and listed too, but its Node networking in Electron's main process (`http`, `https`, `fetch`) isn't blocked, and neither is WebTransport: `offline.requests` never sees those.
 
 | Flag | |
 |---|---|

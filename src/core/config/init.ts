@@ -53,7 +53,7 @@ function updateGitignore(dir: string): boolean {
   return true;
 }
 
-const ICON_FLAG_FIX = `Pass --icon with ${ICON_REQUIREMENT}, as a path relative to your game folder, or --icon none.`;
+const ICON_FLAG_FIX = `Pass --icon with ${ICON_REQUIREMENT}, as a path relative to your project folder, or --icon none.`;
 
 function unsuitableIcon(icon: string, found: string): GsError {
   return gsError(
@@ -89,7 +89,7 @@ function planInit(dir: string, answers: InitAnswers, detected: Detected): InitPl
     errors.push(gsError('INPUT_REQUIRED', "Couldn't find your game's HTML file.", 'Pass --entry <path-to-index.html>.'));
   } else if (!buildCommand && !fs.existsSync(path.join(dir, entry))) {
     // With a build command, the entry is in the build's output, which doesn't exist until it runs.
-    errors.push(gsError('ENTRY_MISSING', `Can't find ${entry}.`, "Pass --entry with your game's HTML file, as a path relative to your game folder."));
+    errors.push(gsError('ENTRY_MISSING', `Can't find ${entry}.`, "Pass --entry with your game's HTML file, as a path relative to your project folder."));
   }
 
   let icon: string | null = null;

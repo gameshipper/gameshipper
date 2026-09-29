@@ -472,7 +472,8 @@ const DEAD_PROXY = 'http://127.0.0.1:9';
  * `check`: every request that isn't for the game's own files fails, and is recorded (capture.ts isAllowedOffline).
  * WebRTC never passes through webRequest: the window is kept from using UDP except through a proxy
  * (offlineWebRtc), and the session's proxy is a dead one, loopback included, so WebRTC's TCP (TURN) fails too.
- * Neither is recorded. WebTransport and plugins' own networking in the main process aren't blocked here.
+ * Neither is recorded. Electron's `net` in the main process goes through the default session, so it's blocked and
+ * recorded too; Node's own networking there (http, https, fetch) and WebTransport aren't blocked here.
  */
 async function blockInternet(): Promise<void> {
   session.defaultSession.webRequest.onBeforeRequest({ urls: ['<all_urls>'] }, (details, callback) => {

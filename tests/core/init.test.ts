@@ -169,6 +169,8 @@ describe('initProject', () => {
     writeFiles(other, { 'index.html': '', 'icon.jpg': 'JFIF' });
     const missing = initProject(other, { icon: 'nope.png' });
     expect(missing.errors).toEqual([{ code: 'ASSET_MISSING', message: "icon: nope.png doesn't exist.", fix: expect.stringContaining('--icon none') }]);
+    // Paths in gameshipper.json are relative to the project folder, which isn't the game folder when a build makes it.
+    expect(missing.errors[0].fix).toContain('relative to your project folder');
     const notPng = initProject(other, { icon: 'icon.jpg' });
     expect(notPng.errors).toEqual([{ code: 'ICON_INVALID', message: "icon: icon.jpg isn't a PNG file.", fix: expect.stringContaining('--icon') }]);
     expect(fs.existsSync(path.join(other, 'gameshipper.json'))).toBe(false);
@@ -183,6 +185,7 @@ describe('initProject', () => {
     writeFiles(dir, { 'index.html': '' });
     const r = initProject(dir, { entry: 'game.html' });
     expect(r.errors).toEqual([{ code: 'ENTRY_MISSING', message: "Can't find game.html.", fix: expect.stringContaining('--entry') }]);
+    expect(r.errors[0].fix).toContain('relative to your project folder');
     expect(fs.existsSync(path.join(dir, 'gameshipper.json'))).toBe(false);
     const built = initProject(dir, { entry: 'game.html', buildCommand: 'npm run build', outputDir: 'dist' });
     expect(built.ok).toBe(true);
