@@ -15,6 +15,9 @@ export interface RuntimeConfig {
   entry: string;
   window: { width: number; height: number; fullscreen: boolean; resizable: boolean };
   steamAppId: number;
+  /** steam.overlay from gameshipper.json; see shell/overlay.ts. */
+  steamOverlay: 'auto' | 'native' | 'repaint' | 'off';
+  plugins: RuntimePlugin[];
 }
 
 export function readRuntimeConfig(file: string): RuntimeConfig {

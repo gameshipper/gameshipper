@@ -3,19 +3,22 @@ import * as path from 'node:path';
 import type { RuntimeConfig } from '../../shell/runtime-config.js';
 import type { Config } from '../config/schema.js';
 import { fileSafeName, slugify } from '../names.js';
+import { copyPlugins, type LoadedPlugin } from '../plugins.js';
 
 export interface AssembleInput {
   stageDir: string;
   /** Compiled shell (dist/shell in the published package). */
   shellDir: string;
   iconPng: string | null;
+  /** Plugins to copy into <app>/plugins/ (default none). */
+  plugins?: LoadedPlugin[];
 }
 
 export function appDirFor(projectDir: string): string {
   return path.join(projectDir, '.gameshipper', 'app');
 }
 
-/** Builds <project>/.gameshipper/app: package.json, shell/, game/. This folder is what Electron runs. */
+/** Builds <project>/.gameshipper/app: package.json, shell/, game/, plugins/. This folder is what Electron runs. */
 export function assembleApp(projectDir: string, config: Config, input: AssembleInput): string {
   const appDir = appDirFor(projectDir);
   fs.rmSync(appDir, { recursive: true, force: true });
@@ -33,6 +36,8 @@ export function assembleApp(projectDir: string, config: Config, input: AssembleI
     entry: config.game.entry,
     window: config.window,
     steamAppId: config.steam.appId,
+    steamOverlay: config.steam.overlay,
+    plugins: copyPlugins(appDir, input.plugins ?? []),
   };
   fs.writeFileSync(path.join(shellOut, 'config.json'), `${JSON.stringify(runtime, null, 2)}\n`);
   if (input.iconPng) fs.copyFileSync(input.iconPng, path.join(shellOut, 'icon.png'));
