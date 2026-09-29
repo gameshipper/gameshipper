@@ -207,11 +207,19 @@ async function initCommand(projectDir: string, values: Values, io: CliIO, run: R
   return { result, human: initSummary(result) };
 }
 
+/**
+ * build and play read gameshipper.json before they write anything: without a valid one the folder isn't a
+ * Gameshipper project, so it gets no .gameshipper folder, run log or last-run record.
+ */
+const notAProject = (loaded: Result<unknown>): Outcome | null => (loaded.data ? null : { result: fail(loaded.errors, loaded.warnings), human: [] });
+
 async function buildCommand(projectDir: string, values: Values, run: RunState): Promise<Outcome> {
   const only = parseTargets(str(values.target));
   if (only && !Array.isArray(only)) return only;
-  const ctx = startRun(projectDir, 'build', run);
   const loaded = loadConfig(projectDir);
+  const invalid = notAProject(loaded);
+  if (invalid) return invalid;
+  const ctx = startRun(projectDir, 'build', run);
   // A config with a missing file still carries the config as data; that is not a build result.
   const result: Result<unknown> = loaded.ok
     ? await capture(() => runBuild(ctx, loaded.data!, { shellDir: SHELL_DIR, only, frozenLock: values['frozen-lock'] === true }), ctx.log)
@@ -225,8 +233,10 @@ async function playCommand(projectDir: string, values: Values, io: CliIO, run: R
   const seconds = secondsRaw === undefined ? 5 : Number(secondsRaw);
   if (!Number.isFinite(seconds) || seconds <= 0) return usage('--seconds must be a positive number.', 'For example: --seconds 10');
   const smoke = values.smoke === true || secondsRaw !== undefined;
-  const ctx = startRun(projectDir, 'play', run);
   const loaded = loadConfig(projectDir);
+  const invalid = notAProject(loaded);
+  if (invalid) return invalid;
+  const ctx = startRun(projectDir, 'play', run);
   let result: Result<unknown>;
   if (loaded.ok) {
     if (!run.json) {

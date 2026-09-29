@@ -154,10 +154,19 @@ describe('gameshipper CLI', () => {
     expect([r.code, r.json().errors[0].code]).toEqual([2, 'USAGE']);
   });
 
-  it('build without a config explains how to start', async () => {
-    const r = await run(['build', '--json', '--dir', makeTmpDir()]);
-    expect([r.code, r.json().errors[0].code]).toEqual([2, 'CONFIG_MISSING']);
-    expect(r.json().logPath).toMatch(/build-.+\.log$/);
+  it('build and play without a valid config explain how to start, without writing into the folder', async () => {
+    for (const command of ['build', 'play']) {
+      const dir = makeTmpDir();
+      writeFiles(dir, { 'index.html': '' });
+      const r = await run([command, '--json', '--dir', dir]);
+      expect([command, r.code, r.json().errors[0].code]).toEqual([command, 2, 'CONFIG_MISSING']);
+      expect(r.json()).not.toHaveProperty('logPath');
+      writeFiles(dir, { 'gameshipper.json': '{ "name": ' });
+      const invalid = await run([command, '--json', '--dir', dir]);
+      expect([invalid.code, invalid.json().errors[0].code]).toEqual([2, 'CONFIG_INVALID']);
+      expect(invalid.json()).not.toHaveProperty('logPath');
+      expect(fs.readdirSync(dir).sort()).toEqual(['gameshipper.json', 'index.html']);
+    }
   });
 
   it('build --target rejects unknown targets', async () => {
@@ -233,7 +242,7 @@ describe('safety net', () => {
   it('prints one line for a person when there is no log yet', async () => {
     const dir = makeTmpDir();
     // The run log can't be created: .gameshipper is a file.
-    writeFiles(dir, { '.gameshipper': '' });
+    writeFiles(dir, { '.gameshipper': '', 'gameshipper.json': CONFIG, 'index.html': '' });
     const r = await run(['build', '--dir', dir]);
     expect(r.code).toBe(1);
     expect(r.out.trimEnd().split('\n')).toEqual([expect.stringMatching(/^✗ INTERNAL_ERROR: Unexpected error: .+/)]);
@@ -245,12 +254,13 @@ describe('recording the last run', () => {
     const dir = makeTmpDir();
     // .gameshipper/last is a file, so the record can't be written.
     writeFiles(dir, { 'index.html': '', '.gameshipper/last': '' });
-    const build = await run(['build', '--json', '--dir', dir]);
-    expect([build.code, build.json().errors[0].code]).toEqual([2, 'CONFIG_MISSING']);
-    expect(build.json().warnings.map((w: { code: string }) => w.code)).toEqual(['LAST_RUN_NOT_SAVED']);
     const init = await run(['init', '--yes', '--json', '--dir', dir]);
     expect([init.code, init.json().ok]).toEqual([0, true]);
     expect(init.json().warnings.map((w: { code: string }) => w.code)).toEqual(['STEAM_TEST_APP', 'LAST_RUN_NOT_SAVED']);
+    fs.rmSync(path.join(dir, 'index.html'));
+    const build = await run(['build', '--json', '--dir', dir]);
+    expect([build.code, build.json().errors[0].code]).toEqual([2, 'ENTRY_MISSING']);
+    expect(build.json().warnings.map((w: { code: string }) => w.code)).toEqual(['LAST_RUN_NOT_SAVED']);
   });
 });
 
