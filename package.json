@@ -19,7 +19,14 @@
     "test:integration": "npm run build && vitest run --config vitest.int.config.ts"
   },
   "dependencies": {
+    "@capacitor/android": "8.5.2",
+    "@capacitor/cli": "8.5.2",
+    "@capacitor/core": "8.5.2",
+    "@capacitor/ios": "8.5.2",
+    "@capacitor/preferences": "8.0.1",
     "@electron/asar": "4.3.1",
+    "@electron/notarize": "3.1.1",
+    "@electron/osx-sign": "2.7.1",
     "@electron/packager": "20.3.0",
     "electron": "44.4.5",
     "es-module-lexer": "3.0.2",
