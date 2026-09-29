@@ -11,12 +11,14 @@ export function isGameUrl(url: string | null | undefined): boolean {
 
 export type NavigationAction = 'allow' | 'open-external' | 'block';
 
-/** The game window may only show game pages; web links open in the player's browser. */
+/** Links the system opens for the player: the web browser, their mail app, or Steam. */
+const EXTERNAL_PROTOCOLS = new Set(['http:', 'https:', 'mailto:', 'steam:']);
+
+/** The game window may only show game pages; web, mail and Steam links go to the system. */
 export function navigationAction(url: string): NavigationAction {
   if (isGameUrl(url)) return 'allow';
   try {
-    const { protocol } = new URL(url);
-    return protocol === 'http:' || protocol === 'https:' ? 'open-external' : 'block';
+    return EXTERNAL_PROTOCOLS.has(new URL(url).protocol) ? 'open-external' : 'block';
   } catch {
     return 'block';
   }
@@ -25,21 +27,43 @@ export function navigationAction(url: string): NavigationAction {
 /** Chromium's net::ERR_ABORTED: the load was stopped or cancelled, not broken. */
 export const ERR_ABORTED = -3;
 
-export type LoadFailure = 'fatal' | 'stopped' | 'ignore';
+export type LoadFailure = 'fatal' | 'stopped' | 'frame-failed' | 'ignore';
 
 /**
  * What a did-fail-load means for the game. Only the main page failing to load is fatal.
  * ERR_ABORTED on the main page means its load was stopped (e.g. window.stop()): the page is
- * still running, but did-finish-load won't follow. Iframe failures don't affect the game.
+ * still running, but did-finish-load won't follow. A failed iframe (for example one blocked by
+ * cross-origin isolation) doesn't stop the game but is worth reporting; aborted ones aren't.
  */
 export function classifyLoadFailure(errorCode: number, isMainFrame: boolean): LoadFailure {
-  if (!isMainFrame) return 'ignore';
-  return errorCode === ERR_ABORTED ? 'stopped' : 'fatal';
+  if (isMainFrame) return errorCode === ERR_ABORTED ? 'stopped' : 'fatal';
+  return errorCode === ERR_ABORTED ? 'ignore' : 'frame-failed';
 }
 
-const ALLOWED_PERMISSIONS = new Set(['fullscreen', 'pointerLock']);
+const ALLOWED_PERMISSIONS = new Set([
+  'fullscreen',
+  'automatic-fullscreen',
+  'pointerLock',
+  'keyboardLock',
+  'clipboard-sanitized-write',
+  'screen-wake-lock',
+  'persistent-storage',
+]);
 
-/** Games get fullscreen and pointer lock; everything else (camera, location, notifications...) is denied. */
+/**
+ * Games get fullscreen, pointer and keyboard lock, clipboard writes (share codes), keeping the
+ * screen awake and persistent storage. Everything else (camera, microphone, location,
+ * notifications, clipboard reads...) is denied.
+ */
 export function isPermissionAllowed(permission: string): boolean {
   return ALLOWED_PERMISSIONS.has(permission);
 }
+
+/**
+ * Cross-origin isolation, so SharedArrayBuffer works for threaded engines (Emscripten, Godot).
+ * `credentialless` still lets the game load images and scripts from other sites.
+ */
+export const CROSS_ORIGIN_ISOLATION_HEADERS: Readonly<Record<string, string>> = {
+  'cross-origin-opener-policy': 'same-origin',
+  'cross-origin-embedder-policy': 'credentialless',
+};
