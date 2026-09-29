@@ -49,10 +49,13 @@ export function holdsSteamworksSdk(dir: string): boolean {
   }
 }
 
-/** The real path of `p`, or `p` itself when it doesn't exist (yet). */
+/**
+ * The real path of `p`, or `p` itself when it doesn't exist (yet). The OS's own realpath also gives each
+ * name its letter case on disk, so two spellings of one file compare equal on case-insensitive disks.
+ */
 export function realOrSelf(p: string): string {
   try {
-    return fs.realpathSync(p);
+    return fs.realpathSync.native(p);
   } catch {
     return path.resolve(p);
   }

@@ -72,6 +72,15 @@ describe('stageGame', () => {
     for (const skipped of ['vendor/valve.zip', 'vendor/folder', 'data.bin']) expect(exists(skipped), skipped).toBe(false);
   });
 
+  it('never stages the SDK a build uses when its path is written in another letter case (case-insensitive disks)', async (ctx) => {
+    const dir = makeTmpDir();
+    writeFiles(dir, { 'index.html': '', 'vendor/valve.zip': 'zip' });
+    const otherCase = path.join(dir, 'Vendor', 'VALVE.zip');
+    if (!fs.existsSync(otherCase)) ctx.skip('this disk is case-sensitive');
+    const { stageDir } = await stageGame(testCtx(dir), parseConfig({ name: 'x', version: '1.0.0' }).data!, { exclude: [otherCase] });
+    expect(fs.existsSync(path.join(stageDir, 'vendor', 'valve.zip'))).toBe(false);
+  });
+
   it.skipIf(process.platform === 'win32')('never stages an SDK through a link with another name', async () => {
     const dir = makeTmpDir();
     writeFiles(dir, { 'index.html': '', 'vendor/steamworks_sdk_165.zip': 'zip' });
