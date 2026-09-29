@@ -1,4 +1,4 @@
-import { spawn, type ChildProcess } from 'node:child_process';
+import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import type { Config } from '../config/schema.js';
@@ -12,9 +12,14 @@ const SKIP_TOP_LEVEL = new Set(['out', 'gameshipper.json', 'gameshipper.lock', '
 const TEXT_FILE = /\.(html?|m?js|css)$/i;
 
 const BUILD_TIMEOUT_MS = 10 * 60 * 1000;
+/** After the command exits, how long to wait for leftover background processes to release its output. */
+const CLOSE_GRACE_MS = 2000;
 const OUTPUT_TAIL_LINES = 20;
+const OUTPUT_TAIL_MAX_CHARS = 4096;
 /** Enough to hold the last lines of output without buffering a whole build log. */
-const OUTPUT_TAIL_CHARS = 64 * 1024;
+const OUTPUT_BUFFER_CHARS = 64 * 1024;
+/** Signals that stop Gameshipper; the build command is stopped with it. */
+const STOP_SIGNALS: NodeJS.Signals[] = ['SIGINT', 'SIGTERM', 'SIGHUP'];
 
 const isEnvFile = (name: string): boolean => name === '.env' || name.startsWith('.env.');
 
@@ -35,9 +40,9 @@ function isWithin(child: string, parent: string): boolean {
 function killTree(child: ChildProcess): void {
   if (child.pid === undefined) return;
   if (process.platform === 'win32') {
-    spawn('taskkill', ['/pid', String(child.pid), '/T', '/F'], { stdio: 'ignore', windowsHide: true }).on('error', () =>
-      child.kill('SIGKILL'),
-    );
+    // Synchronous, because this also runs from signal and 'exit' handlers.
+    const result = spawnSync('taskkill', ['/pid', String(child.pid), '/T', '/F'], { stdio: 'ignore', windowsHide: true });
+    if (result.error) child.kill('SIGKILL');
     return;
   }
   try {
@@ -45,6 +50,13 @@ function killTree(child: ChildProcess): void {
   } catch {
     child.kill('SIGKILL');
   }
+}
+
+/** The last lines of a command's output, short enough for an error message. */
+function outputTail(output: string): string {
+  // Progress bars redraw one line with \r, so treat it as a line break too.
+  const tail = output.trimEnd().split(/\r?\n|\r/).slice(-OUTPUT_TAIL_LINES).join('\n');
+  return tail.length > OUTPUT_TAIL_MAX_CHARS ? `…${tail.slice(-OUTPUT_TAIL_MAX_CHARS)}` : tail;
 }
 
 function formatDuration(ms: number): string {
@@ -63,7 +75,8 @@ export async function runBuildCommand(ctx: Ctx, config: Config, opts: { timeoutM
   ctx.log(`running build command: ${command}`);
   let output = '';
   const outcome = await new Promise<number | 'timeout'>((resolve, reject) => {
-    // On POSIX the command gets its own process group, so a timeout can stop everything it started.
+    // On POSIX the command gets its own process group, so we can stop everything it started.
+    // That also shields it from Ctrl+C, so the signal handlers below pass signals on to it.
     const child = spawn(command, {
       cwd: ctx.projectDir,
       shell: true,
@@ -73,27 +86,55 @@ export async function runBuildCommand(ctx: Ctx, config: Config, opts: { timeoutM
     });
     const onData = (text: string): void => {
       ctx.log(`[build] ${text.trimEnd()}`);
-      output = (output + text).slice(-OUTPUT_TAIL_CHARS);
+      output = (output + text).slice(-OUTPUT_BUFFER_CHARS);
     };
     child.stdout.setEncoding('utf8').on('data', onData);
     child.stderr.setEncoding('utf8').on('data', onData);
-    const timer = setTimeout(() => {
+
+    const stop = (): void => {
       killTree(child);
       child.stdout.destroy();
       child.stderr.destroy();
-      resolve('timeout');
+    };
+    // If Gameshipper is stopped or exits mid-build, stop the build too, then die of the same signal.
+    const onSignal = (signal: NodeJS.Signals): void => {
+      detach();
+      killTree(child);
+      process.kill(process.pid, signal);
+    };
+    const onExit = (): void => killTree(child);
+    const detach = (): void => {
+      for (const signal of STOP_SIGNALS) process.off(signal, onSignal);
+      process.off('exit', onExit);
+    };
+    for (const signal of STOP_SIGNALS) process.on(signal, onSignal);
+    process.on('exit', onExit);
+
+    let graceTimer: NodeJS.Timeout | undefined;
+    const settle = (result: number | 'timeout' | Error): void => {
+      clearTimeout(timer);
+      clearTimeout(graceTimer);
+      detach();
+      if (result instanceof Error) reject(result);
+      else resolve(result);
+    };
+    const timer = setTimeout(() => {
+      stop();
+      settle('timeout');
     }, timeoutMs);
-    child.on('error', (e) => {
-      clearTimeout(timer);
-      reject(e);
+    child.on('error', settle);
+    // A background process started by the command can keep its output open (and 'close' from
+    // firing) long after the command itself exits. Give it a moment, then stop it.
+    child.on('exit', (code) => {
+      graceTimer = setTimeout(() => {
+        stop();
+        settle(code ?? 1);
+      }, CLOSE_GRACE_MS);
     });
-    child.on('close', (c) => {
-      clearTimeout(timer);
-      resolve(c ?? 1);
-    });
+    child.on('close', (code) => settle(code ?? 1));
   });
   const withOutput = (message: string): string => {
-    const tail = output.trimEnd().split(/\r?\n/).slice(-OUTPUT_TAIL_LINES).join('\n');
+    const tail = outputTail(output);
     return tail.trim() ? `${message} Last lines of its output:\n${tail}` : message;
   };
   if (outcome === 'timeout') {

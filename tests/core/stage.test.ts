@@ -1,4 +1,6 @@
+import { spawn } from 'node:child_process';
 import * as fs from 'node:fs';
+import * as nodeModule from 'node:module';
 import * as path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { parseConfig } from '../../src/core/config/load.js';
@@ -8,6 +10,38 @@ import { testCtx } from '../helpers/ctx.js';
 import { makeTmpDir, writeFiles } from '../helpers/tmp.js';
 
 const cfg = (extra: object = {}) => parseConfig({ name: 'x', version: '1.0.0', ...extra }).data!;
+
+/** Never exits. `&& echo` keeps the shell alive, so the node process is a grandchild of the spawned one. */
+const NEVER_EXITS = `node -e "require('fs').writeFileSync('pid.txt', String(process.pid)); setInterval(() => {}, 1000)" && echo done`;
+
+const alive = (pid: number): boolean => {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+const readPid = (file: string): number | null => {
+  try {
+    const pid = Number(fs.readFileSync(file, 'utf8'));
+    return pid > 0 ? pid : null;
+  } catch {
+    return null;
+  }
+};
+
+async function waitFor(check: () => boolean, ms = 5000): Promise<boolean> {
+  for (const end = Date.now() + ms; Date.now() < end; await new Promise((r) => setTimeout(r, 50))) {
+    if (check()) return true;
+  }
+  return check();
+}
+
+const killIfAlive = (pid: number | null): void => {
+  if (pid !== null && alive(pid)) process.kill(pid, 'SIGKILL');
+};
 
 describe('stageGame', () => {
   it('copies the game and skips tool/project files', async () => {
@@ -176,24 +210,128 @@ describe('runBuildCommand', () => {
 
   it('BUILD_COMMAND_TIMEOUT stops a command that never exits, including its child processes', async () => {
     const dir = makeTmpDir();
-    // `&& echo` keeps the shell alive, so the node process is a grandchild of the spawned one.
-    const command = `node -e "require('fs').writeFileSync('pid.txt', String(process.pid)); setInterval(() => {}, 1000)" && echo done`;
     const started = Date.now();
-    const run = runBuildCommand(testCtx(dir), cfg({ game: { buildCommand: command, outputDir: 'dist' } }), { timeoutMs: 1000 });
-    await expect(run).rejects.toMatchObject({
-      error: { code: 'BUILD_COMMAND_TIMEOUT', fix: expect.stringContaining('npm run dev') },
-    });
-    expect(Date.now() - started).toBeLessThan(10_000);
-    const pid = Number(fs.readFileSync(path.join(dir, 'pid.txt'), 'utf8'));
-    const alive = () => {
+    try {
+      const run = runBuildCommand(testCtx(dir), cfg({ game: { buildCommand: NEVER_EXITS, outputDir: 'dist' } }), { timeoutMs: 1000 });
+      await expect(run).rejects.toMatchObject({
+        error: { code: 'BUILD_COMMAND_TIMEOUT', fix: expect.stringContaining('npm run dev') },
+      });
+      expect(Date.now() - started).toBeLessThan(10_000);
+      const pid = readPid(path.join(dir, 'pid.txt'));
+      expect(pid).not.toBeNull();
+      expect(await waitFor(() => !alive(pid!))).toBe(true);
+    } finally {
+      killIfAlive(readPid(path.join(dir, 'pid.txt')));
+    }
+  });
+
+  it.skipIf(process.platform === 'win32')(
+    'finishes when the command exits but a background process keeps its output open',
+    async () => {
+      const dir = makeTmpDir();
+      const bgFile = path.join(dir, 'bg.txt');
+      const started = Date.now();
       try {
-        process.kill(pid, 0);
-        return true;
-      } catch {
-        return false;
+        const command = '(sleep 30 & echo $! > bg.txt) ; echo built';
+        await runBuildCommand(testCtx(dir), cfg({ game: { buildCommand: command, outputDir: 'dist' } }), { timeoutMs: 15_000 });
+        expect(Date.now() - started).toBeLessThan(10_000);
+        const bg = readPid(bgFile);
+        expect(bg).not.toBeNull();
+        expect(await waitFor(() => !alive(bg!))).toBe(true);
+      } finally {
+        killIfAlive(readPid(bgFile));
       }
-    };
-    for (let i = 0; i < 50 && alive(); i++) await new Promise((r) => setTimeout(r, 100));
-    expect(alive()).toBe(false);
+    },
+  );
+
+  it('keeps the output tail short when a progress bar redraws one line', async () => {
+    const dir = makeTmpDir();
+    const command = `node -e "for (let i = 1; i <= 5000; i++) process.stdout.write('step ' + i + ' of 5000 ' + '#'.repeat(20) + '\\r'); process.exitCode = 1"`;
+    const error = await runBuildCommand(testCtx(dir), cfg({ game: { buildCommand: command, outputDir: 'dist' } })).catch((e) => e);
+    const { message } = (error as GsFailure).error;
+    expect(message).toContain('step 5000 of 5000');
+    expect(message).toContain('step 4981 of 5000');
+    expect(message).not.toContain('step 4980 of 5000');
+    expect(message.length).toBeLessThan(command.length + 1500);
+  });
+
+  it('caps the output tail at about 4 KB', async () => {
+    const dir = makeTmpDir();
+    const command = `node -e "process.stdout.write('x'.repeat(100000) + 'END'); process.exitCode = 1"`;
+    const error = await runBuildCommand(testCtx(dir), cfg({ game: { buildCommand: command, outputDir: 'dist' } })).catch((e) => e);
+    const { message } = (error as GsFailure).error;
+    expect(message.endsWith('END')).toBe(true);
+    expect(message.length).toBeLessThan(command.length + 4300);
+  });
+
+  it('removes its signal and exit handlers when the build finishes', async () => {
+    const dir = makeTmpDir();
+    const events = ['SIGINT', 'SIGTERM', 'SIGHUP', 'exit'] as const;
+    const counts = () => events.map((e) => process.listenerCount(e));
+    const before = counts();
+    const run = (buildCommand: string, timeoutMs?: number) =>
+      runBuildCommand(testCtx(dir), cfg({ game: { buildCommand, outputDir: 'dist' } }), { timeoutMs }).catch(() => undefined);
+    try {
+      const pending = run(NEVER_EXITS, 3000);
+      expect(await waitFor(() => readPid(path.join(dir, 'pid.txt')) !== null)).toBe(true);
+      expect(counts()).toEqual(before.map((n) => n + 1));
+      await pending;
+      expect(counts()).toEqual(before);
+      await run('node -e "0"');
+      await run('node -e "process.exit(2)"');
+      expect(counts()).toEqual(before);
+    } finally {
+      killIfAlive(readPid(path.join(dir, 'pid.txt')));
+    }
+  });
+});
+
+/** Runs runBuildCommand in its own Node process (type stripping plus a .js -> .ts resolve hook). */
+const RUNNER = `
+import { existsSync } from 'node:fs';
+import { registerHooks } from 'node:module';
+registerHooks({
+  resolve(specifier, context, nextResolve) {
+    if (specifier.endsWith('.js') && context.parentURL?.endsWith('.ts')) {
+      try {
+        return nextResolve(specifier.slice(0, -3) + '.ts', context);
+      } catch {}
+    }
+    return nextResolve(specifier, context);
+  },
+});
+const [stageUrl, dir, command, mode] = process.argv.slice(2);
+const { runBuildCommand } = await import(stageUrl);
+if (mode === 'exit') setInterval(() => existsSync(dir + '/pid.txt') && process.exit(0), 50);
+const ctx = { projectDir: dir, cacheDir: dir, logPath: dir + '/build.log', log() {} };
+await runBuildCommand(ctx, { game: { buildCommand: command } });
+`;
+
+const canRunTs = typeof nodeModule.registerHooks === 'function' && Boolean(process.features.typescript);
+
+describe.skipIf(process.platform === 'win32' || !canRunTs)('runBuildCommand when Gameshipper itself stops', () => {
+  it.each([
+    ['is sent SIGTERM', 'signal'],
+    ['calls process.exit()', 'exit'],
+  ])('stops the build and its children when Gameshipper %s', async (_, mode) => {
+    const dir = makeTmpDir();
+    const runner = path.join(dir, 'runner.mjs');
+    fs.writeFileSync(runner, RUNNER);
+    const stageUrl = new URL('../../src/core/prepare/stage.ts', import.meta.url).href;
+    const pidFile = path.join(dir, 'pid.txt');
+    const gs = spawn(process.execPath, [runner, stageUrl, dir, NEVER_EXITS, mode], { stdio: 'ignore' });
+    const exited = new Promise<{ code: number | null; signal: NodeJS.Signals | null }>((resolve) =>
+      gs.on('exit', (code, signal) => resolve({ code, signal })),
+    );
+    try {
+      expect(await waitFor(() => readPid(pidFile) !== null, 10_000)).toBe(true);
+      const pid = readPid(pidFile)!;
+      if (mode === 'signal') gs.kill('SIGTERM');
+      expect(await exited).toEqual(mode === 'signal' ? { code: null, signal: 'SIGTERM' } : { code: 0, signal: null });
+      expect(await waitFor(() => !alive(pid))).toBe(true);
+    } finally {
+      gs.kill('SIGKILL');
+      killIfAlive(readPid(pidFile));
+    }
   });
 });
