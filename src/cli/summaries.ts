@@ -55,15 +55,17 @@ export function buildSummary(r: Result<BuildData>, projectDir: string): string[]
  */
 export function playSummary(r: Result<PlayData>, opts: { smoke: boolean }): string[] {
   if (!r.data) return [];
+  const shots = r.data.screenshots ?? [];
+  const saved = shots.length ? [`Saved ${plural(shots.length, 'screenshot')} (1920x1080) in ${path.dirname(shots[0])}`] : [];
   if (opts.smoke) {
     const { smoke } = r.data;
     if (!smoke) return [];
     // Each code lists a few problems, then one entry counting the rest.
     const found = `✗ Found ${plural(problemCount(r.errors), 'problem')} while the game ran.`;
-    return [r.ok ? '✓ The game ran with no errors.' : found, `Events: ${smoke.eventsLog}`];
+    return [r.ok ? '✓ The game ran with no errors.' : found, `Events: ${smoke.eventsLog}`, ...saved];
   }
   if (!r.ok) return [];
-  return ['Game closed.', ...(r.data.eventsLog ? [`Events: ${r.data.eventsLog}`] : [])];
+  return ['Game closed.', ...(r.data.eventsLog ? [`Events: ${r.data.eventsLog}`] : []), ...saved];
 }
 
 export function statusSummary(r: Result<StatusData>): string[] {

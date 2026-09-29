@@ -57,11 +57,16 @@ export const COMMANDS: CommandHelp[] = [
   },
   {
     name: 'play',
-    summary: 'Run the game in the desktop shell. --smoke runs it briefly and reports problems.',
-    usage: 'npx gameshipper play [--smoke [--seconds <n>]] [--fullscreen] [--frozen-lock] [--steam-sdk <path>]',
+    summary: 'Run the game in the desktop shell; F12 saves a 1920x1080 store screenshot. --smoke runs it briefly and reports problems.',
+    usage: 'npx gameshipper play [--smoke [--seconds <n>]] [--screenshot <s,s,...>] [--fullscreen] [--frozen-lock] [--steam-sdk <path>]',
     flags: [
       { name: 'smoke', description: 'Run for a few seconds, quit, and report errors, missing files, internet use and crashes.' },
       { name: 'seconds', value: '<n>', description: 'How long a smoke run lasts after loading (default 5). Implies --smoke.' },
+      {
+        name: 'screenshot',
+        value: '<s,s,...>',
+        description: 'Save 1920x1080 store screenshots to out/store/screenshots this many seconds after loading, then quit (e.g. 5,10,15,20,25).',
+      },
       { name: 'fullscreen', description: 'Honour window.fullscreen (play is windowed by default).' },
       FROZEN_LOCK,
       STEAM_SDK,

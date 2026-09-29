@@ -9,7 +9,7 @@ import { loadConfig } from '../core/config/load.js';
 import { TARGETS, type Target } from '../core/config/schema.js';
 import { createCtx, type Ctx } from '../core/context.js';
 import { checkProjectDir } from '../core/fsutil.js';
-import { runPlay, type PlayData } from '../core/play.js';
+import { parseScreenshotTimes, runPlay, screenshotRunSeconds, type PlayData } from '../core/play.js';
 import { childrenStopped, QUIT_GRACE_MS } from '../core/proc.js';
 import { capture, errorDetails, fail, gsError, internalError, ok, type GsError, type Result } from '../core/result.js';
 import { saveLastRun } from '../core/runs.js';
@@ -256,21 +256,28 @@ async function playCommand(projectDir: string, values: Values, io: CliIO, run: R
   const seconds = secondsRaw === undefined ? 5 : Number(secondsRaw);
   if (!Number.isFinite(seconds) || seconds <= 0) return usage('--seconds must be a positive number.', 'For example: --seconds 10');
   const smoke = values.smoke === true || secondsRaw !== undefined;
+  const screenshotsRaw = str(values.screenshot);
+  const screenshotAt = screenshotsRaw === undefined ? undefined : parseScreenshotTimes(screenshotsRaw);
+  if (screenshotAt === null) {
+    return usage(
+      '--screenshot takes the seconds after the game loads at which to save a screenshot, separated by commas.',
+      'For example: --screenshot 5,10,15,20,25 (up to 20 times, each at most 600).',
+    );
+  }
   const loaded = loadConfig(projectDir);
   const invalid = notAProject(loaded);
   if (invalid) return invalid;
   const ctx = startRun(projectDir, 'play', run);
   let result: Result<unknown>;
   if (loaded.ok) {
-    if (!run.json) {
-      io.write(smoke ? `Running the game for ${plural(seconds, 'second')} to check it…\n` : "Starting the game. Close its window when you're done.\n");
-    }
+    if (!run.json) io.write(playStartLine(smoke ? seconds : undefined, screenshotAt));
     const frozenLock = values['frozen-lock'] === true;
     result = await capture(
       () =>
         runPlay(ctx, loaded.data!, {
           shellDir: SHELL_DIR,
           smokeSeconds: smoke ? seconds : undefined,
+          screenshotAt,
           fullscreen: values.fullscreen === true,
           frozenLock,
           steamSdk: steamSdkFlag(values),
@@ -282,7 +289,17 @@ async function playCommand(projectDir: string, values: Values, io: CliIO, run: R
     result = fail(loaded.errors, loaded.warnings);
   }
   finishRun(ctx, 'play', result, run);
-  return { result, human: playSummary(result as Parameters<typeof playSummary>[0], { smoke }) };
+  return { result, human: playSummary(result as Parameters<typeof playSummary>[0], { smoke: smoke || screenshotAt !== undefined }) };
+}
+
+/** What a person sees while `play` starts the game. */
+function playStartLine(smokeSeconds: number | undefined, screenshotAt: number[] | undefined): string {
+  if (screenshotAt) {
+    const seconds = screenshotRunSeconds(screenshotAt, smokeSeconds);
+    return `Running the game for ${plural(seconds, 'second')} to save ${plural(screenshotAt.length, 'screenshot')}…\n`;
+  }
+  if (smokeSeconds !== undefined) return `Running the game for ${plural(smokeSeconds, 'second')} to check it…\n`;
+  return "Starting the game. Close its window when you're done. F12 saves a 1920x1080 store screenshot.\n";
 }
 
 async function dispatch(argv: string[], io: CliIO, run: RunState): Promise<number> {
