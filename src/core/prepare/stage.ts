@@ -332,5 +332,10 @@ function leaveOut(ctx: Ctx, stageDir: string, staged: string[], art: StoreArt): 
     if (!fs.readFileSync(copy).equals(content)) continue;
     fs.rmSync(copy);
     ctx.log(`left out ${rel}: it's store art (keyArt or logo) and the game's files never mention ${name}`);
+    // A folder that held only store art goes too.
+    for (let folder = path.dirname(copy); folder !== stageDir && isWithin(folder, stageDir); folder = path.dirname(folder)) {
+      if (fs.readdirSync(folder).length) break;
+      fs.rmdirSync(folder);
+    }
   }
 }

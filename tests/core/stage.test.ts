@@ -330,6 +330,13 @@ describe('stageGame', () => {
     expect([fs.existsSync(path.join(again.stageDir, 'art/key-art.png')), fs.existsSync(path.join(again.stageDir, 'art/title-logo.png'))]).toEqual([true, false]);
   });
 
+  it('removes a folder that held only the store art', async () => {
+    const dir = makeTmpDir();
+    writeFiles(dir, { 'index.html': '<html></html>', 'art/store/key-art.png': 'key art', 'art/store/logo.png': 'logo' });
+    const { stageDir } = await stageGame(testCtx(dir), cfg({ keyArt: 'art/store/key-art.png', logo: 'art/store/logo.png' }));
+    expect(fs.readdirSync(stageDir)).toEqual(['index.html']);
+  });
+
   it("leaves out a build's copy of the key art, but not another file with its name", async () => {
     const dir = makeTmpDir();
     writeFiles(dir, {
