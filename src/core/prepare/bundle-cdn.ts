@@ -68,7 +68,8 @@ export async function bundleCdn(ctx: Ctx, stageDir: string): Promise<BundleResul
   for (const rel of gameFiles.filter((f) => IS_HTML.test(f))) {
     const scan = scanHtml(read(rel));
     scans.set(rel, scan);
-    Object.assign(importMap, scan.importMap ?? {});
+    // Browsers ignore entries that aren't strings; so do we.
+    for (const [key, value] of Object.entries(scan.importMap ?? {})) if (typeof value === 'string') importMap[key] = value;
   }
 
   const queue: string[] = [];
@@ -131,13 +132,16 @@ export async function bundleCdn(ctx: Ctx, stageDir: string): Promise<BundleResul
       for (const { specifier } of await specifiers(got.body.toString('utf8'), url)) {
         const r = resolveInVendored(specifier, got.finalUrl);
         if (r) enqueue(r);
-        else warnings.push(unresolvedBare(specifier, url));
+        else if (resolveBare(specifier, importMap) === null) warnings.push(unresolvedBare(specifier, url));
       }
     } else if (IS_CSS.test(entry.path)) {
       for (const u of findCssUrls(got.body.toString('utf8'))) if (!u.startsWith('data:')) enqueue(new URL(u, got.finalUrl).href);
     }
   }
-  if (vendored.size === 0) return { files: [], warnings };
+  if (vendored.size === 0) {
+    if (lockExists(ctx.projectDir)) writeLock(ctx.projectDir, { version: 1, files: {} });
+    return { files: [], warnings };
+  }
 
   const local = (url: string): string | null => {
     const v = vendored.get(normalizeRemote(url));
@@ -169,7 +173,7 @@ export async function bundleCdn(ctx: Ctx, stageDir: string): Promise<BundleResul
   // 4. Point the game's own files at the local copies.
   const rewriteImportMap = (map: ImportMap): ImportMap => {
     const entries = Object.entries(map).map(([key, value]): [string, string] => {
-      if (!isRemote(value)) return [key, value];
+      if (typeof value !== 'string' || !isRemote(value)) return [key, value];
       return [key, key.endsWith('/') ? `/${vendorPrefixFor(value)}` : (local(value) ?? value)];
     });
     // Exact entries win over prefixes, so these point each prefix-resolved import at its real file.
@@ -209,8 +213,6 @@ export async function bundleCdn(ctx: Ctx, stageDir: string): Promise<BundleResul
   const files = [...vendored]
     .map(([url, v]) => ({ url, path: v.path, sha256: v.sha256 }))
     .sort((a, b) => a.url.localeCompare(b.url));
-  if (files.length || lockExists(ctx.projectDir)) {
-    writeLock(ctx.projectDir, { version: 1, files: Object.fromEntries(files.map((f) => [f.url, { path: f.path, sha256: f.sha256 }])) });
-  }
+  writeLock(ctx.projectDir, { version: 1, files: Object.fromEntries(files.map((f) => [f.url, { path: f.path, sha256: f.sha256 }])) });
   return { files, warnings };
 }

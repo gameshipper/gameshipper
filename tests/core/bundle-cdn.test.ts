@@ -141,4 +141,46 @@ describe('bundleCdn', () => {
     const result = await bundleCdn(testCtx(projectDir), stageDir);
     expect(result.warnings.map((w) => w.code)).toEqual(['BARE_IMPORT_UNRESOLVED']);
   });
+
+  it('does not warn when a CDN module imports a name the import map points at a local file', async () => {
+    const projectDir = makeTmpDir();
+    const stageDir = path.join(projectDir, 'stage');
+    writeFiles(stageDir, {
+      'index.html': `<script type="importmap">{"imports":{"three":"./three.js","three/addons/":"${server.base}/three@1/examples/jsm/"}}</script>`,
+      'three.js': 'export const THREE = 1;',
+      'main.js': "import { Orbit } from 'three/addons/controls/Orbit.js';",
+    });
+
+    const result = await bundleCdn(testCtx(projectDir), stageDir);
+
+    expect(result.warnings).toEqual([]);
+    expect(result.files.map((f) => f.path)).toEqual([`${V.slice(1)}/three@1/examples/jsm/controls/Orbit.js`]);
+  });
+
+  it('empties an existing lock when the game no longer loads remote files', async () => {
+    const projectDir = makeTmpDir();
+    const stageDir = path.join(projectDir, 'stage');
+    makeGame(stageDir);
+    await bundleCdn(testCtx(projectDir), stageDir);
+    const plain = path.join(projectDir, 'plain');
+    writeFiles(plain, { 'index.html': '<script src="./game.js"></script>', 'game.js': 'console.log(1)' });
+
+    await bundleCdn(testCtx(projectDir), plain);
+
+    expect(readLock(projectDir)).toEqual({ version: 1, files: {} });
+  });
+
+  it('ignores import-map entries that are not strings', async () => {
+    const projectDir = makeTmpDir();
+    const stageDir = path.join(projectDir, 'stage');
+    writeFiles(stageDir, {
+      'index.html': `<script type="importmap">{"imports":{"bad":1,"three":"${server.base}/three@1/build/three.core.js"}}</script>`,
+      'main.js': "import 'three';",
+    });
+
+    const result = await bundleCdn(testCtx(projectDir), stageDir);
+
+    expect(result.files).toHaveLength(1);
+    expect(readText(stageDir, 'index.html')).toContain('"bad": 1');
+  });
 });
