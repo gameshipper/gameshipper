@@ -1,58 +1,20 @@
-import { spawnSync } from 'node:child_process';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { runSmoke } from '../../src/core/smoke.js';
+import { cli, HOST_TARGET, readEvents, ROOT } from '../helpers/built-cli.js';
 import { testCtx } from '../helpers/ctx.js';
 import { makeSolidPng } from '../helpers/png.js';
 import { makeTmpDir, writeFiles } from '../helpers/tmp.js';
 
-const ROOT = fileURLToPath(new URL('../..', import.meta.url));
-const CLI = path.join(ROOT, 'bin', 'gameshipper.js');
-const HOST_TARGET = ({ darwin: 'mac', win32: 'windows', linux: 'linux' } as const)[process.platform as 'darwin' | 'win32' | 'linux'];
 const BRIDGE_OK = 'gameshipper-bridge:{"ok":true}';
 const THREE_URL = 'https://unpkg.com/three@0.170.0/build/three.module.js';
-/** A fresh Electron download for each OS can take minutes; a single CLI call gets this long. */
-const CLI_TIMEOUT_MS = 14 * 60_000;
-
-/** Runs the built CLI the way an agent does: --json, one JSON Result on stdout. */
-function cli(args: string[], cwd: string) {
-  const r = spawnSync(process.execPath, [CLI, ...args, '--json'], { cwd, encoding: 'utf8', timeout: CLI_TIMEOUT_MS, maxBuffer: 64 * 1024 * 1024 });
-  if (r.error) throw new Error(`gameshipper ${args.join(' ')} didn't finish in ${cwd}: ${r.error.message}\n${r.stderr}`);
-  let result: any;
-  try {
-    result = JSON.parse(r.stdout);
-  } catch {
-    throw new Error(`gameshipper ${args.join(' ')} printed non-JSON output in ${cwd}:\n${r.stdout}\n${r.stderr}`);
-  }
-  return { code: r.status, result };
-}
 
 function freshGame(): string {
   const dir = makeTmpDir('gs-e2e-');
   fs.cpSync(path.join(ROOT, 'fixtures', 'threejs-cdn'), dir, { recursive: true });
   writeFiles(dir, { 'icon.png': makeSolidPng(1024, 1024) });
   return dir;
-}
-
-interface LoggedEvent {
-  kind: string;
-  level?: string;
-  message?: string;
-  url?: string;
-}
-
-/**
- * Every diagnostic event of a run, from its events log (JSON lines). A result's `summary.events` holds only
- * the first 100, so what the game logged is checked here.
- */
-function readEvents(eventsLog: string): LoggedEvent[] {
-  return fs
-    .readFileSync(eventsLog, 'utf8')
-    .split('\n')
-    .filter((line) => line.trim())
-    .map((line) => JSON.parse(line) as LoggedEvent);
 }
 
 /**
