@@ -55,11 +55,17 @@ describe('fetchRemote', () => {
     });
   });
 
-  it('CDN_CHANGED when content no longer matches the lock', async () => {
-    server = await startServer({ '/a.js': { body: 'new', type: 'text/javascript' } });
-    await expect(fetchRemote(testCtx(makeTmpDir()), `${server.base}/a.js`, sha('old'))).rejects.toMatchObject({
-      error: { code: 'CDN_CHANGED' },
-    });
+  it('uses the cache only when it matches the expected hash', async () => {
+    server = await startServer({ '/a.js': { body: 'v1', type: 'text/javascript' } });
+    const ctx = testCtx(makeTmpDir());
+    const url = `${server.base}/a.js`;
+    await fetchRemote(ctx, url, null);
+    server.routes['/a.js'] = { body: 'v2', type: 'text/javascript' };
+    expect((await fetchRemote(ctx, url, sha('v1'))).body.toString()).toBe('v1');
+    // The lock expects something else: ask the server; the caller compares hashes.
+    const fresh = await fetchRemote(ctx, url, sha('old'));
+    expect(fresh).toMatchObject({ sha256: sha('v2') });
+    expect(server.hits).toEqual(['/a.js', '/a.js']);
   });
 
   it('CDN_FETCH_FAILED says so when a download times out', async () => {

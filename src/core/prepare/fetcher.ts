@@ -57,6 +57,10 @@ function downloadFailed(url: string, e: unknown, timeoutMs: number): GsFailure {
   return new GsFailure('CDN_FETCH_FAILED', `Couldn't download ${url}: ${reason}`, FETCH_FIX);
 }
 
+/**
+ * Returns the cached copy of `url` when it matches `expectedSha` (any cached copy when that is null),
+ * otherwise downloads it. The result can differ from `expectedSha`; the caller decides what that means.
+ */
 export async function fetchRemote(ctx: Ctx, url: string, expectedSha: string | null, opts: FetchOptions = {}): Promise<Fetched> {
   const dir = path.join(ctx.cacheDir, 'cdn');
   const key = sha256(url);
@@ -79,13 +83,6 @@ export async function fetchRemote(ctx: Ctx, url: string, expectedSha: string | n
     throw downloadFailed(url, e, timeoutMs); // the body stalled or the connection dropped
   }
   const got: Fetched = { url, finalUrl: res.url || url, body, contentType: res.headers.get('content-type'), sha256: sha256(body) };
-  if (expectedSha !== null && got.sha256 !== expectedSha) {
-    throw new GsFailure(
-      'CDN_CHANGED',
-      `${url} has changed since it was recorded in gameshipper.lock.`,
-      'If you meant to update it, delete its entry from gameshipper.lock and rebuild. Otherwise pin a fixed version in the URL (e.g. three@0.170.0).',
-    );
-  }
   fs.mkdirSync(dir, { recursive: true });
   fs.writeFileSync(path.join(dir, `${key}.bin`), body);
   const meta: CacheMeta = { url, finalUrl: got.finalUrl, contentType: got.contentType, sha256: got.sha256 };
