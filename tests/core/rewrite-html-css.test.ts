@@ -156,7 +156,7 @@ describe('css', () => {
 .a { background: url("./local.png"); }`;
 
   it('finds url() and @import references', () => {
-    expect(findCssUrls(CSS)).toEqual(['https://x/base.css', 'https://x/f.woff2', 'data:font/woff2;base64,AA==', './local.png']);
+    expect(findCssUrls(CSS)).toEqual(['https://x/base.css', 'https://x/f.woff2', './local.png']);
   });
 
   it('rewrites the ones the callback maps, keeping quotes', () => {
@@ -165,5 +165,37 @@ describe('css', () => {
     expect(out).toContain("url('/v/f.woff2')");
     expect(out).toContain('url(data:font/woff2;base64,AA==)');
     expect(out).toContain('url("./local.png")');
+  });
+
+  it('ignores references inside comments', () => {
+    const css = `/* old: url(https://x/old.png)
+   @import "https://x/old.css"; */
+.a { background: url(https://x/new.png) /* url(https://x/inline.png) */ }
+/* unterminated url(https://x/tail.png)`;
+    expect(findCssUrls(css)).toEqual(['https://x/new.png']);
+    expect(rewriteCss(css, () => '/v/x.png')).toBe(css.replace('url(https://x/new.png)', 'url(/v/x.png)'));
+  });
+
+  it('does not treat /* inside a string as a comment', () => {
+    const css = `.a::before { content: "/*"; } .b { background: url(https://x/b.png) } .c::after { content: '*/' }`;
+    expect(findCssUrls(css)).toEqual(['https://x/b.png']);
+  });
+
+  it('matches url( case-insensitively and keeps the original spelling', () => {
+    const css = `.a { background: URL( "https://x/a.png" ) } .b { mask: Url(https://x/b.svg) }`;
+    expect(findCssUrls(css)).toEqual(['https://x/a.png', 'https://x/b.svg']);
+    expect(rewriteCss(css, (u) => `/v/${u.split('/').pop()}`)).toBe(`.a { background: URL( "/v/a.png" ) } .b { mask: Url(/v/b.svg) }`);
+  });
+
+  it('skips data: URLs and fragment-only references', () => {
+    const css = `.a { fill: url(#grad); background: url("DATA:image/png;base64,AA=="), url(https://x/a.png) }`;
+    expect(findCssUrls(css)).toEqual(['https://x/a.png']);
+    const seen: string[] = [];
+    const out = rewriteCss(css, (u) => {
+      seen.push(u);
+      return '/v/a.png';
+    });
+    expect(seen).toEqual(['https://x/a.png']);
+    expect(out).toBe(css.replace('https://x/a.png', '/v/a.png'));
   });
 });
