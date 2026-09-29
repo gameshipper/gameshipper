@@ -4,6 +4,10 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 
 export type ConsoleLevel = 'info' | 'warning' | 'error' | 'debug';
+/** How Steam started in this run (see shell/steam.ts). */
+export type SteamState = 'ready' | 'not-running' | 'init-failed' | 'no-sdk' | 'restarting';
+/** How the Steam overlay gets frames to draw on in this run (see shell/overlay.ts). */
+export type OverlayMode = 'native' | 'repaint' | 'none';
 
 export type DiagEvent =
   | { kind: 'console'; level: ConsoleLevel; message: string; source: string; line: number }
@@ -17,7 +21,12 @@ export type DiagEvent =
    * open it in the system's browser, mail app or Steam, or just block it. Smoke runs never
    * open anything; they only record the attempt.
    */
-  | { kind: 'blocked-navigation'; url: string; action: 'opened-externally' | 'blocked' };
+  | { kind: 'blocked-navigation'; url: string; action: 'opened-externally' | 'blocked' }
+  | { kind: 'steam'; state: SteamState; appId: number; overlay: OverlayMode; message: string | null }
+  /** Recorded when a smoke run ends: whether Steam says its overlay hooked the game. */
+  | { kind: 'steam-overlay'; enabled: boolean }
+  /** A plugin's module failed to load in the game's main process. */
+  | { kind: 'plugin-error'; plugin: string; message: string };
 
 export interface DiagSummary {
   events: DiagEvent[];

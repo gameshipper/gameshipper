@@ -35,6 +35,8 @@ export interface SmokeOptions {
   windowed: boolean;
   /** Stop the game if it's still running this long after launch. Default: `seconds` + 45 s. */
   timeoutMs?: number;
+  /** Extra environment variables for the game (a test emulating how Steam launches a game, say). */
+  env?: NodeJS.ProcessEnv;
 }
 
 /**
@@ -198,6 +200,34 @@ export function summaryToIssues(
             "The game window only shows the game's own pages. Web, mailto: and steam: links the game itself opens go to the player's browser or app; other URLs, and links from embedded sites, are blocked.",
           ),
         );
+        break;
+      case 'steam':
+        // A build without the SDK already carries a STEAM_SDK_MISSING warning from build or play.
+        if (e.state === 'not-running') {
+          add(
+            warnings,
+            gsError(
+              'STEAM_NOT_RUNNING',
+              `Steam isn't running, so Steam features were off in this run (App ID ${e.appId}).`,
+              'Start Steam and sign in, then run again. The game still works without Steam: window.steam.isAvailable() resolves false.',
+            ),
+          );
+        } else if (e.state === 'init-failed') {
+          add(
+            errors,
+            gsError(
+              'STEAM_INIT_FAILED',
+              `Steam is running but didn't start for App ID ${e.appId}: ${e.message ?? 'no reason given'}`,
+              `Check that the signed-in Steam account owns App ID ${e.appId} (Valve's test app 480 works for everyone) and that steam.appId in gameshipper.json is right. The events log has Steam's own messages.`,
+            ),
+          );
+        }
+        break;
+      case 'steam-overlay':
+        // Only the events log keeps it: Steam hooks its overlay only into games it launched.
+        break;
+      case 'plugin-error':
+        add(errors, gsError('PLUGIN_LOAD_FAILED', `Plugin ${e.plugin} failed to load in the game: ${e.message}`, 'Fix the plugin, then run `npx gameshipper play --smoke` again.'));
         break;
       default:
         // A summary from a newer shell may hold kinds this version doesn't know; they're skipped.
@@ -383,7 +413,13 @@ export async function runSmoke(ctx: Ctx, opts: SmokeOptions): Promise<Result<Smo
   const eventsLog = eventsLogPath(ctx.projectDir, started);
   // Each run gets its own summary next to its events log, so runs never read each other's.
   const outFile = path.join(path.dirname(eventsLog), `smoke-${fileStamp(started)}.json`);
-  const env = { ...gameEnv(eventsLog, opts.userDataDir, opts.windowed), GAMESHIPPER_SMOKE_SECONDS: String(opts.seconds), GAMESHIPPER_SMOKE_OUT: outFile };
+  // The smoke settings come last, so extra variables can't change them.
+  const env = {
+    ...gameEnv(eventsLog, opts.userDataDir, opts.windowed),
+    ...opts.env,
+    GAMESHIPPER_SMOKE_SECONDS: String(opts.seconds),
+    GAMESHIPPER_SMOKE_OUT: outFile,
+  };
   const timeoutMs = opts.timeoutMs ?? (opts.seconds + SMOKE_TIMEOUT_GRACE_SECONDS) * 1000;
   ctx.log(`smoke run: ${opts.command} ${opts.args.join(' ')} for ${opts.seconds}s`);
   const run = await launch(ctx, opts.command, opts.args, { env, timeoutMs });
