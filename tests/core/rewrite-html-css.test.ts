@@ -47,6 +47,94 @@ describe('rewriteHtml', () => {
   });
 });
 
+describe('rewriteHtml keeps the original markup', () => {
+  const urlOnly = (map: Record<string, string>) => ({
+    url: (u: string) => map[u] ?? null,
+    importMap: (m: Record<string, string>) => m,
+    moduleScript: (code: string) => code,
+    style: (css: string) => css,
+  });
+
+  it('keeps options with implied end tags', () => {
+    const html = '<select><option>Low<option selected>High</select>\n<img src="https://x/a.png">';
+    expect(rewriteHtml(html, urlOnly({ 'https://x/a.png': '/v/a.png' }))).toBe(html.replace('https://x/a.png', '/v/a.png'));
+  });
+
+  it('keeps table cells and rows with implied end tags', () => {
+    const html = '<table><tr><td>a<td>b<tr><td>c</table><img src="https://x/a.png">';
+    expect(rewriteHtml(html, urlOnly({ 'https://x/a.png': '/v/a.png' }))).toBe(html.replace('https://x/a.png', '/v/a.png'));
+  });
+
+  it('keeps the doctype, comments, whitespace, entities and line endings', () => {
+    const html =
+      '<!DOCTYPE html>\r\n<!-- <img src="https://x/a.png"> -->\r\n<HTML>\r\n  <body class=game>\r\n' +
+      '    <p>Tom &amp; Jerry&nbsp;&copy;</p>\r\n    <IMG  SRC="https://x/a.png"  alt=\'\'>\r\n';
+    const out = rewriteHtml(html, urlOnly({ 'https://x/a.png': '/v/a.png' }));
+    expect(out).toBe(html.replace('SRC="https://x/a.png"', 'SRC="/v/a.png"'));
+  });
+
+  it('returns the input unchanged when nothing is rewritten', () => {
+    const html =
+      '<!doctype html><title>x</title>\n<script type="importmap">{"imports":{"three":"https://x/three.js"}}</script>\n' +
+      '<style>a{b:c}</style><script type=module>import "three";</script><p>unclosed<li>item<img src=x.png>';
+    expect(rewriteHtml(html, urlOnly({}))).toBe(html);
+  });
+
+  it('keeps attribute names and quote style, and quotes unquoted values', () => {
+    const html = `<img SRC=https://x/a.png><img src='https://x/b.png'><img src = "https://x/c.png">`;
+    const out = rewriteHtml(html, urlOnly({ 'https://x/a.png': '/v/a.png', 'https://x/b.png': '/v/b.png', 'https://x/c.png': '/v/c.png' }));
+    expect(out).toBe(`<img SRC="/v/a.png"><img src='/v/b.png'><img src = "/v/c.png">`);
+  });
+
+  it('decodes attribute values for the callback and escapes the new value', () => {
+    const html = '<img src="https://x/a.png?w=1&amp;h=2">';
+    expect(scanHtml(html).urls).toEqual(['https://x/a.png?w=1&h=2']);
+    const out = rewriteHtml(html, urlOnly({ 'https://x/a.png?w=1&h=2': '/v/a.png?q=1&r="2"' }));
+    expect(out).toBe('<img src="/v/a.png?q=1&amp;r=&quot;2&quot;">');
+  });
+
+  it('removes integrity and crossorigin with their whitespace only on rewritten elements', () => {
+    const html =
+      '<script\n  src="https://x/lib.js"\n  integrity="sha384-abc"\n  crossorigin></script>\n' +
+      '<script src="./local.js" integrity="sha384-def" crossorigin="anonymous"></script>';
+    const out = rewriteHtml(html, urlOnly({ 'https://x/lib.js': '/v/lib.js' }));
+    expect(out).toBe(
+      '<script\n  src="/v/lib.js"></script>\n<script src="./local.js" integrity="sha384-def" crossorigin="anonymous"></script>',
+    );
+  });
+
+  it('splices inline module and style text without touching the rest', () => {
+    const html = '<style>\r\n  a { background: url(https://x/bg.png) }\r\n</style>\r\n<script type="module">\r\n  import "https://x/m.js";\r\n</script>';
+    const out = rewriteHtml(html, {
+      ...urlOnly({}),
+      moduleScript: (code) => code.replace('https://x/m.js', '/v/m.js'),
+      style: (css) => css.replace('https://x/bg.png', '/v/bg.png'),
+    });
+    expect(out).toBe(html.replace('https://x/m.js', '/v/m.js').replace('https://x/bg.png', '/v/bg.png'));
+  });
+});
+
+describe('scanHtml details', () => {
+  it('matches script types case-insensitively', () => {
+    const scan = scanHtml('<script TYPE="ImportMap">{"imports":{"a":"https://x/a.js"}}</script><script type="MODULE">go()</script>');
+    expect(scan.importMap).toEqual({ a: 'https://x/a.js' });
+    expect(scan.moduleScripts).toEqual(['go()']);
+  });
+
+  it('looks inside <template> content', () => {
+    const html = '<template><img src="https://x/t.png"><style>b{}</style></template>';
+    expect(scanHtml(html).urls).toEqual(['https://x/t.png']);
+    expect(scanHtml(html).styles).toEqual(['b{}']);
+    const out = rewriteHtml(html, {
+      url: () => '/v/t.png',
+      importMap: (m) => m,
+      moduleScript: (c) => c,
+      style: (c) => c,
+    });
+    expect(out).toBe('<template><img src="/v/t.png"><style>b{}</style></template>');
+  });
+});
+
 describe('css', () => {
   const CSS = `@import "https://x/base.css";
 @font-face { src: url('https://x/f.woff2') format('woff2'), url(data:font/woff2;base64,AA==); }
