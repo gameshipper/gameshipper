@@ -129,7 +129,7 @@ describe('launchChecks', () => {
 
   it('says the frame shows something, and warns when it is mostly one colour', () => {
     expect(byId(launchChecks(evidence()))['launch.frame']).toMatchObject({ status: 'pass', message: 'The game drew a non-uniform frame (1280x800 frame saved).' });
-    const plain = byId(launchChecks(evidence({ frame: { width: 1280, height: 800, blank: false, color: '#050505', plain: true, main: { share: 0.987, color: '#000000' } } })));
+    const plain = byId(launchChecks(evidence({ frame: { width: 1280, height: 800, blank: false, color: '#050505', plain: true, main: { share: 0.998, color: '#000000' } } })));
     expect(plain['launch.frame']).toMatchObject({
       status: 'warn',
       code: 'CHECK_MOSTLY_BLANK_FRAME',
@@ -154,6 +154,7 @@ describe('launchChecks', () => {
       status: 'skip',
       message: 'Not checked: the game closed its own window after 2.4 s (exit code 0), before Gameshipper could close it like a player.',
     });
+    expect(checks['deck.layout']).toMatchObject({ status: 'skip', message: "Couldn't measure the page: the game closed its window after 2.4 s." });
     const early = byId(launchChecks(evidence({ smoke: ok(data), frame: null, closed: { seconds: null } })));
     expect(early['launch.frame'].message).toBe("Couldn't capture the game's window: the game closed its window before its page loaded.");
   });

@@ -200,7 +200,8 @@ export function launchChecks(ev: LaunchEvidence): CheckResult[] {
       ...frameBase,
       status: 'warn',
       code: 'CHECK_MOSTLY_BLANK_FRAME',
-      message: `The frame is mostly one colour (${Math.round(ev.frame.main.share * 100)}% ${ev.frame.main.color}); check the game isn't stuck on a loading screen.`,
+      // Rounded down: a frame that isn't blank is never "100%" one colour.
+      message: `The frame is mostly one colour (${Math.floor(ev.frame.main.share * 100)}% ${ev.frame.main.color}); check the game isn't stuck on a loading screen.`,
       fix: `Look at ${probe?.frame ?? 'the Deck-size frame'}. A game that waits for a click or key on its title screen is fine; otherwise make sure it gets past loading within ${ev.seconds} s (see launch.errors), or check with a longer --seconds.`,
     });
   } else {
@@ -242,7 +243,8 @@ export function launchChecks(ev: LaunchEvidence): CheckResult[] {
   const layoutBase = { id: 'deck.layout', group: 'deck', title: `Fits the Steam Deck screen (${DECK})` } as const;
   const probeErrors = probe?.errors.length ? probe.errors.join('; ') : '';
   if (!layout) {
-    checks.push({ ...layoutBase, status: 'skip', message: `Couldn't measure the page${probeErrors ? `: ${probeErrors}` : '.'}` });
+    const why = ev.closed ? `: the game closed its window ${closedWhen(ev.closed)}.` : probeErrors ? `: ${probeErrors}` : '.';
+    checks.push({ ...layoutBase, status: 'skip', message: `Couldn't measure the page${why}` });
   } else if (layout.viewport.width !== DECK_SIZE.width || layout.viewport.height !== DECK_SIZE.height) {
     // Measured at another size, the page says nothing about the Deck's screen.
     const size = `${layout.viewport.width}x${layout.viewport.height}`;
