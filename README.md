@@ -4,9 +4,10 @@ Turn any web game folder (three.js, Phaser, PixiJS, Babylon.js, plain canvas) in
 
 ```bash
 npx gameshipper init           # detects your game, writes gameshipper.json
-npx gameshipper play           # plays it in the desktop shell
+npx gameshipper play           # plays it in the desktop shell (F12 saves a store screenshot)
 npx gameshipper play --smoke   # runs it for 5 s and reports problems
-npx gameshipper build          # out/windows, out/mac, out/linux
+npx gameshipper build          # out/windows, out/mac, out/linux and the store images in out/store
+npx gameshipper check          # launches the build and checks it's ready for Steam and Steam Deck
 npx gameshipper status         # what's configured, built, and what happened last
 ```
 
@@ -18,28 +19,31 @@ Needs Node.js 22.12 or newer. The first build for each OS downloads Electron (12
 
 ### `init`
 
-Detects the game and writes `gameshipper.json`. It finds `index.html` (or the first `.html` file) and an icon at `icon.png`, `art/icon.png`, `assets/icon.png` or `public/icon.png`. Steam needs a square PNG of at least 1024x1024, so an icon that isn't one is left out with an `ICON_UNSUITABLE` warning. If `package.json` has a `build` script and a bundler (Vite, Parcel, webpack, esbuild, Rollup), Gameshipper runs `npm run build` before every `play` and `build` and packages `dist/`. It also adds `.gameshipper/`, `out/` and `.sdk/` to `.gitignore`, creating one if the folder is a git repository without it.
+Detects the game and writes `gameshipper.json`. It finds `index.html` (or the first `.html` file), an icon at `icon.png`, `art/icon.png`, `assets/icon.png` or `public/icon.png`, and the art for the [store images](#store-images-and-screenshots) at `art/key-art.png` (or `.jpg`) and `art/logo.png`. Steam needs a square PNG of at least 1024x1024, so an icon that isn't one is left out with an `ICON_UNSUITABLE` warning. If `package.json` has a `build` script and a bundler (Vite, Parcel, webpack, esbuild, Rollup), Gameshipper runs `npm run build` before every `play` and `build` and packages `dist/`. It also adds `.gameshipper/`, `out/` and `.sdk/` to `.gitignore`, creating one if the folder is a git repository without it.
 
 | Flag | |
 |---|---|
 | `--name <name>` | Game name shown in windows and stores. |
 | `--app-id <id>` | Steam App ID (default 480, Valve's test app). |
 | `--icon <png\|none>` | Square PNG icon, at least 1024x1024. |
+| `--key-art <file\|none>` | Key art for the store images: PNG or JPEG, 3840x2160 recommended. |
+| `--logo <png\|none>` | Game logo on a transparent background, for the store images. |
 | `--entry <file>` | The game's HTML file (default: detected). |
 | `--build-command <cmd>` | Command that builds the game (default: detected). |
 | `--output-dir <dir>` | Folder the build command writes. |
 | `--force` | Overwrite an existing `gameshipper.json`. |
 
-In a terminal, `init` asks for the name, App ID and icon. With `--yes` or `--json`, or when stdin isn't a terminal, it uses the flags and what it detected instead.
+In a terminal, `init` asks for the name, App ID, icon, key art and logo. With `--yes` or `--json`, or when stdin isn't a terminal, it uses the flags and what it detected instead.
 
 ### `play`
 
-Runs the game in the same shell the builds use. The window stays a window even when `gameshipper.json` asks for fullscreen; F11 or Alt+Enter toggles fullscreen. Saves go to `.gameshipper/play-data/`, so testing never touches a real install's saves.
+Runs the game in the same shell the builds use. The window stays a window even when `gameshipper.json` asks for fullscreen; F11 or Alt+Enter toggles fullscreen. **F12** saves a 1920x1080 store screenshot to `out/store/screenshots/` (the window flickers while it's taken). Saves go to `.gameshipper/play-data/`, so testing never touches a real install's saves.
 
 | Flag | |
 |---|---|
 | `--smoke` | Run for a few seconds, quit, and report errors, missing files, internet use and crashes. |
 | `--seconds <n>` | How long a smoke run lasts after the page loads (default 5). Implies `--smoke`. |
+| `--screenshot <s,s,...>` | Save 1920x1080 store screenshots this many seconds after the page loads, then quit, e.g. `--screenshot 5,10,15,20,25`. |
 | `--fullscreen` | Honour `window.fullscreen` from `gameshipper.json`. |
 | `--frozen-lock` | Fail instead of accepting changed or new CDN files; for CI. |
 | `--steam-sdk <path>` | Your Steamworks SDK zip or folder (see [Steam](#steam)). |
@@ -56,9 +60,29 @@ Builds desktop apps into `out/<target>`. For a game named "Spinning Cube" that's
 
 `targets` defaults to `windows`, `mac` and `linux`. `ios` and `android` can be added to it, but this version skips them with a `TARGET_NOT_YET_SUPPORTED` warning.
 
+Every build also makes the [store images](#store-images-and-screenshots) in `out/store/`, whatever `--target` says.
+
+### `check`
+
+Launches the latest build for this computer once, for 15 seconds (`--seconds` to change), with the network blocked and the page laid out at Steam Deck size (1280x800), then closes its window the way a player would. It also looks at every build and at `out/store/`, and reports 18 checks:
+
+| Group | What |
+|---|---|
+| Offline | nothing is loaded from the internet (every blocked address is listed) |
+| Launch | it starts, has no console errors or missing files, draws a picture, and exits with code 0 when its window closes; builds for other operating systems are listed as built, not launched here |
+| Steam Deck | at 1280x800 nothing is cut off and no scrollbars appear; it reads a gamepad (while running, or anywhere in its code); text fields are listed |
+| Review | a build for every desktop target, no `steam_appid.txt`, the Mac build signed and notarized, a custom icon, your own App ID |
+| Store | all eight images at their exact sizes, at least five 1920x1080 screenshots, and reminders about the trailer and Steam's AI disclosure |
+
+Run it after `build`: it never builds anything itself. The Deck-size frame is saved as `.gameshipper/check/frame.png` and the full report as `.gameshipper/check/report.json`. Until Gameshipper signs Mac builds, a Mac build made on a Mac is only ad-hoc signed, so on a Mac `review.mac-signing` fails with `CHECK_MAC_NOT_NOTARIZED`.
+
+| Flag | |
+|---|---|
+| `--seconds <n>` | How long the game runs with the network blocked (default 15). |
+
 ### `status`
 
-Shows the config, what this computer can build, the Steamworks SDK builds will use, which `out/` folders exist, and the last result of `init`, `play` and `build` with their log paths. It succeeds for any existing folder, so it's the command to run first.
+Shows the config, what this computer can build, the Steamworks SDK builds will use, which `out/` folders exist, and the last result of `init`, `play`, `build` and `check` with their log paths. It succeeds for any existing folder, so it's the command to run first.
 
 ### `help`
 
@@ -77,13 +101,15 @@ Shows the config, what this computer can build, the Steamworks SDK builds will u
 
 ## For AI agents
 
-- Add `--json` to any command: stdout is exactly one JSON object, `{ ok, data, errors[], warnings[], logPath }`. `logPath` is the run's log (for `play` and `build`). Without a valid `gameshipper.json` they write nothing into the folder, so a `CONFIG_MISSING` or `CONFIG_INVALID` result has no `logPath`.
+- Add `--json` to any command: stdout is exactly one JSON object, `{ ok, data, errors[], warnings[], logPath }`. `logPath` is the run's log (for `play`, `build` and `check`). Without a valid `gameshipper.json` they write nothing into the folder, so a `CONFIG_MISSING` or `CONFIG_INVALID` result has no `logPath`.
 - Every error and warning has a stable `code` and a plain-English `message`. Errors always have a `fix`; warnings have one whenever there's something to do.
 - Nothing ever prompts when `--json` or `--yes` is set, or when stdin isn't a terminal. Missing input comes back as `INPUT_REQUIRED`, naming the flag to pass.
 - Exit codes: `0` success, `1` a target or check failed, `2` invalid config, usage or missing input. A signal ends the run with an `INTERRUPTED` result and exit code 128 + the signal number (130 for Ctrl+C). Ctrl+C during an interactive `play` just ends the session: an `ok` result with a `PLAY_STOPPED` warning, still exit 130.
 - `help --json` returns every command and flag.
+- `check --json` returns 18 checks, each with a stable `id`, a `status` (`pass`, `warn`, `fail`, `info` or `skip`) and, for `warn` and `fail`, a `code` and a `fix`. Every failed check is also an error in `errors`, and every warning in `warnings`, so exit code 1 means at least one check failed. Open `data.deckScreenshot` to see what the game showed at Steam Deck size.
+- `play --screenshot 5,10,15,20,25 --json` saves store screenshots without a person; `data.screenshots` lists them. They show whatever the game shows without input, so look at them before you upload them.
 
-The loop: `status --json`, `init --yes --json`, then `play --smoke --json` until it comes back clean (`ok: true`, so no errors; warnings don't block), then `build --json`.
+The loop: `status --json`, `init --yes --json`, then `play --smoke --json` until it comes back clean (`ok: true`, so no errors; warnings don't block), then `build --json`, then `check --json` until nothing fails that you can fix.
 
 ### What `play --smoke` reports
 
@@ -101,11 +127,36 @@ The loop: `status --json`, `init --yes --json`, then `play --smoke --json` until
 | `STEAM_NOT_RUNNING` | warning | Steam isn't running, so `window.steam` was a no-op. |
 | `STEAM_OVERLAY_FAILED` | warning | The native overlay window (see [Steam](#steam)) couldn't start, so Shift+Tab shows no overlay. |
 | `PLUGIN_LOAD_FAILED` | error | A plugin's module failed to load in the game. |
+| `SCREENSHOT_FAILED` | warning | A screenshot couldn't be saved. With `--screenshot` it's also an error when fewer were saved than asked for. |
 | `GAME_NAVIGATION_BLOCKED` | warning | The game tried to take its window to a page that isn't the game's, like `about:blank` or `file:`, or an embedded site tried to open a link. Web, mail and `steam:` links the game itself opens aren't reported: they open in the player's browser or app. But while the page has an embedded frame from another site, or one that failed to load, the game's own `window.open()` and `target="_blank"` links are blocked too, because Electron can't tell which frame opened a window. |
 
 Each code lists at most 10 issues, then one more issue counting the rest. `data.smoke.summary.events` holds the first 100 diagnostic events; `data.smoke.eventsLog` names a JSON-lines file with all of them, including everything the game logged.
 
 Other problems have codes too, such as `CDN_FETCH_FAILED`, `CDN_CHANGED`, `ENTRY_MISSING`, `CONFIG_INVALID`, `ICON_TOO_SMALL`, `ICON_NOT_SQUARE`, `STEAM_SDK_MISSING`, `STEAM_SDK_INVALID`, `STEAM_SDK_CACHE_FAILED` (Gameshipper's cache can't be written), `STEAM_NATIVE_DOWNLOAD_FAILED` (another OS's native Steam bridge couldn't be downloaded), `STEAM_UNSUPPORTED_PLATFORM` (a warning: Steam has no libraries for that OS and CPU, like arm64 Linux, so it runs without Steam), `PLUGIN_LOAD_FAILED`, `PLUGIN_IMPORTS_NOT_COPIED` (a warning, see [Plugins](#plugins)), `PLUGIN_HOOK_FAILED` and `PACKAGE_FAILED` from a build, or `GAME_EXITED` when a game quits with an error during `play`, each with its fix. An icon problem only stops `build`: `play` warns with the same code and uses the default icon.
+
+### What `check` reports
+
+| Check | Not met | Code |
+|---|---|---|
+| `offline.requests` | fail | `CHECK_OFFLINE` |
+| `launch.run` | fail (warn when this computer's OS isn't a target) | `CHECK_NOT_LAUNCHED`, `CHECK_LAUNCH_FAILED` |
+| `launch.errors` | warn | `CHECK_GAME_ERRORS` |
+| `launch.frame` | fail | `CHECK_BLANK_FRAME` |
+| `launch.exit` | fail | `CHECK_EXIT_CODE` |
+| `launch.other-os` | info | |
+| `deck.layout` | warn | `CHECK_DECK_LAYOUT` |
+| `deck.gamepad` | warn | `CHECK_NO_GAMEPAD` |
+| `deck.text-input` | always passes; lists text fields | |
+| `review.builds` | fail | `CHECK_BUILD_MISSING` |
+| `review.steam-appid` | fail | `CHECK_STEAM_APPID_FILE` |
+| `review.mac-signing` | fail on a Mac, warn elsewhere | `CHECK_MAC_NOT_NOTARIZED`, `CHECK_MAC_SIGNING_UNKNOWN` |
+| `review.icon` | warn | `CHECK_DEFAULT_ICON` |
+| `review.app-id` | warn | `CHECK_TEST_APP_ID` |
+| `store.images` | fail | `CHECK_STORE_IMAGES` |
+| `store.screenshots` | fail | `CHECK_SCREENSHOTS` |
+| `store.trailer`, `ai.disclosure` | info | |
+
+A check that couldn't run here is `skip`, and its message says why.
 
 ### Environment variables
 
@@ -122,9 +173,11 @@ Other problems have codes too, such as `CDN_FETCH_FAILED`, `CDN_CHANGED`, `ENTRY
 | `gameshipper.json` | The config. Commit it. |
 | `gameshipper.lock` | The URL and SHA-256 of every downloaded CDN file. Commit it. When a CDN file changes, `build` warns with `CDN_CHANGED` and updates the lock; `--frozen-lock` makes that an error. |
 | `out/<target>/` | The builds. |
+| `out/store/` | The store images; `out/store/screenshots/` holds the screenshots from F12 and `play --screenshot`. |
 | `.sdk/` | Your Steamworks SDK zip. Don't commit it (`init` adds it to `.gitignore`). |
 | `.gameshipper/logs/` | Run logs (the newest 50 of each command), plus the events logs and smoke summaries of `play` runs (the newest 20). |
 | `.gameshipper/last/` | The last result of each command, which `status` reads. |
+| `.gameshipper/check/` | The last `check`: `report.json` and the Deck-size `frame.png`. |
 
 ## `gameshipper.json`
 
@@ -136,6 +189,8 @@ Other problems have codes too, such as `CDN_FETCH_FAILED`, `CDN_CHANGED`, `ENTRY
   "version": "1.0.0",
   "game": { "dir": ".", "entry": "index.html", "buildCommand": null, "outputDir": null },
   "icon": "icon.png",
+  "keyArt": "art/key-art.png",
+  "logo": "art/logo.png",
   "targets": ["windows", "mac", "linux"],
   "window": { "width": 1280, "height": 720, "fullscreen": true, "resizable": true },
   "steam": { "appId": 480, "sdk": null, "overlay": "auto" },
@@ -144,6 +199,25 @@ Other problems have codes too, such as `CDN_FETCH_FAILED`, `CDN_CHANGED`, `ENTRY
 ```
 
 Builds start fullscreen when `window.fullscreen` is true, and always on Steam Deck. `npx gameshipper help --json` includes the full schema.
+
+## Store images and screenshots
+
+Set `keyArt` (PNG or JPEG, 3840x2160 recommended, at least 1280x720) and `logo` (a PNG with a transparent background) in `gameshipper.json`, or put them at `art/key-art.png` and `art/logo.png` before `init`. Every `build` then writes all eight Steam images to `out/store/`:
+
+| File | Size | |
+|---|---|---|
+| `header_capsule.png` | 920x430 | key art and logo |
+| `small_capsule.png` | 462x174 | key art and logo |
+| `main_capsule.png` | 1232x706 | key art and logo |
+| `vertical_capsule.png` | 748x896 | key art and logo |
+| `library_capsule.png` | 600x900 | key art and logo |
+| `library_header.png` | 920x430 | key art and logo |
+| `library_hero.png` | 3840x1240 | key art only |
+| `library_logo.png` | 1280x720 | the logo on a transparent background |
+
+Crops centre on `keyArtFocus`: `[x, y]` as fractions of the key art's width and height, `[0.5, 0.5]` by default. Unusable art fails the build with `KEYART_INVALID`, `KEYART_TOO_SMALL`, `LOGO_INVALID` or `LOGO_NOT_TRANSPARENT` (exit code 2, like a bad icon); art that had to be enlarged gives `KEYART_LOW_RES` or `LOGO_LOW_RES`; without `keyArt` and `logo`, builds warn `STORE_IMAGES_SKIPPED`.
+
+Steam needs at least five 1920x1080 gameplay screenshots. Press **F12** during `npx gameshipper play` to save one to `out/store/screenshots/`. It's always exactly 1920x1080, whatever your screen's scaling. F12 only does this in `play`: in your shipped game it stays Steam's screenshot key.
 
 ## Saves
 
@@ -239,7 +313,7 @@ Windows and Linux builds are x64. ¹ Universal Mac builds need Apple's command-l
 
 ## Coming in later versions
 
-Store images, `check`, `publish`, Mac signing and notarization, and iOS and Android builds.
+`publish`, Mac signing and notarization, and iOS and Android builds.
 
 ## Development
 
