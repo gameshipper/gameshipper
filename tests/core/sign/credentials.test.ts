@@ -42,6 +42,37 @@ describe('readAppleCredentials', () => {
     }
   });
 
+  it('names the variables that conflict', () => {
+    const cases: Array<[NodeJS.ProcessEnv, string[]]> = [
+      [{ GAMESHIPPER_NOTARY_KEYCHAIN: '/k.keychain-db' }, ['GAMESHIPPER_NOTARY_KEYCHAIN', 'GAMESHIPPER_NOTARY_PROFILE']],
+      [{ GAMESHIPPER_MAC_IDENTITY: ID, GAMESHIPPER_NOTARY_KEYCHAIN: '/k.keychain-db' }, ['GAMESHIPPER_NOTARY_KEYCHAIN', 'GAMESHIPPER_NOTARY_PROFILE']],
+      [
+        { GAMESHIPPER_MAC_IDENTITY: ID, GAMESHIPPER_NOTARY_KEYCHAIN: '/k.keychain-db', GAMESHIPPER_NOTARY_KEY: '/k.p8', GAMESHIPPER_NOTARY_KEY_ID: 'X' },
+        ['GAMESHIPPER_NOTARY_KEYCHAIN', 'GAMESHIPPER_NOTARY_KEY'],
+      ],
+      [{ GAMESHIPPER_MAC_IDENTITY: ID, GAMESHIPPER_NOTARY_PROFILE: 'gs', GAMESHIPPER_NOTARY_ISSUER: 'uuid' }, ['GAMESHIPPER_NOTARY_ISSUER', 'GAMESHIPPER_NOTARY_PROFILE']],
+      [{ GAMESHIPPER_MAC_IDENTITY: ID, GAMESHIPPER_NOTARY_PROFILE: 'gs', GAMESHIPPER_NOTARY_KEY_ID: 'X' }, ['GAMESHIPPER_NOTARY_PROFILE', 'GAMESHIPPER_NOTARY_KEY_ID']],
+    ];
+    for (const [env, names] of cases) {
+      const r = readAppleCredentials(env, exists);
+      expect(r.error?.code, JSON.stringify(env)).toBe('APPLE_CREDENTIALS_INVALID');
+      for (const name of names) expect(r.error?.message, JSON.stringify(env)).toContain(name);
+    }
+  });
+
+  it('never repeats a private key pasted into GAMESHIPPER_NOTARY_KEY', () => {
+    const body = 'MIGTAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBHkwdwIBAQQgFAKEKEYFAKEKEY';
+    for (const key of [`-----BEGIN PRIVATE KEY-----\n${body}\n-----END PRIVATE KEY-----`, `-----BEGIN PRIVATE KEY----- ${body} -----END PRIVATE KEY-----`, `${body}\n${body}`]) {
+      const r = readAppleCredentials({ GAMESHIPPER_MAC_IDENTITY: ID, GAMESHIPPER_NOTARY_KEY: key, GAMESHIPPER_NOTARY_KEY_ID: 'X' }, () => false);
+      expect(r.error?.code).toBe('APPLE_CREDENTIALS_INVALID');
+      const text = JSON.stringify(r.error);
+      expect(text).not.toContain(body);
+      expect(text).not.toContain('BEGIN');
+      expect(r.error?.message).toContain('path');
+      expect(r.error?.fix).toContain('.p8');
+    }
+  });
+
   it('checks the API key file exists', () => {
     const r = readAppleCredentials({ GAMESHIPPER_MAC_IDENTITY: ID, GAMESHIPPER_NOTARY_KEY: '/nope.p8', GAMESHIPPER_NOTARY_KEY_ID: 'X' }, () => false);
     expect(r.error?.message).toContain('/nope.p8');

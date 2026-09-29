@@ -338,13 +338,13 @@ export GAMESHIPPER_NOTARY_PROFILE=gameshipper
 npx gameshipper build --target mac      # signs, notarizes (usually a few minutes) and staples
 ```
 
-For CI, use an App Store Connect API key instead of the profile: `GAMESHIPPER_NOTARY_KEY` (the `.p8` file's path), `GAMESHIPPER_NOTARY_KEY_ID` and `GAMESHIPPER_NOTARY_ISSUER`. The first signing may ask for keychain access: click "Always Allow". The variables are never read from `gameshipper.json`, because the identity contains your legal name and game repositories are often public.
+For CI, use an App Store Connect API key instead of the profile: `GAMESHIPPER_NOTARY_KEY` (the `.p8` file's path, not the key itself), `GAMESHIPPER_NOTARY_KEY_ID` and `GAMESHIPPER_NOTARY_ISSUER`. The first signing may ask for keychain access: click "Always Allow". The variables are never read from `gameshipper.json`, because the identity contains your legal name and game repositories are often public.
 
 Without them the Mac app is ad-hoc signed: it runs on your Mac, and `build` warns `MAC_UNSIGNED`. With only `GAMESHIPPER_MAC_IDENTITY` it's signed but not notarized (`MAC_NOT_NOTARIZED`). Every Mac build uses the hardened runtime with the entitlements Steam needs: Steam injects its overlay with `DYLD_INSERT_LIBRARIES` and the game loads Valve-signed libraries, so library validation is off and DYLD variables are allowed in the game's main process; the App Sandbox isn't used. Signing happens after your plugins' `afterPackage` hooks.
 
 | Code | |
 |---|---|
-| `APPLE_CREDENTIALS_INVALID` | The variables are half-set (a notary login without an identity, say). Stops the build before anything is built; exit code 2. |
+| `APPLE_CREDENTIALS_INVALID` | The variables are half-set or mixed (a notary login without an identity, a keychain without a profile, a profile with API key variables, say); the message names them. Stops the build before anything is built; exit code 2. |
 | `MAC_IDENTITY_NOT_FOUND` | `GAMESHIPPER_MAC_IDENTITY` isn't in your keychain. The message lists what is; exit code 2. |
 | `MAC_SIGN_FAILED`, `NOTARIZE_FAILED`, `STAPLE_FAILED`, `NOTARIZE_TOOL_MISSING` | Signing or notarizing failed; the Mac target fails. The fix names the log in `.gameshipper/logs/` with codesign's output or Apple's report. |
 | `MAC_UNSIGNED`, `MAC_NOT_NOTARIZED`, `MAC_BUNDLE_ID_DEFAULT`, `MAC_SIGN_HOST`, `MAC_ADHOC_SIGN_FAILED` | Warnings: how far the Mac app got, and what to set to go further. |
