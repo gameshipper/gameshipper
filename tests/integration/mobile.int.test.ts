@@ -1,5 +1,6 @@
 import { spawnSync } from 'node:child_process';
 import * as fs from 'node:fs';
+import * as os from 'node:os';
 import * as path from 'node:path';
 import sharp from 'sharp';
 import { describe, expect, it } from 'vitest';
@@ -70,7 +71,14 @@ describe('iOS and Android projects', () => {
     expect(page).toContain(SHIM_TAG);
     expect(page).not.toContain('https://unpkg.com');
     // three.js was bundled into the game's own files, which Android packages (its asset filter keeps _ folders).
-    expect([...files].some((f) => f.startsWith('app/src/main/assets/public/_gameshipper/cdn/unpkg.com/three@0.170.0/'))).toBe(true);
+    const three = [...files].filter((f) => f.startsWith('app/src/main/assets/public/_gameshipper/cdn/unpkg.com/three@0.170.0/'));
+    expect(three.length).toBeGreaterThan(0);
+    // Committing out/android keeps them, although three.js's files are in a build/ folder, which Android's .gitignore ignores.
+    if (spawnSync('git', ['--version']).status === 0) {
+      expect(spawnSync('git', ['init', '-q'], { cwd: android }).status).toBe(0);
+      for (const f of three) expect(spawnSync('git', ['check-ignore', '-q', f], { cwd: android }).status, f).toBe(1);
+      fs.rmSync(path.join(android, '.git'), { recursive: true, force: true });
+    }
     expect(readText(android, 'app/src/main/assets/capacitor.plugins.json')).toContain('PreferencesPlugin');
     for (const f of [...files].filter((f) => /\.(gradle|xml|swift|pbxproj)$/.test(f))) {
       expect(readText(android, f).includes('node_modules'), f).toBe(false);
@@ -95,8 +103,9 @@ describe('iOS and Android projects', () => {
     const app = buildForSimulator(ios, path.join(dir, '.gameshipper', 'xcode'));
     const device = pickIphone();
     const booted = bootSimulator(device);
+    // Outside the project, which is removed afterwards (Xcode's build folder alone is about 340 MB); each run replaces it.
+    const shot = path.join(os.tmpdir(), 'gameshipper-ios-simulator.png');
     try {
-      const shot = path.join(dir, 'ios-screenshot.png');
       const out = await runOnSimulator(device, app, BUNDLE_ID, [BRIDGE_OK, 'mobile-probe:'], () => screenshot(device, shot));
       expect(out).toContain(BRIDGE_OK); // saved and loaded through Capacitor Preferences
       expect(out).toContain('mobile-probe:steam=undefined');
@@ -110,6 +119,7 @@ describe('iOS and Android projects', () => {
       await ctx.annotate(`${device.name} (${device.udid}), ${w}x${h}, screenshot: ${shot}`);
     } finally {
       if (booted) shutdownSimulator(device);
+      fs.rmSync(dir, { recursive: true, force: true, maxRetries: 3 });
     }
   });
 });
