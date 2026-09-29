@@ -17,6 +17,10 @@ describe('bundle IDs', () => {
     expect(bundleIdProblem('my-game')).toMatch(/com\.yourname\.yourgame/);
     expect(bundleIdProblem('com.jane.2fast')).toMatch(/com\.yourname\.yourgame/);
     expect(bundleIdProblem('com.int.game')).toContain('"int"');
+    // Apple reserves its own prefix.
+    for (const id of ['com.apple.moon', 'Com.Apple.Moon']) expect(bundleIdProblem(id), id).toContain('Apple');
+    expect(bundleIdProblem('com.applesauce.moon')).toBeNull();
+    expect(checkBundleId(cfg('com.apple.moon'))).toMatchObject({ code: 'BUNDLE_ID_INVALID' });
   });
 
   it('derives a build number from the version', () => {

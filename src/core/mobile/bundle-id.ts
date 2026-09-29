@@ -11,6 +11,7 @@ const JAVA_KEYWORDS = new Set(
 /** Why iOS or Android can't use this bundle ID, or null when both can. */
 export function bundleIdProblem(id: string): string | null {
   if (!BUNDLE_ID_PATTERN.test(id)) return `"${id}" must look like com.yourname.yourgame: dot-separated parts of letters and digits, each starting with a letter.`;
+  if (/^com\.apple\./i.test(id)) return `"${id}" starts with com.apple., which Apple keeps for its own apps.`;
   const keyword = id.split('.').find((part) => JAVA_KEYWORDS.has(part));
   return keyword ? `"${id}" contains "${keyword}", a Java keyword, which Android can't use in a package name.` : null;
 }

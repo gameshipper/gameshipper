@@ -7,6 +7,7 @@ import { findBuilds } from '../core/check/review.js';
 import { DEFAULT_CHECK_SECONDS, hostTarget, runCheck } from '../core/check/run.js';
 import { detectProject } from '../core/config/detect.js';
 import { initErrors, initProject, type InitAnswers } from '../core/config/init.js';
+import { bundleIdProblem } from '../core/mobile/bundle-id.js';
 import { loadConfig } from '../core/config/load.js';
 import { TARGETS, type Config, type Target } from '../core/config/schema.js';
 import { createCtx, type Ctx } from '../core/context.js';
@@ -180,7 +181,26 @@ function emit(io: CliIO, run: RunState, { result, human }: Outcome): number {
   return exitCodeFor(result);
 }
 
+/** How many times init asks for a bundle ID the stores would reject before giving up (BUNDLE_ID_INVALID). */
+const BUNDLE_ID_TRIES = 3;
+const BUNDLE_ID_QUESTION = 'Bundle ID for the iOS and Android projects, like com.yourname.yourgame ("none" for desktop only)';
+
+/** Asks for a bundle ID, and again (saying why) while the answer is one the stores reject. */
+async function askBundleId(prompt: Prompter): Promise<string> {
+  let answer = await prompt.ask(BUNDLE_ID_QUESTION, 'none');
+  for (let tries = 1; tries < BUNDLE_ID_TRIES; tries++) {
+    const problem = answer === 'none' ? null : bundleIdProblem(answer);
+    if (!problem) break;
+    answer = await prompt.ask(`${problem} ${BUNDLE_ID_QUESTION}`, 'none');
+  }
+  return answer;
+}
+
 async function initCommand(projectDir: string, values: Values, io: CliIO, run: RunState): Promise<Outcome> {
+  const bundleIdFlag = str(values['bundle-id']);
+  if (bundleIdFlag !== undefined && !bundleIdFlag.trim()) {
+    return usage('--bundle-id needs a bundle ID.', 'Pass one like --bundle-id com.yourname.yourgame, or --bundle-id none for desktop only.');
+  }
   const detected = detectProject(projectDir);
   const iconFlag = str(values.icon);
   const flags: InitAnswers = {
@@ -217,10 +237,7 @@ async function initCommand(projectDir: string, values: Values, io: CliIO, run: R
     flags.logo !== undefined || !interactive
       ? undefined
       : await prompt.ask('Logo for the store images, PNG with a transparent background ("none" to skip)', detected.logo ?? 'none');
-  const bundleIdAnswer =
-    flags.bundleId !== undefined || !interactive
-      ? undefined
-      : await prompt.ask('Bundle ID for the iOS and Android projects, like com.yourname.yourgame ("none" for desktop only)', 'none');
+  const bundleIdAnswer = flags.bundleId !== undefined || !interactive ? undefined : await askBundleId(prompt);
   const result = initProject(projectDir, {
     ...flags,
     name,

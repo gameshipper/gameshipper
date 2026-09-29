@@ -56,9 +56,10 @@ export function buildSummary(r: Result<BuildData>, projectDir: string): string[]
   if (r.data.targets.some((t) => t.status === 'built')) {
     lines.push('', 'Next: `npx gameshipper check` tests the build against Steam and Steam Deck requirements.');
   }
-  if (r.data.targets.some((t) => t.mobile)) {
-    lines.push('Mobile: open out/ios/App/App.xcodeproj in Xcode, or out/android in Android Studio, to sign and upload.');
-  }
+  const opens = r.data.targets.flatMap((t) =>
+    !t.mobile ? [] : [t.target === 'ios' ? `${rel(projectDir, t.mobile.project)} in Xcode` : `${rel(projectDir, t.mobile.project)} in Android Studio`],
+  );
+  if (opens.length) lines.push(`Mobile: open ${opens.join(', or ')}${opens.length > 1 ? ',' : ''} to sign and upload.`);
   return lines;
 }
 

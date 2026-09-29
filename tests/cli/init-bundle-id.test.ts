@@ -57,6 +57,38 @@ describe('init --bundle-id', () => {
     }
   });
 
+  it('USAGE (exit 2) for an empty --bundle-id', async () => {
+    for (const argv of [['--bundle-id', ''], ['--bundle-id=']]) {
+      const dir = game();
+      const r = await run(['init', '--json', '--dir', dir, ...argv]);
+      expect([r.code, r.json().errors[0].code], argv.join(' ')).toEqual([2, 'USAGE']);
+      expect(r.json().errors[0].message).toContain('--bundle-id');
+      expect(fs.existsSync(path.join(dir, 'gameshipper.json'))).toBe(false);
+    }
+  });
+
+  it('asks again when a person types an ID the stores reject, saying why', async () => {
+    const dir = game();
+    const answers = ['my-game', 'com.apple.moon', 'com.jane.moon'];
+    const ask = vi.fn(async (q: string, fallback: string) => (q.includes('Bundle ID') ? answers.shift()! : fallback));
+    const r = await run(['init', '--dir', dir], true, { ask });
+    expect(r.code).toBe(0);
+    const questions = ask.mock.calls.map(([q]) => q).filter((q) => q.includes('Bundle ID'));
+    expect(questions).toHaveLength(3);
+    expect(questions[1]).toMatch(/^"my-game" must look like com\.yourname\.yourgame.*Bundle ID for the iOS and Android projects/);
+    expect(questions[2]).toContain('Apple');
+    expect(JSON.parse(readText(dir, 'gameshipper.json')).mobile.bundleId).toBe('com.jane.moon');
+  });
+
+  it('stops asking after 3 rejected answers, with BUNDLE_ID_INVALID', async () => {
+    const dir = game();
+    const ask = vi.fn(async (q: string, fallback: string) => (q.includes('Bundle ID') ? 'my-game' : fallback));
+    const r = await run(['init', '--dir', dir], true, { ask });
+    expect(r.code).toBe(2);
+    expect(r.out).toContain('BUNDLE_ID_INVALID');
+    expect(ask.mock.calls.filter(([q]) => q.includes('Bundle ID'))).toHaveLength(3);
+  });
+
   it('a person at a terminal is asked, and the summary says what it means', async () => {
     const dir = game();
     const ask = vi.fn(async (q: string, fallback: string) => (q.startsWith('Bundle ID') ? 'com.jane.moon' : fallback));

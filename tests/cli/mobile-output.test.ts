@@ -32,4 +32,14 @@ describe('mobile projects in the CLI', () => {
       'Mobile: open out/ios/App/App.xcodeproj in Xcode, or out/android in Android Studio, to sign and upload.',
     ]);
   });
+
+  it('the Mobile line names only the projects that were built', () => {
+    const ios = { target: 'ios' as const, status: 'built' as const, mobile: { target: 'ios' as const, dir: '/p/out/ios', project: '/p/out/ios/App/App.xcodeproj' }, errors: [], warnings: [] };
+    const android = { target: 'android' as const, status: 'built' as const, mobile: { target: 'android' as const, dir: '/p/out/android', project: '/p/out/android' }, errors: [], warnings: [] };
+    const failed = (target: 'ios' | 'android') => ({ target, status: 'failed' as const, errors: [gsError('MOBILE_GENERATE_FAILED', 'x')], warnings: [] });
+    const mobileLine = (targets: object[]) => buildSummary(fail(gsError('MOBILE_GENERATE_FAILED', 'x'), [], { outDir: '/p/out', targets } as never), '/p').find((l) => l.startsWith('Mobile:'));
+    expect(mobileLine([ios, failed('android')])).toBe('Mobile: open out/ios/App/App.xcodeproj in Xcode to sign and upload.');
+    expect(mobileLine([failed('ios'), android])).toBe('Mobile: open out/android in Android Studio to sign and upload.');
+    expect(mobileLine([failed('ios'), failed('android')])).toBeUndefined();
+  });
 });
