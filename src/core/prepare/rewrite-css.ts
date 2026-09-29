@@ -1,5 +1,7 @@
-const URL_RE = /url\(\s*(['"]?)([^'")]+?)\1\s*\)/dgi;
-const IMPORT_RE = /@import\s+(['"])([^'"]+)\1/dgi;
+/** url("…"), url('…') or url(…); the URL is in group 1, 2 or 3. */
+const URL_RE = /url\(\s*(?:"([^"]*)"|'([^']*)'|([^\s'"()]*))\s*\)/dgi;
+/** @import "…" or @import '…'; the URL is in group 1 or 2. (@import url(…) is matched by URL_RE.) */
+const IMPORT_RE = /@import\s+(?:"([^"]*)"|'([^']*)')/dgi;
 /** Comments (possibly unterminated) and strings, so a "/*" inside a string isn't taken for a comment. */
 const COMMENT_OR_STRING = /\/\*[\s\S]*?(?:\*\/|$)|"(?:[^"\\\n]|\\[\s\S])*"?|'(?:[^'\\\n]|\\[\s\S])*'?/g;
 
@@ -21,9 +23,11 @@ function cssRefs(css: string): CssRef[] {
   const refs: CssRef[] = [];
   for (const re of [IMPORT_RE, URL_RE]) {
     for (const m of masked.matchAll(re)) {
-      const span = m.indices?.[2];
-      if (!span || isLocalOnly(m[2])) continue;
-      refs.push({ url: m[2], start: span[0], end: span[1] });
+      const group = m.findIndex((g, i) => i > 0 && g !== undefined);
+      const span = m.indices?.[group];
+      const url = m[group];
+      if (group === -1 || !span || !url || isLocalOnly(url)) continue;
+      refs.push({ url, start: span[0], end: span[1] });
     }
   }
   return refs.sort((a, b) => a.start - b.start);

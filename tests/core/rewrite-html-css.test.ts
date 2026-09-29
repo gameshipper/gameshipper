@@ -187,6 +187,19 @@ describe('css', () => {
     expect(rewriteCss(css, (u) => `/v/${u.split('/').pop()}`)).toBe(`.a { background: URL( "/v/a.png" ) } .b { mask: Url(/v/b.svg) }`);
   });
 
+  it('reads quoted URLs that contain parentheses or the other quote', () => {
+    const css = `.a { background: url("https://x/a(1).png") } .b { background: url('https://x/it"s.png') }`;
+    expect(findCssUrls(css)).toEqual(['https://x/a(1).png', 'https://x/it"s.png']);
+    const out = rewriteCss(css, (u) => (u === 'https://x/a(1).png' ? '/v/a1.png' : null));
+    expect(out).toBe(css.replace('https://x/a(1).png', '/v/a1.png'));
+  });
+
+  it('does not find url() inside a quoted data: URI', () => {
+    const css = `.a { background: url("data:image/svg+xml,%3Csvg%3E%3Crect fill='url(%23g)'/%3E%3C/svg%3E") }
+.b { background: url(https://x/b.png) }`;
+    expect(findCssUrls(css)).toEqual(['https://x/b.png']);
+  });
+
   it('skips data: URLs and fragment-only references', () => {
     const css = `.a { fill: url(#grad); background: url("DATA:image/png;base64,AA=="), url(https://x/a.png) }`;
     expect(findCssUrls(css)).toEqual(['https://x/a.png']);
