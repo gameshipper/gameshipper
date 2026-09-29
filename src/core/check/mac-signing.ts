@@ -1,4 +1,6 @@
-import { execFile } from 'node:child_process';
+import { runTool, type ToolRunner } from '../proc.js';
+
+export type { ToolRunner };
 
 export interface MacSigning {
   kind: 'developer-id' | 'adhoc' | 'unsigned' | 'other';
@@ -11,17 +13,6 @@ export interface MacSigning {
   /** Tool output for the report when something is wrong. */
   detail: string;
 }
-
-export type ToolRunner = (command: string, args: string[]) => Promise<{ code: number; output: string }>;
-
-/** Runs a tool and returns its exit code and combined output; never throws. */
-export const runTool: ToolRunner = (command, args) =>
-  new Promise((resolve) => {
-    execFile(command, args, { encoding: 'utf8', timeout: 60_000 }, (error, stdout, stderr) => {
-      const code = error ? (typeof error.code === 'number' ? error.code : 1) : 0;
-      resolve({ code, output: `${stdout}${stderr}`.trim() });
-    });
-  });
 
 /** Reads `codesign -dv --verbose=2` output (codesign prints it to stderr). */
 export function parseCodesignDisplay(output: string): Pick<MacSigning, 'kind' | 'authority'> {

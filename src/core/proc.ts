@@ -1,4 +1,4 @@
-import { spawnSync, type ChildProcess } from 'node:child_process';
+import { execFile, spawnSync, type ChildProcess } from 'node:child_process';
 import * as os from 'node:os';
 
 /** Signals that stop Gameshipper; child processes it started are stopped with it. */
@@ -8,6 +8,17 @@ const OUTPUT_TAIL_LINES = 20;
 const OUTPUT_TAIL_MAX_CHARS = 4096;
 /** Enough of a child's output to hold its last lines without buffering a whole log. */
 export const OUTPUT_BUFFER_CHARS = 64 * 1024;
+
+export type ToolRunner = (command: string, args: string[]) => Promise<{ code: number; output: string }>;
+
+/** Runs a short-lived tool (codesign, stapler) and returns its exit code and combined output; never throws. */
+export const runTool: ToolRunner = (command, args) =>
+  new Promise((resolve) => {
+    execFile(command, args, { encoding: 'utf8', timeout: 60_000 }, (error, stdout, stderr) => {
+      const code = error ? (typeof error.code === 'number' ? error.code : 1) : 0;
+      resolve({ code, output: `${stdout}${stderr}`.trim() });
+    });
+  });
 
 /** The last lines of a command's output, short enough for an error message. */
 export function outputTail(output: string): string {

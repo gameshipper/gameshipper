@@ -1,7 +1,7 @@
 import * as fs from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import type { NotaryAuth } from '../../../src/core/sign/credentials.js';
-import { notarizeFailure, notarizeMacApp, notaryCredentials } from '../../../src/core/sign/notarize.js';
+import { notarizeFailure, notarizeMacApp, notaryCredentials, STAPLE_ATTEMPTS } from '../../../src/core/sign/notarize.js';
 import { signMacApp } from '../../../src/core/sign/sign.js';
 import { testCtx } from '../../helpers/ctx.js';
 import { installFakeXcrun, withEnv } from '../../helpers/fake-xcrun.js';
@@ -38,6 +38,26 @@ describe('notarizeFailure', () => {
     for (const text of ['AuthKey_K1ABCDEF', 'K1ABCDEF', '69a6de7e', 'jane', 'ci.keychain-db']) {
       expect(JSON.stringify([f.error, k.error]), text).not.toContain(text);
     }
+  });
+
+  it("keeps notarytool's own reason when it answers in plain text (a login problem, not Apple's verdict)", () => {
+    const out = 'Conducting pre-submission checks for G.zip and initiating connection to the Apple notary service...\nError: HTTP status code: 401. Unable to authenticate. Invalid Session.\n\n';
+    const f = notarizeFailure(`Failed to notarize via notarytool.  Failed with unexpected result: \n\n${out}`, '/p/l.log', '/o/G.app', profile);
+    expect(f.error.code).toBe('NOTARIZE_FAILED');
+    expect(f.error.message).toContain('Error: HTTP status code: 401. Unable to authenticate. Invalid Session.');
+    expect(f.error.message).not.toContain('Conducting');
+    expect(f.error.fix).toContain('xcrun notarytool history --keychain-profile "$GAMESHIPPER_NOTARY_PROFILE"');
+    expect(f.error.fix).toContain('/p/l.log');
+    expect(f.error.fix).not.toContain('unsigned');
+  });
+
+  it("says when the app couldn't be zipped for upload", () => {
+    const f = notarizeFailure('Failed to zip application, exited with code: 1\n\nditto: /o/G.zip: No space left on device\n', '/p/l.log', '/o/G.app', profile);
+    expect(f.error.code).toBe('NOTARIZE_FAILED');
+    expect(f.error.message).toContain("Couldn't zip the Mac app");
+    expect(f.error.message).toContain('No space left on device');
+    expect(f.error.fix).not.toContain('unsigned');
+    expect(f.error.fix).not.toContain('notarytool');
   });
 
   it('recognises a missing notarytool, stapling and signature problems', () => {
@@ -82,11 +102,40 @@ describe.runIf(process.platform === 'darwin')('notarizeMacApp against a fake not
     expect(fs.readFileSync(logPath, 'utf8')).toContain('secure timestamp');
   });
 
-  it('STAPLE_FAILED when the ticket cannot be attached', async () => {
+  const staples = (logFile: string) => fs.readFileSync(logFile, 'utf8').split('\n').filter((l) => l.startsWith('stapler staple'));
+
+  it('STAPLE_FAILED after 3 attempts, 5 seconds apart', async () => {
     const { dir, app, fake } = await signedApp();
+    const waits: number[] = [];
+    const wait = async (ms: number) => void waits.push(ms);
     const run = withEnv({ PATH: `${fake.binDir}:${process.env.PATH}`, FAKE_XCRUN_LOG: fake.logFile, FAKE_NOTARY_RESULT: 'Accepted', FAKE_STAPLE_FAIL: '1' }, () =>
+      notarizeMacApp(testCtx(dir), app, profile, { wait }),
+    );
+    await expect(run).rejects.toMatchObject({ error: { code: 'STAPLE_FAILED', message: expect.stringContaining('3 tries') } });
+    expect(staples(fake.logFile)).toHaveLength(STAPLE_ATTEMPTS);
+    expect(STAPLE_ATTEMPTS).toBe(3);
+    expect(waits).toEqual([5000, 5000]);
+  }, 30_000);
+
+  it('a staple that fails at first and then works counts as notarized', async () => {
+    const { dir, app, fake } = await signedApp();
+    await withEnv({ PATH: `${fake.binDir}:${process.env.PATH}`, FAKE_XCRUN_LOG: fake.logFile, FAKE_NOTARY_RESULT: 'Accepted', FAKE_STAPLE_FAILURES: '2' }, () =>
+      notarizeMacApp(testCtx(dir), app, profile, { wait: async () => {} }),
+    );
+    expect(staples(fake.logFile)).toHaveLength(3);
+  }, 30_000);
+
+  it("NOTARIZE_FAILED with notarytool's plain-text reason when the login fails", async () => {
+    const { dir, app, fake } = await signedApp();
+    const run = withEnv({ PATH: `${fake.binDir}:${process.env.PATH}`, FAKE_XCRUN_LOG: fake.logFile, FAKE_NOTARY_RESULT: 'AuthError' }, () =>
       notarizeMacApp(testCtx(dir), app, profile),
     );
-    await expect(run).rejects.toMatchObject({ error: { code: 'STAPLE_FAILED' } });
+    const err = await run.then(
+      () => null,
+      (e: { error: { code: string; message: string; fix: string } }) => e.error,
+    );
+    expect(err).toMatchObject({ code: 'NOTARIZE_FAILED', message: expect.stringContaining('401. Unable to authenticate') });
+    expect(err!.fix).toContain('notarytool history');
+    expect(staples(fake.logFile)).toEqual([]);
   }, 30_000);
 });
