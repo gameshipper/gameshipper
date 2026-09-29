@@ -66,10 +66,32 @@ describe('initProject', () => {
     expect(r.ok).toBe(true);
     const written = JSON.parse(readText(dir, 'gameshipper.json'));
     expect(written).toMatchObject({ name: 'Moon Game', version: '1.0.0', steam: { appId: 1234567 }, game: { entry: 'index.html' } });
-    expect(readText(dir, '.gitignore')).toContain('.gameshipper/');
-    expect(readText(dir, '.gitignore')).toContain('out/');
+    expect(readText(dir, '.gitignore')).toBe('node_modules/\n# Gameshipper\n.gameshipper/\nout/\n.sdk/\n');
     expect(r.data!.gitignoreUpdated).toBe(true);
     expect(r.warnings).toEqual([]);
+  });
+
+  it('creates a .gitignore in a git repository that has none', () => {
+    const dir = makeTmpDir();
+    writeFiles(dir, { 'index.html': '', '.git/HEAD': 'ref: refs/heads/main\n' });
+    const r = initProject(dir);
+    expect(r.data!.gitignoreUpdated).toBe(true);
+    expect(readText(dir, '.gitignore')).toBe('# Gameshipper\n.gameshipper/\nout/\n.sdk/\n');
+  });
+
+  it('leaves a folder that is not a git repository without a .gitignore', () => {
+    const dir = makeTmpDir();
+    writeFiles(dir, { 'index.html': '' });
+    expect(initProject(dir).data!.gitignoreUpdated).toBe(false);
+    expect(fs.existsSync(path.join(dir, '.gitignore'))).toBe(false);
+  });
+
+  it('adds only the lines a .gitignore is missing, however they are written', () => {
+    const dir = makeTmpDir();
+    writeFiles(dir, { 'index.html': '', '.gitignore': '/out\r\n.gameshipper/' });
+    expect(initProject(dir).data!.gitignoreUpdated).toBe(true);
+    expect(readText(dir, '.gitignore')).toBe('/out\r\n.gameshipper/\n# Gameshipper\n.sdk/\n');
+    expect(initProject(dir, { force: true }).data!.gitignoreUpdated).toBe(false);
   });
 
   it('warns when still using the test app', () => {

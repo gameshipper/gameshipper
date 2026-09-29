@@ -18,7 +18,7 @@ Needs Node.js 22.12 or newer. The first build for each OS downloads Electron (12
 
 ### `init`
 
-Detects the game and writes `gameshipper.json`. It finds `index.html` (or the first `.html` file) and an icon at `icon.png`, `art/icon.png`, `assets/icon.png` or `public/icon.png`. Steam needs a square PNG of at least 1024x1024, so an icon that isn't one is left out with an `ICON_UNSUITABLE` warning. If `package.json` has a `build` script and a bundler (Vite, Parcel, webpack, esbuild, Rollup), Gameshipper runs `npm run build` before every `play` and `build` and packages `dist/`. It also adds `.gameshipper/` and `out/` to an existing `.gitignore`.
+Detects the game and writes `gameshipper.json`. It finds `index.html` (or the first `.html` file) and an icon at `icon.png`, `art/icon.png`, `assets/icon.png` or `public/icon.png`. Steam needs a square PNG of at least 1024x1024, so an icon that isn't one is left out with an `ICON_UNSUITABLE` warning. If `package.json` has a `build` script and a bundler (Vite, Parcel, webpack, esbuild, Rollup), Gameshipper runs `npm run build` before every `play` and `build` and packages `dist/`. It also adds `.gameshipper/`, `out/` and `.sdk/` to `.gitignore`, creating one if the folder is a git repository without it.
 
 | Flag | |
 |---|---|

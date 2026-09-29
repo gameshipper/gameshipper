@@ -24,14 +24,23 @@ export interface InitData {
   gitignoreUpdated: boolean;
 }
 
-const IGNORE_LINES = ['.gameshipper/', 'out/'];
+/** What init keeps out of git: run files, builds, and the Steamworks SDK folder. */
+const IGNORE_LINES = ['.gameshipper/', 'out/', '.sdk/'];
 
+/** `/out`, `out` and `/out/` ignore the same folder as `out/`. */
+const ignoreKey = (line: string) => line.trim().replace(/^\//, '').replace(/\/$/, '');
+
+/**
+ * Adds the IGNORE_LINES .gitignore is missing. In a git repository without a .gitignore, creates one.
+ * Returns true when it changed or created the file.
+ */
 function updateGitignore(dir: string): boolean {
   const file = path.join(dir, '.gitignore');
-  if (!fs.existsSync(file)) return false;
-  const current = fs.readFileSync(file, 'utf8');
-  const lines = current.split(/\r?\n/);
-  const missing = IGNORE_LINES.filter((l) => !lines.includes(l));
+  const exists = fs.existsSync(file);
+  if (!exists && !fs.existsSync(path.join(dir, '.git'))) return false;
+  const current = exists ? fs.readFileSync(file, 'utf8') : '';
+  const present = new Set(current.split(/\r?\n/).map(ignoreKey));
+  const missing = IGNORE_LINES.filter((l) => !present.has(ignoreKey(l)));
   if (!missing.length) return false;
   const prefix = current.endsWith('\n') || current === '' ? '' : '\n';
   fs.appendFileSync(file, `${prefix}# Gameshipper\n${missing.join('\n')}\n`);
