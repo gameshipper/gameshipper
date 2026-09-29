@@ -6,9 +6,21 @@ import { MIN_SCREENSHOTS, screenshotDirFor, STORE_IMAGES, storeDirFor } from '..
 import type { Config } from '../config/schema.js';
 import { capDetails, type CheckResult } from './types.js';
 
+const mtimeOf = (file: string): number | null => {
+  try {
+    return fs.statSync(file).mtimeMs;
+  } catch {
+    return null;
+  }
+};
+
 export async function storeImagesCheck(projectDir: string, config: Config): Promise<CheckResult> {
   const base = { id: 'store.images', group: 'store', title: 'All eight store images at exact sizes' } as const;
   const dir = storeDirFor(projectDir);
+  const fix =
+    config.keyArt && config.logo
+      ? 'Run `npx gameshipper build` to make them again.'
+      : 'Set "keyArt" (3840x2160 PNG or JPEG) and "logo" (transparent PNG) in gameshipper.json, then run `npx gameshipper build`.';
   const problems: string[] = [];
   for (const spec of STORE_IMAGES) {
     const info = await imageInfo(path.join(dir, spec.file));
@@ -17,18 +29,41 @@ export async function storeImagesCheck(projectDir: string, config: Config): Prom
       problems.push(`${spec.file} (${spec.label}): ${info.width}x${info.height}, needs ${spec.width}x${spec.height}`);
     }
   }
-  if (!problems.length) return { ...base, status: 'pass', message: `All ${STORE_IMAGES.length} images are in out/store at Steam's sizes.` };
-  return {
-    ...base,
-    status: 'fail',
-    code: 'CHECK_STORE_IMAGES',
-    message: `${problems.length} of ${STORE_IMAGES.length} store images are missing or the wrong size.`,
-    fix:
-      config.keyArt && config.logo
-        ? 'Run `npx gameshipper build` to make them again.'
-        : 'Set "keyArt" (3840x2160 PNG or JPEG) and "logo" (transparent PNG) in gameshipper.json, then run `npx gameshipper build`.',
-    details: problems,
-  };
+  if (problems.length) {
+    return {
+      ...base,
+      status: 'fail',
+      code: 'CHECK_STORE_IMAGES',
+      message: `${problems.length} of ${STORE_IMAGES.length} store images are missing or the wrong size.`,
+      fix,
+      details: problems,
+    };
+  }
+  // Made from the key art and logo: one changed since means the images show the old art.
+  const art = [config.keyArt, config.logo].flatMap((rel) => {
+    const mtime = rel ? mtimeOf(path.join(projectDir, rel)) : null;
+    return rel && mtime !== null ? [{ rel, mtime }] : [];
+  });
+  const stale: string[] = [];
+  const newer = new Set<string>();
+  for (const spec of STORE_IMAGES) {
+    const made = mtimeOf(path.join(dir, spec.file)) ?? 0;
+    const changed = art.filter((a) => a.mtime > made).map((a) => a.rel);
+    if (!changed.length) continue;
+    for (const rel of changed) newer.add(rel);
+    stale.push(`${spec.file} (${spec.label}): older than ${changed.join(' and ')}`);
+  }
+  if (stale.length) {
+    return {
+      ...base,
+      status: 'fail',
+      code: 'CHECK_STORE_IMAGES',
+      message: `${stale.length} of ${STORE_IMAGES.length} store images are older than ${[...newer].join(' and ')}: rebuild to refresh the store images.`,
+      fix,
+      details: stale,
+    };
+  }
+  return { ...base, status: 'pass', message: `All ${STORE_IMAGES.length} images are in out/store at Steam's sizes.` };
 }
 
 /** Steam takes 16:9 screenshots of 1920x1080 or larger; everything Gameshipper saves is exactly 1920x1080. */

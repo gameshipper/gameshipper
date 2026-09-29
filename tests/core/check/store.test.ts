@@ -1,3 +1,5 @@
+import * as fs from 'node:fs';
+import * as path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { STORE_IMAGES } from '../../../src/core/assets/sizes.js';
 import { aiDisclosureCheck, screenshotsCheck, storeImagesCheck, trailerCheck } from '../../../src/core/check/store.js';
@@ -23,6 +25,29 @@ describe('storeImagesCheck', () => {
     expect(c.details).toEqual(['header_capsule.png (Header capsule): missing', 'small_capsule.png (Small capsule): 460x174, needs 462x174']);
     expect(c.fix).toContain('Set "keyArt"');
     expect((await storeImagesCheck(dir, config({ keyArt: 'k.png', logo: 'l.png' }))).fix).toBe('Run `npx gameshipper build` to make them again.');
+  });
+
+  it('fails when the key art or logo changed after the images were made', async () => {
+    const dir = makeTmpDir();
+    writeFiles(dir, {
+      ...Object.fromEntries(STORE_IMAGES.map((s) => [`out/store/${s.file}`, makeSolidPng(s.width, s.height)])),
+      'art/key.png': 'k',
+      'art/logo.png': 'l',
+    });
+    const at = (rel: string, seconds: number) => fs.utimesSync(path.join(dir, rel), seconds, seconds);
+    const now = Math.floor(Date.now() / 1000);
+    for (const s of STORE_IMAGES) at(`out/store/${s.file}`, now - 60);
+    at('art/key.png', now - 120);
+    at('art/logo.png', now - 120);
+    const art = config({ keyArt: 'art/key.png', logo: 'art/logo.png' });
+    expect((await storeImagesCheck(dir, art)).status).toBe('pass');
+
+    at('art/logo.png', now);
+    at('out/store/library_hero.png', now + 10);
+    const c = await storeImagesCheck(dir, art);
+    expect(c).toMatchObject({ status: 'fail', code: 'CHECK_STORE_IMAGES', fix: 'Run `npx gameshipper build` to make them again.' });
+    expect(c.message).toBe('7 of 8 store images are older than art/logo.png: rebuild to refresh the store images.');
+    expect(c.details).toEqual(STORE_IMAGES.filter((s) => s.file !== 'library_hero.png').map((s) => `${s.file} (${s.label}): older than art/logo.png`));
   });
 });
 
