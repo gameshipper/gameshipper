@@ -49,7 +49,13 @@ async function startRtcServers(): Promise<{ stop: () => Promise<{ listening: boo
   };
 }
 
-type Check = { id: string; status: string; code?: string; details?: string[] };
+type Check = { id: string; status: string; code?: string; message?: string; details?: string[] };
+
+/** Builds and checks only this computer's target, which is all check launches. */
+function buildOnlyHere(dir: string): void {
+  const configFile = path.join(dir, 'gameshipper.json');
+  fs.writeFileSync(configFile, JSON.stringify({ ...JSON.parse(fs.readFileSync(configFile, 'utf8')), targets: [HOST_TARGET] }, null, 2));
+}
 const statuses = (checks: Check[]) => Object.fromEntries(checks.map((c) => [c.id, c.status]));
 /** Without Apple credentials the Mac build is only ad-hoc signed, which macOS blocks for players (Plan 5 signs it). */
 const onMac = HOST_TARGET === 'mac';
@@ -118,8 +124,7 @@ describe('check on this computer', () => {
   it('a broken game: internet at runtime, a HUD off the Deck screen, no screenshots', async () => {
     const dir = await game('check-broken');
     expect(cli(['init', '--yes', '--name', 'Broken Cube'], dir).code).toBe(0);
-    const configFile = path.join(dir, 'gameshipper.json');
-    fs.writeFileSync(configFile, JSON.stringify({ ...JSON.parse(fs.readFileSync(configFile, 'utf8')), targets: [HOST_TARGET] }, null, 2));
+    buildOnlyHere(dir);
 
     const build = cli(['build'], dir);
     expect(build.result.errors).toEqual([]);
@@ -141,6 +146,24 @@ describe('check on this computer', () => {
     expect(check.result.errors.map((e: { code: string }) => e.code)).toEqual(
       onMac ? ['CHECK_OFFLINE', 'CHECK_MAC_NOT_NOTARIZED', 'CHECK_SCREENSHOTS'] : ['CHECK_OFFLINE', 'CHECK_SCREENSHOTS'],
     );
+
+    fs.rmSync(dir, { recursive: true, force: true, maxRetries: 3 });
+  });
+
+  it("a game whose HUD text runs off the Deck screen, though the HUD's box fits", async () => {
+    const dir = await game('check-overflow');
+    expect(cli(['init', '--yes', '--name', 'Overflow Orbs'], dir).code).toBe(0);
+    buildOnlyHere(dir);
+    expect(cli(['build'], dir).result.errors).toEqual([]);
+
+    const check = cli(['check', '--seconds', '5'], dir);
+    const byId = Object.fromEntries((check.result.data.checks as Check[]).map((c) => [c.id, c]));
+    expect(byId['deck.layout']).toMatchObject({ status: 'warn', code: 'CHECK_DECK_LAYOUT', message: 'At 1280x800, text in 1 element runs past the screen edge.' });
+    // Where the text ends depends on the fonts: past 1280 is what counts.
+    const [detail] = byId['deck.layout'].details!;
+    const [, right] = /^div#hud "Score: 000000 · Lives: 3 · Level: 1 · Best: 999999": its text spans x 940\.\.(\d+), y 20\.\.\d+$/.exec(detail) ?? [];
+    expect(Number(right)).toBeGreaterThan(1300);
+    expect([byId['launch.frame'].status, byId['offline.requests'].status, byId['deck.gamepad'].status]).toEqual(['pass', 'pass', 'pass']);
 
     fs.rmSync(dir, { recursive: true, force: true, maxRetries: 3 });
   });

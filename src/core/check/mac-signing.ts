@@ -40,7 +40,9 @@ export async function inspectMacSigning(appPath: string, run: ToolRunner = runTo
   const tools = await run('xcode-select', ['-p']);
   const staple = tools.code === 0 ? await run('xcrun', ['stapler', 'validate', appPath]) : null;
   const { kind, authority } = parseCodesignDisplay(display.output);
-  const problems = [verify.code === 0 ? '' : verify.output, staple && staple.code !== 0 ? staple.output : ''];
+  // stapler starts with a "Processing: <path>" line that says nothing about the problem.
+  const stapleOutput = staple ? staple.output.split('\n').filter((l) => !/^Processing:/.test(l)).join('\n').trim() : '';
+  const problems = [verify.code === 0 ? '' : verify.output, staple && staple.code !== 0 ? stapleOutput : ''];
   return {
     kind,
     authority,

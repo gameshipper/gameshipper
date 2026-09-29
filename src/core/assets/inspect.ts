@@ -18,10 +18,68 @@ export interface FrameInfo extends Size {
   blank: boolean;
   /** Average colour as #rrggbb. */
   color: string;
+  /** Mostly one colour and not clearly varied (isPlain): perhaps a loading screen. */
+  plain: boolean;
+  /** The frame's most common colour and its share (0-1) of the frame (see colourMix). */
+  main: { share: number; color: string };
 }
 
 /** Largest per-channel spread (0-255) that still counts as a blank, single-colour frame. */
 export const BLANK_SPREAD = 8;
+
+/** A frame whose most common colour covers more than this share of it is mostly one colour. */
+export const MOSTLY_ONE_COLOUR = 0.95;
+/** Colours are grouped in steps of this many levels per channel, so antialiasing and faint shading join their colour. */
+const COLOUR_STEP = 32;
+/** A colour group counts as one of the frame's colours when it covers more than this share of it. */
+const COLOUR_MIN_SHARE = 0.001;
+/**
+ * A mostly one-colour frame with this many other colours is still clearly varied: a small, detailed scene (a
+ * spinning cube's faces on black), not a loading screen's background with its text or bar.
+ */
+const VARIED_COLOURS = 2;
+
+export interface ColourMix {
+  /** Share (0-1) of the frame in its most common colour group. */
+  share: number;
+  /** That group's average colour as #rrggbb. */
+  color: string;
+  /** How many other colour groups cover more than COLOUR_MIN_SHARE of the frame. */
+  others: number;
+}
+
+const hex = (values: number[]): string => `#${values.map((v) => Math.round(v).toString(16).padStart(2, '0')).join('')}`;
+
+/** How a frame's pixels (raw, `channels` bytes each; the first three are RGB) spread over colour groups. */
+export function colourMix(pixels: Uint8Array, channels: number): ColourMix {
+  const levels = 256 / COLOUR_STEP;
+  const counts = new Uint32Array(levels ** 3);
+  const sums = new Float64Array(levels ** 3 * 3);
+  const total = Math.floor(pixels.length / channels);
+  for (let i = 0; i < total * channels; i += channels) {
+    const r = pixels[i];
+    const g = pixels[i + 1];
+    const b = pixels[i + 2];
+    const group = (Math.floor(r / COLOUR_STEP) * levels + Math.floor(g / COLOUR_STEP)) * levels + Math.floor(b / COLOUR_STEP);
+    counts[group]++;
+    sums[group * 3] += r;
+    sums[group * 3 + 1] += g;
+    sums[group * 3 + 2] += b;
+  }
+  let main = 0;
+  for (let group = 1; group < counts.length; group++) if (counts[group] > counts[main]) main = group;
+  let others = 0;
+  for (let group = 0; group < counts.length; group++) if (group !== main && counts[group] > total * COLOUR_MIN_SHARE) others++;
+  const n = counts[main] || 1;
+  return {
+    share: total ? counts[main] / total : 0,
+    color: hex([sums[main * 3] / n, sums[main * 3 + 1] / n, sums[main * 3 + 2] / n]),
+    others,
+  };
+}
+
+/** Mostly one colour (over MOSTLY_ONE_COLOUR) and not clearly varied. */
+export const isPlain = (mix: ColourMix): boolean => mix.share > MOSTLY_ONE_COLOUR && mix.others < VARIED_COLOURS;
 
 /** Size (after EXIF rotation) and format of an image, or null if sharp can't read it. */
 export async function imageInfo(file: string): Promise<ImageInfo | null> {
@@ -86,15 +144,22 @@ export async function inspectLogo(file: string): Promise<LogoInfo> {
   return { ...info, trimmed: { width: trimmed.width, height: trimmed.height } };
 }
 
-/** Is a captured frame blank? `check` asks this of the game's last frame. */
+/** Is a captured frame blank, or mostly one colour? `check` asks this of the game's last frame. */
 export async function frameInfo(file: string): Promise<FrameInfo> {
   const sharp = await loadSharp();
-  const [meta, stats] = await Promise.all([sharp(file).metadata(), sharp(file).stats()]);
+  const [meta, stats, raw] = await Promise.all([
+    sharp(file).metadata(),
+    sharp(file).stats(),
+    sharp(file).removeAlpha().toColourspace('srgb').raw().toBuffer({ resolveWithObject: true }),
+  ]);
   const rgb = stats.channels.slice(0, 3);
+  const mix = colourMix(raw.data, raw.info.channels);
   return {
     width: meta.width,
     height: meta.height,
     blank: rgb.every((c) => c.max - c.min <= BLANK_SPREAD),
-    color: `#${rgb.map((c) => Math.round(c.mean).toString(16).padStart(2, '0')).join('')}`,
+    color: hex(rgb.map((c) => c.mean)),
+    plain: isPlain(mix),
+    main: { share: mix.share, color: mix.color },
   };
 }

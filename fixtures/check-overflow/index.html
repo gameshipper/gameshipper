@@ -1,0 +1,18 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Overflow Orbs</title>
+  <!-- Deck-ready except for one thing: the HUD box fits the screen, but its text doesn't fit the box. -->
+  <style>
+    html, body { margin: 0; height: 100%; overflow: hidden; background: #0b1020; }
+    canvas { display: block; }
+    #hud { position: absolute; top: 20px; right: 20px; width: 320px; white-space: nowrap; color: #fff; font: 24px sans-serif; }
+  </style>
+</head>
+<body>
+  <canvas id="game"></canvas>
+  <div id="hud">Score: 000000 · Lives: 3 · Level: 1 · Best: 999999</div>
+  <script src="./main.js"></script>
+</body>
+</html>

@@ -26,7 +26,31 @@ describe('scanBuildCode', () => {
     });
     const asar = path.join(makeTmpDir(), 'app.asar');
     await createPackage(src, asar);
-    expect(scanBuildCode(asar)).toEqual({ gamepad: ['js/input.js'], textInputs: ['js/menu.js'] });
+    expect(scanBuildCode(asar)).toEqual({ gamepad: ['js/input.js'], textInputs: ['js/menu.js'], skipped: ['js/phaser.min.js'] });
+  });
+
+  it('skips engine and library code: node_modules, files over 1 MB and files named after an engine', async () => {
+    const src = makeTmpDir();
+    const pad = 'navigator.getGamepads()';
+    writeFiles(src, {
+      'game/index.html': '<canvas></canvas>',
+      'game/node_modules/gamepad-lib/index.js': pad,
+      'game/lib/phaser.js': pad,
+      'game/assets/three-Bq3xk.js': pad,
+      'game/assets/babylon.max.js': pad,
+      'game/assets/pixi.mjs': pad,
+      'game/assets/index-9f2c1.js': `${pad};${' '.repeat(1024 * 1024)}`,
+      // Names that only contain an engine's name are the game's own.
+      'game/js/threefold.js': 'const rounds = 3;',
+      'game/js/pixie-dust.js': pad,
+    });
+    const asar = path.join(makeTmpDir(), 'app.asar');
+    await createPackage(src, asar);
+    expect(scanBuildCode(asar)).toEqual({
+      gamepad: ['js/pixie-dust.js'],
+      textInputs: [],
+      skipped: ['assets/babylon.max.js', 'assets/index-9f2c1.js', 'assets/pixi.mjs', 'assets/three-Bq3xk.js', 'lib/phaser.js', 'node_modules/gamepad-lib/index.js'],
+    });
   });
 
   it('is null without an app.asar', () => {

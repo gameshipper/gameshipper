@@ -7,6 +7,7 @@ import { hostTarget, runCheck } from '../../../src/core/check/run.js';
 import { parseConfig } from '../../../src/core/config/load.js';
 import { ok } from '../../../src/core/result.js';
 import type { runSmoke, SmokeOptions } from '../../../src/core/smoke.js';
+import type { DiagEvent } from '../../../src/shell/diagnostics.js';
 import type { ProbeReport } from '../../../src/shell/probe.js';
 import { testCtx } from '../../helpers/ctx.js';
 import { makeQuadrantPng } from '../../helpers/images.js';
@@ -32,14 +33,18 @@ function readyProject(): string {
  * Stands in for the smoke run: what the shell would leave behind (frame.png, an events log) and report (the probe).
  * `logged` are events log lines.
  */
-function fakeSmoke(seen: SmokeOptions[], opts: { frame?: boolean; logged?: object[]; probe?: Partial<ProbeReport> } = {}): typeof runSmoke {
+function fakeSmoke(
+  seen: SmokeOptions[],
+  opts: { frame?: boolean; logged?: object[] | null; events?: DiagEvent[]; probe?: Partial<ProbeReport> | null } = {},
+): typeof runSmoke {
   return async (ctx, smokeOpts) => {
     seen.push(smokeOpts);
     const dir = smokeOpts.capture!.probeDir!;
     const frame = path.join(dir, 'frame.png');
     if (opts.frame !== false) fs.writeFileSync(frame, await makeQuadrantPng(1280, 800));
     const eventsLog = path.join(ctx.projectDir, 'events.jsonl');
-    fs.writeFileSync(eventsLog, (opts.logged ?? []).map((e) => `${JSON.stringify(e)}\n`).join(''));
+    // null: an events log that can't be read.
+    if (opts.logged !== null) fs.writeFileSync(eventsLog, (opts.logged ?? []).map((e) => `${JSON.stringify(e)}\n`).join(''));
     const probe: ProbeReport = {
       viewport: { width: 1280, height: 800 },
       frame: opts.frame === false ? null : frame,
@@ -48,7 +53,8 @@ function fakeSmoke(seen: SmokeOptions[], opts: { frame?: boolean; logged?: objec
       errors: [],
       ...opts.probe,
     };
-    return ok({ eventsLog, exitCode: 0, summary: { droppedInfo: 0, truncatedEvents: 0, events: [], probe } });
+    const summary = { droppedInfo: 0, truncatedEvents: 0, events: opts.events ?? [], ...(opts.probe === null ? {} : { probe }) };
+    return ok({ eventsLog, exitCode: 0, summary });
   };
 }
 
@@ -109,6 +115,36 @@ describe('runCheck', () => {
     ];
     const r = await runCheck(testCtx(dir), config, { host: 'linux', smoke: fakeSmoke([], { logged }) });
     expect(r.data!.checks.find((c) => c.id === 'offline.requests')).toMatchObject({ status: 'fail', code: 'CHECK_OFFLINE', details: ['https://example.com/scores.json'] });
+  });
+
+  it('keeps report.json small when the game requested a huge URL', async () => {
+    const dir = readyProject();
+    const huge = `https://example.com/beacon?payload=${'x'.repeat(1_500_000)}`;
+    const r = await runCheck(testCtx(dir), config, { host: 'linux', smoke: fakeSmoke([], { logged: [{ kind: 'blocked-request', url: huge }] }) });
+    expect(r.data!.checks.find((c) => c.id === 'offline.requests')!.details).toEqual([`${huge.slice(0, 300)}…`]);
+    expect(fs.statSync(r.data!.reportFile).size).toBeLessThan(50_000);
+  });
+
+  it("uses the summary's blocked and remote requests when the events log can't be read", async () => {
+    const dir = readyProject();
+    const events: DiagEvent[] = [
+      { kind: 'blocked-request', url: 'wss://example.com/live' },
+      { kind: 'remote-request', url: 'https://example.com/scores.json', status: null, error: 'net::ERR_BLOCKED_BY_CLIENT' },
+    ];
+    const r = await runCheck(testCtx(dir), config, { host: 'linux', smoke: fakeSmoke([], { logged: null, events }) });
+    expect(r.data!.checks.find((c) => c.id === 'offline.requests')).toMatchObject({
+      status: 'fail',
+      details: ['wss://example.com/live', 'https://example.com/scores.json'],
+    });
+  });
+
+  it('knows from the events log when the game closed its own window', async () => {
+    const dir = readyProject();
+    const logged = [{ kind: 'window-closed', seconds: 1.5 }];
+    const r = await runCheck(testCtx(dir), config, { host: 'linux', smoke: fakeSmoke([], { logged, frame: false, probe: null }) });
+    const byId = Object.fromEntries(r.data!.checks.map((c) => [c.id, c]));
+    expect(byId['launch.frame'].message).toBe("Couldn't capture the game's window: the game closed its window after 1.5 s.");
+    expect(byId['launch.exit'].status).toBe('skip');
   });
 
   it('checks Mac signing on a Mac, and fails a run with no frame', async () => {

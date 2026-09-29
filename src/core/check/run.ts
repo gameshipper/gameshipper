@@ -5,7 +5,8 @@ import { frameInfo, type FrameInfo } from '../assets/inspect.js';
 import type { Config, DesktopTarget } from '../config/schema.js';
 import type { Ctx } from '../context.js';
 import { fail, GsFailure, ok, type GsError, type Result } from '../result.js';
-import { readLoggedEvents, runSmoke, type SmokeData } from '../smoke.js';
+import type { DiagEvent } from '../../shell/diagnostics.js';
+import { loggedEvents, runSmoke, type SmokeData } from '../smoke.js';
 import { launchChecks } from './launch.js';
 import { inspectMacSigning, type MacSigning } from './mac-signing.js';
 import { appIdCheck, buildsCheck, findBuilds, iconCheck, macAppPath, macSigningCheck, steamAppIdCheck } from './review.js';
@@ -83,8 +84,17 @@ export async function runCheck(ctx: Ctx, config: Config, opts: CheckOptions = {}
       ctx.log(`check: couldn't read ${probe.frame}: ${e instanceof Error ? e.message : String(e)}`);
     }
   }
-  // The summary keeps only the first events; the events log has every blocked request.
-  const blocked = smoke?.data ? readLoggedEvents(smoke.data.eventsLog, ['blocked-request']).map((e) => e.url) : [];
+  // The summary keeps only the first events; the events log has every one. Without a readable log, the summary's
+  // do: its blocked requests, and its http(s) requests (every one of them was blocked).
+  const kinds = ['blocked-request', 'remote-request', 'window-closed'] as const;
+  type RunEvent = Extract<DiagEvent, { kind: (typeof kinds)[number] }>;
+  const events: RunEvent[] = smoke?.data
+    ? (loggedEvents(smoke.data.eventsLog, ['blocked-request', 'window-closed']) ??
+      smoke.data.summary.events.filter((e): e is RunEvent => (kinds as readonly string[]).includes(e.kind)))
+    : [];
+  const blocked = events.flatMap((e) => (e.kind === 'blocked-request' || e.kind === 'remote-request' ? [e.url] : []));
+  const closedEvent = events.find((e) => e.kind === 'window-closed');
+  const closed = closedEvent ? { seconds: closedEvent.seconds } : null;
   const scanned = hostBuild ?? builds.find((b) => b.built) ?? null;
   const scan = scanned ? scanBuildCode(appAsarPath(scanned.target, scanned.executable, scanned.dir)) : null;
   const macBuild = builds.find((b) => b.target === 'mac' && b.built);
@@ -102,6 +112,7 @@ export async function runCheck(ctx: Ctx, config: Config, opts: CheckOptions = {}
       frame,
       scan,
       otherBuilt: builds.filter((b) => b.built && b.target !== host).map((b) => b.target),
+      closed,
     }),
     buildsCheck(builds),
     steamAppIdCheck(ctx.projectDir),

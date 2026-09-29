@@ -105,7 +105,7 @@ describe('parseCodesignDisplay / inspectMacSigning', () => {
         calls.push([command, ...args].join(' '));
         if (args[0] === '-dv') return { code: 0, output: ADHOC };
         if (command === 'xcode-select') return tools ? { code: 0, output: '/Library/Developer/CommandLineTools' } : { code: 2, output: 'no developer tools' };
-        if (command === 'xcrun') return { code: 65, output: 'My Game.app does not have a ticket stapled to it.' };
+        if (command === 'xcrun') return { code: 65, output: 'Processing: /o/My Game.app\nMy Game.app does not have a ticket stapled to it.' };
         return { code: 0, output: '' };
       };
     expect(await inspectMacSigning('/o/My Game.app', runner(true))).toEqual({
