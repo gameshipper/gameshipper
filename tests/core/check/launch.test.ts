@@ -215,7 +215,7 @@ describe('launchChecks', () => {
     const c = byId(launchChecks(evidence({ scan: { gamepad: [], textInputs: [], skipped: ['lib/phaser.js', 'assets/three-Bq3x.js'] } })))['deck.gamepad'];
     expect(c.status).toBe('warn');
     expect(c.details).toEqual([
-      "Only the game's own code was searched. Engine and library code mentions gamepads whether or not the game uses them, so bundled CDN files, node_modules, *.min.js files, files over 1 MB and files named after an engine (phaser, three, babylon, pixi) were skipped.",
+      "Only the game's own code was searched. Engine and library code mentions gamepads whether or not the game uses them, so bundled CDN files, node_modules, *.min.js files, files over 1 MB and an engine's own files (like phaser.js, three.module.js, babylon.js or pixi.mjs) were skipped.",
       'Skipped: lib/phaser.js, assets/three-Bq3x.js',
     ]);
   });
