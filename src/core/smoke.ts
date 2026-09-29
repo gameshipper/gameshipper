@@ -1,7 +1,7 @@
 import { spawn } from 'node:child_process';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { LOAD_BACKSTOP_EXTRA_SECONDS, LOAD_TIMEOUT_DESCRIPTION, type DiagSummary } from '../shell/diagnostics.js';
+import { LOAD_BACKSTOP_EXTRA_SECONDS, LOAD_TIMEOUT_DESCRIPTION, type DiagEvent, type DiagSummary } from '../shell/diagnostics.js';
 import type { Ctx } from './context.js';
 import { killTree, OUTPUT_BUFFER_CHARS, outputTail, releaseAfterExit, stopWithGameshipper } from './proc.js';
 import { fail, GsFailure, gsError, ok, type GsError, type Result } from './result.js';
@@ -10,6 +10,8 @@ import { fail, GsFailure, gsError, ok, type GsError, type Result } from './resul
 export const MAX_ISSUES_PER_CODE = 10;
 /** How many diagnostic events a smoke result carries; the events log keeps every one. */
 export const MAX_SUMMARY_EVENTS = 100;
+/** Longest message or URL a smoke result shows in full; the events log keeps every character. */
+export const MAX_TEXT_CHARS = 2000;
 
 /** The shell's summary, cut to its first MAX_SUMMARY_EVENTS events so a noisy game's result stays small. */
 export interface SmokeSummary extends DiagSummary {
@@ -55,6 +57,20 @@ function formatSeconds(ms: number): string {
 /** Compile-time check that every DiagEvent kind is handled. */
 const unhandled = (_event: never): void => {};
 
+function capText(text: string): string {
+  if (text.length <= MAX_TEXT_CHARS) return text;
+  return `${text.slice(0, MAX_TEXT_CHARS)}… (${text.length - MAX_TEXT_CHARS} more characters; see the events log)`;
+}
+
+/** The event with every text field (message, url, …) cut to MAX_TEXT_CHARS; the same object if none is longer. */
+function capEvent(event: DiagEvent): DiagEvent {
+  let capped: Record<string, unknown> | undefined;
+  for (const [key, value] of Object.entries(event)) {
+    if (typeof value === 'string' && value.length > MAX_TEXT_CHARS) (capped ??= { ...event })[key] = capText(value);
+  }
+  return (capped ?? event) as DiagEvent;
+}
+
 /**
  * `seconds` is the smoke run's duration, used to say how long the page had to load. `eventsLog` is named in
  * the issue that counts what's left out: each code lists at most MAX_ISSUES_PER_CODE issues.
@@ -80,11 +96,13 @@ export function summaryToIssues(
       count.more++;
     }
   };
+  // A game can log a whole file as one message: issues show at most MAX_TEXT_CHARS of any text.
+  const events = summary.events.map(capEvent);
   // The shell records a wrong-case request as both case-mismatch and missing-file (it 404s).
   const realName = new Map<string, string>();
-  for (const e of summary.events) if (e.kind === 'case-mismatch') realName.set(e.url, e.actual);
+  for (const e of events) if (e.kind === 'case-mismatch') realName.set(e.url, e.actual);
 
-  for (const e of summary.events) {
+  for (const e of events) {
     switch (e.kind) {
       case 'console': {
         if (e.level !== 'error' && e.level !== 'warning') break;
@@ -185,10 +203,10 @@ export function summaryToIssues(
   return { errors, warnings };
 }
 
-/** Keeps the first MAX_SUMMARY_EVENTS events; the rest are only counted. */
+/** Keeps the first MAX_SUMMARY_EVENTS events, with long texts cut; the rest are only counted. */
 export function truncateSummary(summary: DiagSummary): SmokeSummary {
   return {
-    events: summary.events.slice(0, MAX_SUMMARY_EVENTS),
+    events: summary.events.slice(0, MAX_SUMMARY_EVENTS).map(capEvent),
     droppedInfo: summary.droppedInfo,
     truncatedEvents: Math.max(0, summary.events.length - MAX_SUMMARY_EVENTS),
   };
@@ -297,9 +315,12 @@ export function gameEnv(eventsLog: string, userDataDir: string, windowed: boolea
   return env;
 }
 
+/** A file-name-safe timestamp, e.g. 2026-09-29T15-50-38-836Z. */
+const fileStamp = (now: Date): string => now.toISOString().replace(/[:.]/g, '-');
+
 /** Creates this run's (empty) events log and returns its path, so the path in a result always exists. */
 export function eventsLogPath(projectDir: string, now: Date = new Date()): string {
-  const file = path.join(projectDir, '.gameshipper', 'logs', `events-${now.toISOString().replace(/[:.]/g, '-')}.jsonl`);
+  const file = path.join(projectDir, '.gameshipper', 'logs', `events-${fileStamp(now)}.jsonl`);
   fs.mkdirSync(path.dirname(file), { recursive: true });
   fs.writeFileSync(file, '', { flag: 'a' });
   return file;
@@ -323,9 +344,10 @@ function readSummary(file: string): DiagSummary | 'missing' | 'unreadable' {
 }
 
 export async function runSmoke(ctx: Ctx, opts: SmokeOptions): Promise<Result<SmokeData>> {
-  const eventsLog = eventsLogPath(ctx.projectDir);
-  const outFile = path.join(ctx.projectDir, '.gameshipper', 'smoke.json');
-  fs.rmSync(outFile, { force: true });
+  const started = new Date();
+  const eventsLog = eventsLogPath(ctx.projectDir, started);
+  // Each run gets its own summary (named like its events log), so runs never read each other's.
+  const outFile = path.join(ctx.projectDir, '.gameshipper', `smoke-${fileStamp(started)}.json`);
   const env = { ...gameEnv(eventsLog, opts.userDataDir, opts.windowed), GAMESHIPPER_SMOKE_SECONDS: String(opts.seconds), GAMESHIPPER_SMOKE_OUT: outFile };
   const timeoutMs = opts.timeoutMs ?? (opts.seconds + SMOKE_TIMEOUT_GRACE_SECONDS) * 1000;
   ctx.log(`smoke run: ${opts.command} ${opts.args.join(' ')} for ${opts.seconds}s`);

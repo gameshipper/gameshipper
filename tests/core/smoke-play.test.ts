@@ -3,7 +3,7 @@ import * as path from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import { parseConfig } from '../../src/core/config/load.js';
 import { runPlay } from '../../src/core/play.js';
-import { runSmoke, summaryToIssues } from '../../src/core/smoke.js';
+import { runSmoke, summaryToIssues, truncateSummary } from '../../src/core/smoke.js';
 import { LOAD_TIMEOUT_DESCRIPTION, type DiagEvent, type DiagSummary } from '../../src/shell/diagnostics.js';
 import { testCtx } from '../helpers/ctx.js';
 import { makeTmpDir, writeFiles } from '../helpers/tmp.js';
@@ -426,6 +426,57 @@ describe('bounded smoke output for noisy games', () => {
     const { dir, shellDir } = project(`require('fs').writeFileSync(process.env.GAMESHIPPER_SMOKE_OUT, JSON.stringify({ droppedInfo: 0, events: [] }));`);
     const r = await runPlay(testCtx(dir), config, { shellDir, smokeSeconds: 1, electronPath: process.execPath });
     expect(r.data!.smoke!.summary).toEqual({ events: [], droppedInfo: 0, truncatedEvents: 0 });
+  });
+});
+
+describe('long messages', () => {
+  const more = (n: number) => `… (${n} more characters; see the events log)`;
+
+  it('cuts any message or URL over 2,000 characters in the issues', () => {
+    const huge = 'x'.repeat(5 * 1024 * 1024);
+    const longUrl = `app://game/${'a'.repeat(3000)}.png`;
+    const events: DiagEvent[] = [
+      { kind: 'console', level: 'error', message: huge, source: 'app://game/main.js', line: 1 },
+      { kind: 'missing-file', url: longUrl },
+      { kind: 'console', level: 'warning', message: 'y'.repeat(2000), source: '', line: 0 },
+    ];
+    const { errors, warnings } = summaryToIssues({ droppedInfo: 0, events });
+    expect(errors[0].message).toBe(`${'x'.repeat(2000)}${more(huge.length - 2000)} (main.js:1)`);
+    expect(errors[1].message).toContain(more(longUrl.length - 2000));
+    expect(errors[1].message.length).toBeLessThan(2200);
+    expect(warnings[0].message).toBe('y'.repeat(2000)); // exactly the limit: kept whole
+  });
+
+  it('cuts them in the events a smoke result keeps too, leaving other events as they were', () => {
+    const huge = 'x'.repeat(5 * 1024 * 1024);
+    const short: DiagEvent = { kind: 'missing-file', url: 'app://game/a.png' };
+    const kept = truncateSummary({ droppedInfo: 0, events: [{ kind: 'console', level: 'error', message: huge, source: '', line: 0 }, short] });
+    expect(kept.events[0]).toEqual({ kind: 'console', level: 'error', message: `${'x'.repeat(2000)}${more(huge.length - 2000)}`, source: '', line: 0 });
+    expect(kept.events[1]).toBe(short);
+    expect(JSON.stringify(kept).length).toBeLessThan(3000);
+  });
+
+  it('keeps a smoke result small when the game logs a 5 MB error', async () => {
+    const { dir, shellDir } = project(`
+      const events = [{ kind: 'console', level: 'error', message: 'x'.repeat(5 * 1024 * 1024), source: 'app://game/main.js', line: 1 }];
+      require('fs').writeFileSync(process.env.GAMESHIPPER_SMOKE_OUT, JSON.stringify({ droppedInfo: 0, events }));
+    `);
+    const r = await runPlay(testCtx(dir), config, { shellDir, smokeSeconds: 1, electronPath: process.execPath });
+    expect(r.errors.map((e) => e.code)).toEqual(['GAME_CONSOLE_ERROR']);
+    expect(JSON.stringify(r).length).toBeLessThan(10_000);
+  });
+});
+
+describe('smoke summaries', () => {
+  it('each run writes its own summary file, named like its events log', async () => {
+    const { dir, shellDir } = project(`require('fs').writeFileSync(process.env.GAMESHIPPER_SMOKE_OUT, JSON.stringify({ droppedInfo: 0, events: [] }));`);
+    const first = await runPlay(testCtx(dir), config, { shellDir, smokeSeconds: 1, electronPath: process.execPath });
+    const second = await runPlay(testCtx(dir), config, { shellDir, smokeSeconds: 1, electronPath: process.execPath });
+    const work = path.join(dir, '.gameshipper');
+    const stamp = (eventsLog: string) => /events-(.+)\.jsonl$/.exec(eventsLog)![1];
+    const expected = [first, second].map((r) => `smoke-${stamp(r.data!.smoke!.eventsLog)}.json`);
+    expect(new Set(expected).size).toBe(2);
+    expect(fs.readdirSync(work).filter((f) => f.startsWith('smoke')).sort()).toEqual(expected.sort());
   });
 });
 
