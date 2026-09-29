@@ -1,0 +1,6 @@
+# Local research (not part of the tool)
+reports/
+research_notes/
+
+# OS / editor
+.DS_Store
