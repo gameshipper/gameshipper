@@ -76,16 +76,22 @@ describe('summaryToIssues', () => {
     expect(errors.map((e) => e.code)).toEqual(['GAME_LOAD_FAILED']);
     expect(errors[0].message).toContain('ERR_FILE_NOT_FOUND');
     expect(errors[0].fix).toContain('game.entry');
-    expect(warnings.map((w) => w.code)).toEqual([
-      'GAME_CONSOLE_WARNING',
-      'GAME_NAVIGATION_BLOCKED',
-      'GAME_NAVIGATION_BLOCKED',
-      'GAME_USES_INTERNET',
+    expect(warnings.map((w) => w.code)).toEqual(['GAME_CONSOLE_WARNING', 'GAME_NAVIGATION_BLOCKED', 'GAME_USES_INTERNET']);
+    expect(warnings[1].message).toBe('The game tried to leave its window for file:///etc/passwd (blocked).');
+    expect(warnings[1].fix).toContain('steam:');
+    expect(warnings[2].message).toContain('failed: net::ERR_INTERNET_DISCONNECTED');
+  });
+
+  it('a link the game opened in the browser is no issue; only blocked ones are', () => {
+    const opened: DiagEvent[] = [
+      { kind: 'blocked-navigation', url: 'https://store.steampowered.com/app/480', action: 'opened-externally' },
+      { kind: 'blocked-navigation', url: 'mailto:help@example.com', action: 'opened-externally' },
+    ];
+    expect(summaryToIssues({ droppedInfo: 0, events: opened })).toEqual({ errors: [], warnings: [] });
+    const blocked: DiagEvent = { kind: 'blocked-navigation', url: 'about:blank', action: 'blocked' };
+    expect(summaryToIssues({ droppedInfo: 0, events: [...opened, blocked] }).warnings.map((w) => [w.code, w.message])).toEqual([
+      ['GAME_NAVIGATION_BLOCKED', 'The game tried to leave its window for about:blank (blocked).'],
     ]);
-    expect(warnings[1].message).toBe('The game tried to leave its window for https://store.steampowered.com/app/480 (opens outside the game).');
-    expect(warnings[1].fix).toContain('window.open');
-    expect(warnings[2].message).toContain('(blocked)');
-    expect(warnings[3].message).toContain('failed: net::ERR_INTERNET_DISCONNECTED');
   });
 
   it("says when the shell's backstop found the page never finished loading", () => {

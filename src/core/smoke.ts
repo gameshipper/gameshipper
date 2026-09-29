@@ -187,12 +187,15 @@ export function summaryToIssues(
         );
         break;
       case 'blocked-navigation':
+        // A web, mail or Steam link the game opened in the player's browser or app is working as intended:
+        // only the events log keeps it.
+        if (e.action === 'opened-externally') break;
         add(
           warnings,
           gsError(
             'GAME_NAVIGATION_BLOCKED',
-            `The game tried to leave its window for ${e.url} (${e.action === 'opened-externally' ? 'opens outside the game' : 'blocked'}).`,
-            "Open external links with a normal link or window.open; they open in the player's browser. Navigating the game window itself isn't allowed.",
+            `The game tried to leave its window for ${e.url} (blocked).`,
+            "The game window only shows the game's own pages. Web, mailto: and steam: links the game itself opens go to the player's browser or app; other URLs, and links from embedded sites, are blocked.",
           ),
         );
         break;
