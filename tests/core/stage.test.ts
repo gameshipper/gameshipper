@@ -114,6 +114,21 @@ describe('stageGame', () => {
     }
   });
 
+  it('skips top-level package manager lockfiles but keeps nested ones', async () => {
+    const dir = makeTmpDir();
+    const lockfiles = ['package-lock.json', 'yarn.lock', 'pnpm-lock.yaml', 'bun.lockb', 'bun.lock'];
+    writeFiles(dir, {
+      'index.html': '',
+      'package.json': '{}',
+      ...Object.fromEntries(lockfiles.map((f) => [f, ''])),
+      'data/yarn.lock': 'level data',
+    });
+    const { stageDir } = await stageGame(testCtx(dir), cfg());
+    const exists = (rel: string) => fs.existsSync(path.join(stageDir, rel));
+    for (const skipped of lockfiles) expect(exists(skipped), skipped).toBe(false);
+    for (const kept of ['index.html', 'package.json', 'data/yarn.lock']) expect(exists(kept), kept).toBe(true);
+  });
+
   it('skips a broken top-level symlink with a BROKEN_SYMLINK warning', async () => {
     const dir = makeTmpDir();
     writeFiles(dir, { 'index.html': '' });

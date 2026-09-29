@@ -8,7 +8,19 @@ import { GsFailure, gsError, type GsError } from '../result.js';
 
 const SKIP_ANYWHERE = new Set(['.git', '.DS_Store', 'Thumbs.db', 'steam_appid.txt']);
 /** Also skipped at the top level: every dot entry (.gameshipper, .claude, .vscode, .github, ...). */
-const SKIP_TOP_LEVEL = new Set(['out', 'gameshipper.json', 'gameshipper.lock', 'node_modules', 'CLAUDE.md', 'AGENTS.md']);
+const SKIP_TOP_LEVEL = new Set([
+  'out',
+  'gameshipper.json',
+  'gameshipper.lock',
+  'node_modules',
+  'CLAUDE.md',
+  'AGENTS.md',
+  'package-lock.json',
+  'yarn.lock',
+  'pnpm-lock.yaml',
+  'bun.lockb',
+  'bun.lock',
+]);
 const TEXT_FILE = /\.(html?|m?js|css)$/i;
 
 const BUILD_TIMEOUT_MS = 10 * 60 * 1000;
