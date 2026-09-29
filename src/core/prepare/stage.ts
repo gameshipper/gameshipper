@@ -29,12 +29,14 @@ const BUILD_TIMEOUT_MS = 10 * 60 * 1000;
 const CLOSE_GRACE_MS = 2000;
 
 const isEnvFile = (name: string): boolean => name === '.env' || name.startsWith('.env.');
+/** Names never staged, wherever they are. Also checked against the name a link points at. */
+const isSkippedAnywhere = (name: string): boolean => SKIP_ANYWHERE.has(name) || isEnvFile(name);
 
 /** `rel` is relative to the game folder. */
 function isSkipped(rel: string): boolean {
   const parts = rel.split(path.sep);
   const base = parts[parts.length - 1];
-  if (SKIP_ANYWHERE.has(base) || isEnvFile(base)) return true;
+  if (isSkippedAnywhere(base)) return true;
   return parts.length === 1 && (base.startsWith('.') || SKIP_TOP_LEVEL.has(base));
 }
 
@@ -68,7 +70,7 @@ export async function runBuildCommand(ctx: Ctx, config: Config, opts: { timeoutM
   let output = '';
   const outcome = await new Promise<number | 'timeout'>((resolve, reject) => {
     // On POSIX the command gets its own process group, so we can stop everything it started.
-    // That also shields it from Ctrl+C, so the signal handlers below pass signals on to it.
+    // That also shields it from Ctrl+C, so stopWithGameshipper's handlers stop its whole tree instead.
     const child = spawn(command, {
       cwd: ctx.projectDir,
       shell: true,
@@ -168,17 +170,14 @@ export async function stageGame(ctx: Ctx, config: Config): Promise<{ stageDir: s
   }
   const stageDir = stageDirFor(ctx.projectDir);
   fs.rmSync(stageDir, { recursive: true, force: true });
+  fs.mkdirSync(stageDir, { recursive: true });
+  const realStage = fs.realpathSync(stageDir);
   const warnings: GsError[] = [];
-  const skipLink = (link: string, problem: string): false => {
-    warnings.push(
-      gsError(
-        'BROKEN_SYMLINK',
-        `${path.relative(ctx.projectDir, link)} ${problem}, so it wasn't staged.`,
-        'Remove the link or point it at a real file.',
-      ),
-    );
+  const skipLink = (link: string, problem: string, fix: string): false => {
+    warnings.push(gsError('BROKEN_SYMLINK', `${path.relative(ctx.projectDir, link)} ${problem}, so it wasn't staged.`, fix));
     return false;
   };
+  const LOOP_FIX = 'Remove the link, or replace it with a copy of the folder.';
   // Called for every path before it's copied (links not yet followed).
   const keep = (src: string): boolean => {
     const rel = path.relative(source, src);
@@ -189,17 +188,24 @@ export async function stageGame(ctx: Ctx, config: Config): Promise<{ stageDir: s
     try {
       target = fs.realpathSync(src);
     } catch {
-      return skipLink(src, "is a link to something that doesn't exist");
+      return skipLink(src, "is a link to something that doesn't exist", 'Remove the link or point it at a real file.');
     }
+    // A link with a harmless name can still point at a secret (cfg/settings.txt -> ../.env).
+    if (isSkippedAnywhere(path.basename(target))) return false;
+    // Copying a folder that holds the stage (gs -> .gameshipper, or a link into the stage) copies
+    // the stage into itself, without end.
+    if (isWithin(realStage, target)) {
+      return skipLink(src, "links to a folder that holds Gameshipper's staging folder (.gameshipper/stage)", LOOP_FIX);
+    }
+    if (isWithin(target, realStage)) return skipLink(src, "links into Gameshipper's staging folder (.gameshipper/stage)", LOOP_FIX);
     if (fs.statSync(target).isDirectory() && loopsBack(src, target, source)) {
-      return skipLink(src, 'links to a folder that contains it');
+      return skipLink(src, 'links to a folder that contains it', LOOP_FIX);
     }
     return true;
   };
   // Copy entry by entry: when the game lives in the project root, stageDir is inside `source`,
   // and fs.cpSync refuses to copy a folder into its own subdirectory. Links are copied as the
   // files they point to, so the stage never links back into the developer's disk.
-  fs.mkdirSync(stageDir, { recursive: true });
   for (const name of fs.readdirSync(source)) {
     fs.cpSync(path.join(source, name), path.join(stageDir, name), { recursive: true, dereference: true, filter: keep });
   }

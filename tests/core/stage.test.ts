@@ -192,6 +192,45 @@ describe('stageGame', () => {
     expect(warnings.map((w) => w.code)).toEqual(['BROKEN_SYMLINK', 'BROKEN_SYMLINK', 'BROKEN_SYMLINK']);
     const messages = warnings.map((w) => w.message).join('\n');
     for (const link of [['sub', 'up'], ['a', 'to-b', 'to-a'], ['b', 'to-a', 'to-b']]) expect(messages).toContain(path.join(...link));
+    for (const w of warnings) expect(w.fix).toBe('Remove the link, or replace it with a copy of the folder.');
+  });
+
+  it('skips links to a folder that holds the stage, which would copy the stage into itself', async () => {
+    const dir = makeTmpDir();
+    writeFiles(dir, { 'index.html': '', 'js/main.js': '' });
+    fs.symlinkSync('.gameshipper', path.join(dir, 'gs'));
+    fs.symlinkSync(path.join('..', '.gameshipper', 'stage'), path.join(dir, 'js', 'stage'));
+    fs.symlinkSync('.', path.join(dir, 'here'));
+    const { stageDir, warnings } = await stageGame(testCtx(dir), cfg());
+    expect(present(path.join(stageDir, 'js', 'main.js'))).toBe(true);
+    for (const link of ['gs', 'here', path.join('js', 'stage')]) expect(present(path.join(stageDir, link)), link).toBe(false);
+    expect(warnings.map((w) => w.code)).toEqual(['BROKEN_SYMLINK', 'BROKEN_SYMLINK', 'BROKEN_SYMLINK']);
+    const messages = warnings.map((w) => w.message).join('\n');
+    for (const link of ['gs', 'here', path.join('js', 'stage')]) expect(messages).toContain(link);
+    for (const w of warnings) expect(w.fix).toBe('Remove the link, or replace it with a copy of the folder.');
+  });
+
+  it('skips links to the stage from a game folder that is not the project root', async () => {
+    const dir = makeTmpDir();
+    writeFiles(dir, { 'dist/index.html': '' });
+    fs.symlinkSync(path.join('..', '.gameshipper'), path.join(dir, 'dist', 'cache'));
+    const { stageDir, warnings } = await stageGame(testCtx(dir), cfg({ game: { buildCommand: 'true', outputDir: 'dist' } }));
+    expect(present(path.join(stageDir, 'index.html'))).toBe(true);
+    expect(present(path.join(stageDir, 'cache'))).toBe(false);
+    expect(warnings.map((w) => [w.code, w.message])).toEqual([['BROKEN_SYMLINK', expect.stringContaining(path.join('dist', 'cache'))]]);
+  });
+
+  it('never ships a .env file through a link with another name', async () => {
+    const dir = makeTmpDir();
+    writeFiles(dir, { 'index.html': '', '.env': 'SECRET=1', 'config/.env.production': 'SECRET=1', 'cfg/real.txt': 'ok' });
+    fs.symlinkSync(path.join('..', '.env'), path.join(dir, 'cfg', 'settings.txt'));
+    fs.symlinkSync(path.join('..', 'config', '.env.production'), path.join(dir, 'cfg', 'prod.txt'));
+    fs.symlinkSync('real.txt', path.join(dir, 'cfg', 'alias.txt'));
+    const { stageDir, warnings } = await stageGame(testCtx(dir), cfg());
+    expect(warnings).toEqual([]);
+    expect(present(path.join(stageDir, 'cfg', 'settings.txt'))).toBe(false);
+    expect(present(path.join(stageDir, 'cfg', 'prod.txt'))).toBe(false);
+    expect(fs.readFileSync(path.join(stageDir, 'cfg', 'alias.txt'), 'utf8')).toBe('ok');
   });
 
   it('GAME_DIR_INVALID when game.dir is a file', async () => {
