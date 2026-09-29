@@ -286,7 +286,7 @@ export function launch(ctx: Ctx, command: string, args: string[], opts: LaunchOp
         return;
       }
       reject(
-        new GsFailure('LAUNCH_FAILED', `Couldn't start ${command}: ${error.message}`, 'Run `npm install` again so Electron downloads, or check the build exists.'),
+        new GsFailure('LAUNCH_FAILED', `Couldn't start ${command}: ${error.message}`, 'Reinstall Gameshipper (e.g. `npx gameshipper@latest`), or check the build exists.'),
       );
     };
     const timer =

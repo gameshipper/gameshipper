@@ -53,7 +53,7 @@ export const COMMANDS: CommandHelp[] = [
     usage: 'npx gameshipper play [--smoke [--seconds <n>]] [--fullscreen] [--frozen-lock]',
     flags: [
       { name: 'smoke', description: 'Run for a few seconds, quit, and report errors, missing files, internet use and crashes.' },
-      { name: 'seconds', value: '<n>', description: 'How long a smoke run lasts after loading (default 5).' },
+      { name: 'seconds', value: '<n>', description: 'How long a smoke run lasts after loading (default 5). Implies --smoke.' },
       { name: 'fullscreen', description: 'Honour window.fullscreen (play is windowed by default).' },
       FROZEN_LOCK,
     ],
@@ -81,11 +81,12 @@ export function helpData() {
     commands: COMMANDS,
     globalFlags: GLOBAL_FLAGS,
     exitCodes: EXIT_CODES,
-    resultShape: 'Every command prints { ok, data, errors[], warnings[], logPath }. Each error has code, message and fix.',
+    resultShape:
+      'Every command prints { ok, data, errors[], warnings[], logPath }. logPath (the run log) is present for build and play, unless gameshipper.json is missing or invalid. Each error has code, message and fix; fix may be absent on warnings.',
     agentLoop: [
       'npx gameshipper status --json',
       'npx gameshipper init --yes --json',
-      'npx gameshipper play --smoke --json   (fix errors, repeat)',
+      'npx gameshipper play --smoke --json   (fix errors, repeat until ok is true)',
       'npx gameshipper build --json',
     ],
     /** Every gameshipper.json field; fields with defaults are optional. */

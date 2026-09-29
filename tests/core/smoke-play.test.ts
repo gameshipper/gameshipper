@@ -173,6 +173,7 @@ describe('runPlay --smoke', () => {
     const { dir, shellDir } = project('');
     const r = await runPlay(testCtx(dir), config, { shellDir, smokeSeconds: 1, electronPath: path.join(dir, 'no-electron') });
     expect(r.errors[0].code).toBe('LAUNCH_FAILED');
+    expect(r.errors[0].fix).toBe('Reinstall Gameshipper (e.g. `npx gameshipper@latest`), or check the build exists.');
     expect(r.warnings.map((w) => w.code)).toEqual(['ICON_MISSING']);
   });
 

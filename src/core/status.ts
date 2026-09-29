@@ -21,7 +21,7 @@ export interface StatusData {
 }
 
 /**
- * Never fails: it is the command an agent runs first to find out what state things are in.
+ * Succeeds for any existing folder: it is the command an agent runs first to find out what state things are in.
  * Config problems come back as warnings; a valid config with a missing file is still shown.
  */
 export function getStatus(projectDir: string, host: NodeJS.Platform = process.platform): Result<StatusData> {

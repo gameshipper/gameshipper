@@ -10,7 +10,7 @@ npx gameshipper build          # out/windows, out/mac, out/linux
 npx gameshipper status         # what's configured, built, and what happened last
 ```
 
-Your game doesn't need a build step or npm. A folder with an `index.html` is enough. Files your game loads from CDNs (three.js from unpkg through an import map, a `<script>` or `<link>` tag, a CSS `@import`) are downloaded into the build, so it works offline. They're pinned in `gameshipper.lock`, so every build is identical.
+Your game doesn't need a build step or npm. A folder with an `index.html` is enough. Files your game loads from CDNs (three.js from unpkg through an import map, a `<script>` or `<link>` tag, a CSS `@import`) are downloaded into the build, so it works offline. They're pinned in `gameshipper.lock`, so builds are reproducible from it; use `--frozen-lock` in CI to enforce that.
 
 Needs Node.js 22.12 or newer. The first build for each OS downloads Electron (120 to 160 MB, cached after that).
 
@@ -56,7 +56,7 @@ Builds desktop apps into `out/<target>`. For a game named "Spinning Cube" that's
 
 ### `status`
 
-Shows the config, what this computer can build, which `out/` folders exist, and the last result of `init`, `play` and `build` with their log paths. It never fails, so it's the command to run first.
+Shows the config, what this computer can build, which `out/` folders exist, and the last result of `init`, `play` and `build` with their log paths. It succeeds for any existing folder, so it's the command to run first.
 
 ### `help`
 
@@ -76,12 +76,12 @@ Shows the config, what this computer can build, which `out/` folders exist, and 
 ## For AI agents
 
 - Add `--json` to any command: stdout is exactly one JSON object, `{ ok, data, errors[], warnings[], logPath }`. `logPath` is the run's log (for `play` and `build`). Without a valid `gameshipper.json` they write nothing into the folder, so a `CONFIG_MISSING` or `CONFIG_INVALID` result has no `logPath`.
-- Every error and warning has a stable `code` and a plain-English `message`, and a `fix` whenever there's something to do.
+- Every error and warning has a stable `code` and a plain-English `message`. Errors always have a `fix`; warnings have one whenever there's something to do.
 - Nothing ever prompts when `--json` or `--yes` is set, or when stdin isn't a terminal. Missing input comes back as `INPUT_REQUIRED`, naming the flag to pass.
 - Exit codes: `0` success, `1` a target or check failed, `2` invalid config, usage or missing input. A signal ends the run with an `INTERRUPTED` result and exit code 128 + the signal number (130 for Ctrl+C). Ctrl+C during an interactive `play` just ends the session: an `ok` result with a `PLAY_STOPPED` warning, still exit 130.
 - `help --json` returns every command and flag.
 
-The loop: `status --json`, `init --yes --json`, then `play --smoke --json` until it comes back clean, then `build --json`.
+The loop: `status --json`, `init --yes --json`, then `play --smoke --json` until it comes back clean (`ok: true`, so no errors; warnings don't block), then `build --json`.
 
 ### What `play --smoke` reports
 
@@ -108,7 +108,7 @@ Other problems have codes too, such as `CDN_FETCH_FAILED`, `CDN_CHANGED`, `ENTRY
 | `gameshipper.json` | The config. Commit it. |
 | `gameshipper.lock` | The URL and SHA-256 of every downloaded CDN file. Commit it. When a CDN file changes, `build` warns with `CDN_CHANGED` and updates the lock; `--frozen-lock` makes that an error. |
 | `out/<target>/` | The builds. |
-| `.gameshipper/logs/` | Run logs, plus the events logs of `play` runs (the newest 20). |
+| `.gameshipper/logs/` | Run logs (the newest 50 of each command), plus the events logs and smoke summaries of `play` runs (the newest 20). |
 | `.gameshipper/last/` | The last result of each command, which `status` reads. |
 
 ## `gameshipper.json`

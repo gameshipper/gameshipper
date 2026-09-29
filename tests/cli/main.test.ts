@@ -32,6 +32,14 @@ describe('gameshipper CLI', () => {
     expect(schema.properties.steam.properties.appId.type).toBe('integer');
   });
 
+  it('help --json says when logPath and fix are there, and that --seconds implies --smoke', async () => {
+    const data = (await run(['help', '--json'])).json().data;
+    expect(data.resultShape).toContain('logPath (the run log) is present for build and play');
+    expect(data.resultShape).toContain('fix may be absent on warnings');
+    const play = data.commands.find((c: { name: string }) => c.name === 'play');
+    expect(play.flags.find((f: { name: string }) => f.name === 'seconds').description).toContain('Implies --smoke.');
+  });
+
   it('no arguments prints human help', async () => {
     const r = await run([]);
     expect(r.code).toBe(0);

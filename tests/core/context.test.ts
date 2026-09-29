@@ -29,6 +29,28 @@ describe('createCtx', () => {
   });
 });
 
+describe('run logs', () => {
+  it("keep the newest 50 of each command's logs, touching nothing else", () => {
+    const dir = makeTmpDir();
+    const logs = path.join(dir, '.gameshipper', 'logs');
+    const stamp = (i: number) => `2020-01-01T00-${String(Math.floor(i / 60)).padStart(2, '0')}-${String(i % 60).padStart(2, '0')}-000Z`;
+    const files: Record<string, string> = { 'notes.txt': '', 'build-notes.log': '', 'events-2020-01-01T00-00-00-000Z.jsonl': '' };
+    for (let i = 0; i < 60; i++) files[`build-${stamp(i)}.log`] = '';
+    for (let i = 0; i < 55; i++) files[`play-${stamp(i)}.log`] = '';
+    writeFiles(logs, files);
+
+    const ctx = createCtx(dir, 'build', { cacheDir: makeTmpDir() });
+
+    const left = fs.readdirSync(logs).sort();
+    const builds = left.filter((f) => /^build-\d/.test(f));
+    expect(builds).toHaveLength(50);
+    expect(builds.slice(0, 49)).toEqual(Array.from({ length: 49 }, (_, i) => `build-${stamp(i + 11)}.log`));
+    expect(builds[49]).toBe(path.basename(ctx.logPath));
+    expect(left.filter((f) => f.startsWith('play-'))).toHaveLength(55);
+    expect(left).toEqual(expect.arrayContaining(['notes.txt', 'build-notes.log', 'events-2020-01-01T00-00-00-000Z.jsonl']));
+  });
+});
+
 describe('listFiles', () => {
   it('lists files recursively as sorted posix paths', () => {
     const dir = makeTmpDir();
