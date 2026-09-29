@@ -1,6 +1,6 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import type { GsError, Result } from './result.js';
+import { gsError, type GsError, type Result } from './result.js';
 
 /** What the last run of a command reported, kept in .gameshipper/last/<command>.json for `status`. */
 export interface LastRun {
@@ -14,7 +14,11 @@ export interface LastRun {
 
 const lastDir = (projectDir: string) => path.join(projectDir, '.gameshipper', 'last');
 
-export function saveLastRun(projectDir: string, command: string, result: Result<unknown>, now: Date = new Date()): void {
+/**
+ * Best-effort: a run that finished must not turn into a failure because its record couldn't be written.
+ * Returns a LAST_RUN_NOT_SAVED warning for the result when saving fails, else null.
+ */
+export function saveLastRun(projectDir: string, command: string, result: Result<unknown>, now: Date = new Date()): GsError | null {
   const record: LastRun = {
     command,
     at: now.toISOString(),
@@ -23,8 +27,17 @@ export function saveLastRun(projectDir: string, command: string, result: Result<
     errors: result.errors,
     warnings: result.warnings,
   };
-  fs.mkdirSync(lastDir(projectDir), { recursive: true });
-  fs.writeFileSync(path.join(lastDir(projectDir), `${command}.json`), `${JSON.stringify(record, null, 2)}\n`);
+  try {
+    fs.mkdirSync(lastDir(projectDir), { recursive: true });
+    fs.writeFileSync(path.join(lastDir(projectDir), `${command}.json`), `${JSON.stringify(record, null, 2)}\n`);
+    return null;
+  } catch (e) {
+    return gsError(
+      'LAST_RUN_NOT_SAVED',
+      `Couldn't record this ${command} for \`status\`: ${e instanceof Error ? e.message : String(e)}`,
+      `Make sure ${lastDir(projectDir)} is a folder you can write to. Until then \`status\` shows an older result.`,
+    );
+  }
 }
 
 /** Last runs by command. Damaged records are skipped: `status` must always answer. */

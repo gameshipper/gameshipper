@@ -32,6 +32,17 @@ describe('last runs', () => {
     expect(readLastRuns(dir).build.ok).toBe(true);
   });
 
+  it('saving is best-effort: a failure comes back as a LAST_RUN_NOT_SAVED warning', () => {
+    expect(saveLastRun(makeTmpDir(), 'build', ok({}))).toBeNull();
+    const dir = makeTmpDir();
+    writeFiles(dir, { '.gameshipper/last': '' });
+    expect(saveLastRun(dir, 'build', ok({}))).toMatchObject({
+      code: 'LAST_RUN_NOT_SAVED',
+      message: expect.stringContaining("Couldn't record this build for `status`"),
+      fix: expect.stringContaining('.gameshipper'),
+    });
+  });
+
   it('skips damaged records', () => {
     const dir = makeTmpDir();
     saveLastRun(dir, 'build', ok({}));

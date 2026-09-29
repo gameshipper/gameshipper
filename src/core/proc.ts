@@ -1,4 +1,5 @@
 import { spawnSync, type ChildProcess } from 'node:child_process';
+import * as os from 'node:os';
 
 /** Signals that stop Gameshipper; child processes it started are stopped with it. */
 const STOP_SIGNALS: NodeJS.Signals[] = ['SIGINT', 'SIGTERM', 'SIGHUP'];
@@ -36,15 +37,21 @@ export function killTree(child: ChildProcess): void {
 }
 
 /**
- * While `child` runs, stop its whole tree if Gameshipper is stopped (then die of the same signal) or
- * exits. A detached child doesn't get the terminal's Ctrl+C itself. Returns the function that removes
- * these handlers; call it once the child is done.
+ * While `child` runs, stop its whole tree if Gameshipper is stopped or exits. A detached child doesn't
+ * get the terminal's Ctrl+C itself. After stopping the child, Gameshipper dies of the same signal,
+ * unless something else listens for it (the CLI does, to report the interrupted run and pick the exit
+ * code). Returns the function that removes these handlers; call it once the child is done.
  */
 export function stopWithGameshipper(child: ChildProcess): () => void {
   const onSignal = (signal: NodeJS.Signals): void => {
     detach();
     killTree(child);
-    process.kill(process.pid, signal);
+    if (process.listenerCount(signal) > 0) return;
+    try {
+      process.kill(process.pid, signal);
+    } catch {
+      process.exit(128 + (os.constants.signals[signal] ?? 0));
+    }
   };
   const onExit = (): void => killTree(child);
   const detach = (): void => {
