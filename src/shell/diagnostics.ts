@@ -30,6 +30,11 @@ export interface Diagnostics {
 
 export const MAX_INFO_EVENTS = 200;
 
+/** A smoke run whose page hasn't loaded this many seconds past its duration ends with a load-failed event. */
+export const LOAD_BACKSTOP_EXTRA_SECONDS = 30;
+/** The load-failed `description` for that backstop; the smoke runner (core/smoke.ts) recognises it. */
+export const LOAD_TIMEOUT_DESCRIPTION = 'The page never finished loading (timed out)';
+
 export function createDiagnostics(logFile: string | null): Diagnostics {
   const events: DiagEvent[] = [];
   let infoCount = 0;

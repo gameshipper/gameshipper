@@ -4,7 +4,7 @@ import * as path from 'node:path';
 import type { Config } from '../config/schema.js';
 import type { Ctx } from '../context.js';
 import { listFiles } from '../fsutil.js';
-import { killTree, stopWithGameshipper } from '../proc.js';
+import { killTree, OUTPUT_BUFFER_CHARS, outputTail, stopWithGameshipper } from '../proc.js';
 import { GsFailure, gsError, type GsError } from '../result.js';
 
 const SKIP_ANYWHERE = new Set(['.git', '.DS_Store', 'Thumbs.db', 'steam_appid.txt']);
@@ -27,10 +27,6 @@ const TEXT_FILE = /\.(html?|m?js|css)$/i;
 const BUILD_TIMEOUT_MS = 10 * 60 * 1000;
 /** After the command exits, how long to wait for leftover background processes to release its output. */
 const CLOSE_GRACE_MS = 2000;
-const OUTPUT_TAIL_LINES = 20;
-const OUTPUT_TAIL_MAX_CHARS = 4096;
-/** Enough to hold the last lines of output without buffering a whole build log. */
-const OUTPUT_BUFFER_CHARS = 64 * 1024;
 
 const isEnvFile = (name: string): boolean => name === '.env' || name.startsWith('.env.');
 
@@ -53,13 +49,6 @@ function loopsBack(link: string, target: string, root: string): boolean {
     if (isWithin(fs.realpathSync(dir), target)) return true;
     if (dir === root || dir === path.dirname(dir)) return false;
   }
-}
-
-/** The last lines of a command's output, short enough for an error message. */
-function outputTail(output: string): string {
-  // Progress bars redraw one line with \r, so treat it as a line break too.
-  const tail = output.trimEnd().split(/\r?\n|\r/).slice(-OUTPUT_TAIL_LINES).join('\n');
-  return tail.length > OUTPUT_TAIL_MAX_CHARS ? `…${tail.slice(-OUTPUT_TAIL_MAX_CHARS)}` : tail;
 }
 
 function formatDuration(ms: number): string {

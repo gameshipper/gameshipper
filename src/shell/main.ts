@@ -2,7 +2,13 @@ import { app, BrowserWindow, ipcMain, Menu, protocol, session, shell } from 'ele
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { Readable } from 'node:stream';
-import { createDiagnostics, mainProcessErrorReason, writeSummary } from './diagnostics.js';
+import {
+  createDiagnostics,
+  LOAD_BACKSTOP_EXTRA_SECONDS,
+  LOAD_TIMEOUT_DESCRIPTION,
+  mainProcessErrorReason,
+  writeSummary,
+} from './diagnostics.js';
 import { chromiumSwitches } from './flags.js';
 import { isFullscreenToggle } from './keys.js';
 import { mimeType } from './mime.js';
@@ -72,10 +78,10 @@ if (smoke) {
   // Backstop: end the run even if the page never loads, and report that as a failure, not a pass.
   setTimeout(() => {
     if (!pageLoaded) {
-      diagnostics.record({ kind: 'load-failed', url: gameEntry, code: 0, description: 'The page never finished loading (timed out)' });
+      diagnostics.record({ kind: 'load-failed', url: gameEntry, code: 0, description: LOAD_TIMEOUT_DESCRIPTION });
     }
     finishSmoke(0);
-  }, (smokeSeconds + 30) * 1000);
+  }, (smokeSeconds + LOAD_BACKSTOP_EXTRA_SECONDS) * 1000);
 }
 
 // Everything below must happen before the app is ready.

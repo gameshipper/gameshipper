@@ -3,7 +3,7 @@ import { prepareApp, type PrepareOptions, type PreparedApp } from './build.js';
 import type { Config } from './config/schema.js';
 import type { Ctx } from './context.js';
 import { electronBinary } from './electron.js';
-import { fail, GsFailure, ok, type Result } from './result.js';
+import { fail, GsFailure, gsError, ok, type Result } from './result.js';
 import { eventsLogPath, gameEnv, launch, runSmoke, type SmokeData } from './smoke.js';
 
 export interface PlayOptions extends PrepareOptions {
@@ -39,8 +39,19 @@ export async function runPlay(ctx: Ctx, config: Config, opts: PlayOptions): Prom
     }
     const eventsLog = eventsLogPath(ctx.projectDir);
     ctx.log(`playing: ${electron} ${prepared.appDir}`);
-    await launch(ctx, electron, [prepared.appDir], { env: gameEnv(eventsLog, userDataDir, windowed) });
-    return ok({ appDir: prepared.appDir, eventsLog }, prepared.warnings);
+    const run = await launch(ctx, electron, [prepared.appDir], { env: gameEnv(eventsLog, userDataDir, windowed) });
+    const data: PlayData = { appDir: prepared.appDir, eventsLog };
+    // Interactive play has no timeout, so any signal came from outside Gameshipper (a crash or a kill).
+    if (run.exitCode === 0) return ok(data, prepared.warnings);
+    const how = run.signal ? `stopped by ${run.signal}` : `exit code ${run.exitCode}`;
+    const message = run.outputTail.trim()
+      ? `The game quit unexpectedly (${how}). Last lines of its output:\n${run.outputTail}`
+      : `The game quit unexpectedly (${how}).`;
+    return fail(
+      gsError('GAME_EXITED', message, `Its full output is in ${ctx.logPath}. Run \`npx gameshipper play --smoke --json\` to collect the game's errors.`),
+      prepared.warnings,
+      data,
+    );
   } catch (e) {
     if (e instanceof GsFailure) return fail(e.error, prepared.warnings);
     throw e;

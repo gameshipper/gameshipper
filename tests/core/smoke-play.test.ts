@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vitest';
 import { parseConfig } from '../../src/core/config/load.js';
 import { runPlay } from '../../src/core/play.js';
 import { runSmoke, summaryToIssues } from '../../src/core/smoke.js';
-import type { DiagEvent, DiagSummary } from '../../src/shell/diagnostics.js';
+import { LOAD_TIMEOUT_DESCRIPTION, type DiagEvent, type DiagSummary } from '../../src/shell/diagnostics.js';
 import { testCtx } from '../helpers/ctx.js';
 import { makeTmpDir, writeFiles } from '../helpers/tmp.js';
 
@@ -74,6 +74,7 @@ describe('summaryToIssues', () => {
     const { errors, warnings } = summaryToIssues({ droppedInfo: 0, events });
     expect(errors.map((e) => e.code)).toEqual(['GAME_LOAD_FAILED']);
     expect(errors[0].message).toContain('ERR_FILE_NOT_FOUND');
+    expect(errors[0].fix).toContain('game.entry');
     expect(warnings.map((w) => w.code)).toEqual([
       'GAME_CONSOLE_WARNING',
       'GAME_NAVIGATION_BLOCKED',
@@ -84,6 +85,18 @@ describe('summaryToIssues', () => {
     expect(warnings[1].fix).toContain('window.open');
     expect(warnings[2].message).toContain('(blocked)');
     expect(warnings[3].message).toContain('failed: net::ERR_INTERNET_DISCONNECTED');
+  });
+
+  it("says when the shell's backstop found the page never finished loading", () => {
+    const events: DiagEvent[] = [{ kind: 'load-failed', url: 'app://game/index.html', code: 0, description: LOAD_TIMEOUT_DESCRIPTION }];
+    expect(summaryToIssues({ droppedInfo: 0, events }, { seconds: 3 }).errors).toEqual([
+      {
+        code: 'GAME_LOAD_FAILED',
+        message: "The game's page never finished loading within 33 seconds.",
+        fix: 'Something the page waits for never arrived: check the events log for requests that never completed, or a script that never returns.',
+      },
+    ]);
+    expect(summaryToIssues({ droppedInfo: 0, events }).errors[0].message).toBe("The game's page never finished loading.");
   });
 
   it('ignores event kinds from a newer shell instead of failing', () => {
@@ -134,6 +147,15 @@ describe('runPlay --smoke', () => {
     expect(r.errors[0].message).toContain('exit code 4');
   });
 
+  it('reports a page that never finished loading against the smoke duration', async () => {
+    const { dir, shellDir } = project(`
+      const events = [{ kind: 'load-failed', url: 'app://game/index.html', code: 0, description: ${JSON.stringify(LOAD_TIMEOUT_DESCRIPTION)} }];
+      require('fs').writeFileSync(process.env.GAMESHIPPER_SMOKE_OUT, JSON.stringify({ droppedInfo: 0, events }));
+    `);
+    const r = await runPlay(testCtx(dir), config, { shellDir, smokeSeconds: 2, electronPath: process.execPath });
+    expect(r.errors.map((e) => [e.code, e.message])).toEqual([['GAME_LOAD_FAILED', "The game's page never finished loading within 32 seconds."]]);
+  });
+
   it('SMOKE_NO_RESULT when the report is not valid JSON', async () => {
     const { dir, shellDir } = project(`require('fs').writeFileSync(process.env.GAMESHIPPER_SMOKE_OUT, '{"events": [');`);
     const r = await runPlay(testCtx(dir), config, { shellDir, smokeSeconds: 1, electronPath: process.execPath });
@@ -170,6 +192,40 @@ describe('runPlay', () => {
     expect(env.GAMESHIPPER_WINDOWED).toBe('');
     expect(env.GAMESHIPPER_SMOKE_SECONDS).toBeUndefined();
     expect(env.ELECTRON_RUN_AS_NODE).toBeUndefined();
+  });
+});
+
+describe('runPlay when the game dies', () => {
+  it('GAME_EXITED when the game quits with an error, with the last lines of its output', async () => {
+    const { dir, shellDir } = project(`console.log('starting'); console.error('Error: save file corrupt'); process.exitCode = 1;`);
+    const ctx = testCtx(dir);
+    const r = await runPlay(ctx, config, { shellDir, electronPath: process.execPath });
+    expect(r.ok).toBe(false);
+    expect(r.errors.map((e) => e.code)).toEqual(['GAME_EXITED']);
+    expect(r.errors[0].message).toContain('exit code 1');
+    expect(r.errors[0].message).toContain('starting');
+    expect(r.errors[0].message).toContain('Error: save file corrupt');
+    expect(r.errors[0].fix).toContain(ctx.logPath);
+    expect(r.errors[0].fix).toContain('npx gameshipper play --smoke --json');
+    expect(r.data!.eventsLog!.startsWith(path.join(dir, '.gameshipper', 'logs'))).toBe(true);
+    expect(r.warnings.map((w) => w.code)).toEqual(['ICON_MISSING']);
+  });
+
+  it('GAME_EXITED keeps only the last 20 lines of output', async () => {
+    const { dir, shellDir } = project(`for (let i = 1; i <= 30; i++) console.log('line ' + i); process.exitCode = 2;`);
+    const r = await runPlay(testCtx(dir), config, { shellDir, electronPath: process.execPath });
+    const { message } = r.errors[0];
+    expect(message).toContain('exit code 2');
+    expect(message).toMatch(/^line 30$/m);
+    expect(message).toMatch(/^line 11$/m);
+    expect(message).not.toMatch(/^line 10$/m);
+  });
+
+  it.skipIf(process.platform === 'win32')('GAME_EXITED when something else kills the game', async () => {
+    const { dir, shellDir } = project(`process.kill(process.pid, 'SIGTERM');`);
+    const r = await runPlay(testCtx(dir), config, { shellDir, electronPath: process.execPath });
+    expect(r.errors.map((e) => e.code)).toEqual(['GAME_EXITED']);
+    expect(r.errors[0].message).toContain('SIGTERM');
   });
 });
 

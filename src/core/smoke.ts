@@ -1,9 +1,9 @@
 import { spawn } from 'node:child_process';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import type { DiagSummary } from '../shell/diagnostics.js';
+import { LOAD_BACKSTOP_EXTRA_SECONDS, LOAD_TIMEOUT_DESCRIPTION, type DiagSummary } from '../shell/diagnostics.js';
 import type { Ctx } from './context.js';
-import { killTree, stopWithGameshipper } from './proc.js';
+import { killTree, OUTPUT_BUFFER_CHARS, outputTail, stopWithGameshipper } from './proc.js';
 import { fail, GsFailure, gsError, ok, type GsError, type Result } from './result.js';
 
 export interface SmokeData {
@@ -26,7 +26,8 @@ export interface SmokeOptions {
 
 /**
  * How long past the smoke duration a game may run before Gameshipper stops it. The shell ends a smoke
- * run itself by `seconds` + 30 s even when the page never loads, so this only fires if the game hangs.
+ * run itself by `seconds` + LOAD_BACKSTOP_EXTRA_SECONDS even when the page never loads, so this only
+ * fires if the game hangs.
  */
 export const SMOKE_TIMEOUT_GRACE_SECONDS = 45;
 /** After the game exits, how long to wait for its helper processes to release its output. */
@@ -43,7 +44,8 @@ function formatSeconds(ms: number): string {
 /** Compile-time check that every DiagEvent kind is handled. */
 const unhandled = (_event: never): void => {};
 
-export function summaryToIssues(summary: DiagSummary): { errors: GsError[]; warnings: GsError[] } {
+/** `seconds` is the smoke run's duration, used to say how long the page had to load. */
+export function summaryToIssues(summary: DiagSummary, opts: { seconds?: number } = {}): { errors: GsError[]; warnings: GsError[] } {
   const errors: GsError[] = [];
   const warnings: GsError[] = [];
   const seen = new Set<string>();
@@ -105,6 +107,19 @@ export function summaryToIssues(summary: DiagSummary): { errors: GsError[]; warn
         );
         break;
       case 'load-failed':
+        if (e.code === 0 && e.description === LOAD_TIMEOUT_DESCRIPTION) {
+          // The shell's backstop: the page started loading but never finished.
+          const within = opts.seconds === undefined ? '' : ` within ${formatSeconds((opts.seconds + LOAD_BACKSTOP_EXTRA_SECONDS) * 1000)}`;
+          add(
+            errors,
+            gsError(
+              'GAME_LOAD_FAILED',
+              `The game's page never finished loading${within}.`,
+              'Something the page waits for never arrived: check the events log for requests that never completed, or a script that never returns.',
+            ),
+          );
+          break;
+        }
         add(
           errors,
           gsError(
@@ -147,7 +162,10 @@ export interface LaunchOptions {
 export interface LaunchResult {
   exitCode: number | null;
   signal: NodeJS.Signals | null;
+  /** Gameshipper stopped the game because it ran past `timeoutMs`. */
   timedOut: boolean;
+  /** The last lines the game printed (stdout and stderr), for error messages. */
+  outputTail: string;
 }
 
 /**
@@ -164,9 +182,13 @@ export function launch(ctx: Ctx, command: string, args: string[], opts: LaunchOp
       detached: process.platform !== 'win32',
       windowsHide: true,
     });
-    const onData = (d: Buffer): void => ctx.log(`[game] ${d.toString().trimEnd()}`);
-    child.stdout.on('data', onData);
-    child.stderr.on('data', onData);
+    let output = '';
+    const onData = (text: string): void => {
+      ctx.log(`[game] ${text.trimEnd()}`);
+      output = (output + text).slice(-OUTPUT_BUFFER_CHARS);
+    };
+    child.stdout.setEncoding('utf8').on('data', onData);
+    child.stderr.setEncoding('utf8').on('data', onData);
     const detach = stopWithGameshipper(child);
 
     let settled = false;
@@ -185,7 +207,7 @@ export function launch(ctx: Ctx, command: string, args: string[], opts: LaunchOp
       clearTimeout(graceTimer);
       detach();
       if (!error) {
-        resolve({ exitCode: exit.code, signal: exit.signal, timedOut });
+        resolve({ exitCode: exit.code, signal: exit.signal, timedOut, outputTail: outputTail(output) });
         return;
       }
       reject(
@@ -208,6 +230,8 @@ export function launch(ctx: Ctx, command: string, args: string[], opts: LaunchOp
     });
     // A helper process can keep the game's output open (and 'close' from firing) after the game exits.
     child.on('exit', (code, signal) => {
+      // After a timeout the run has already settled; the kill's own exit needs no grace period.
+      if (settled) return;
       exit = { code, signal };
       graceTimer = setTimeout(() => {
         stop();
@@ -279,7 +303,7 @@ export async function runSmoke(ctx: Ctx, opts: SmokeOptions): Promise<Result<Smo
       summary === 'missing' ? `The game didn't report back (${ended}).` : `The game's report ${outFile} couldn't be read (${ended}).`;
     return fail([gsError('SMOKE_NO_RESULT', message, `Run \`npx gameshipper play\` to watch it start. ${details}`), ...timeout]);
   }
-  const { errors, warnings } = summaryToIssues(summary);
+  const { errors, warnings } = summaryToIssues(summary, { seconds: opts.seconds });
   const all = [...errors, ...timeout];
   const data: SmokeData = { summary, eventsLog, exitCode: run.exitCode };
   return all.length ? fail(all, warnings, data) : ok(data, warnings);
