@@ -78,6 +78,8 @@ describe('runCheck', () => {
       windowed: true,
       userDataDir: path.join(dir, '.gameshipper', 'check', 'data'),
       capture: { offline: true, viewport: { width: 1280, height: 800 }, probeDir: path.join(dir, '.gameshipper', 'check') },
+      // A missing file named like the key art or logo was left out of the build as store art.
+      storeArt: ['k.png', 'l.png'],
     });
     expect(Object.fromEntries(r.data!.checks.map((c) => [c.id, c.status]))).toEqual({
       'offline.requests': 'pass',

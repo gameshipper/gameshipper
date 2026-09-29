@@ -5,6 +5,7 @@ import { prepareApp, type PrepareOptions, type PreparedApp } from './build.js';
 import type { Config } from './config/schema.js';
 import type { Ctx } from './context.js';
 import { electronBinary } from './electron.js';
+import { storeArtNames } from './prepare/stage.js';
 import { QUIT_GRACE_MS } from './proc.js';
 import { fail, GsFailure, gsError, ok, type GsError, type Result } from './result.js';
 import { eventsLogPath, gameEnv, launch, readLoggedEvents, runSmoke, type SmokeData } from './smoke.js';
@@ -86,7 +87,8 @@ export async function runPlay(ctx: Ctx, config: Config, opts: PlayOptions): Prom
   try {
     const electron = opts.electronPath ?? electronBinary();
     if (smokeSeconds) {
-      const smoke = await runSmoke(ctx, { command: electron, args: [prepared.appDir], seconds: smokeSeconds, userDataDir, windowed, capture });
+      const storeArt = storeArtNames(config);
+      const smoke = await runSmoke(ctx, { command: electron, args: [prepared.appDir], seconds: smokeSeconds, userDataDir, windowed, capture, storeArt });
       const screenshots = smoke.data ? savedScreenshots(smoke.data.eventsLog) : [];
       const errors = [...smoke.errors];
       if (smoke.data && screenshots.length < at.length) {

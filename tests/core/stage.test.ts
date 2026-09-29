@@ -337,6 +337,33 @@ describe('stageGame', () => {
     expect(fs.existsSync(path.join(stageDir, 'art', 'logo.png'))).toBe(true);
   });
 
+  it('keeps store art the game names in quotes without its extension, as RPG Maker does', async () => {
+    const dir = makeTmpDir();
+    writeFiles(dir, {
+      'index.html': '<script src="js/main.js"></script>',
+      'js/main.js': 'const screen = "LogoScreen"; // a name that merely contains the stem',
+      'data/System.json': '{"title1Name":"Logo","title2Name":""}',
+      'img/titles1/Logo.png': 'logo',
+      'img/key art.png': 'key art',
+    });
+    const art = { keyArt: 'img/key art.png', logo: 'img/titles1/Logo.png' };
+    const { stageDir } = await stageGame(testCtx(dir), cfg(art));
+    expect(fs.existsSync(path.join(stageDir, 'img/titles1/Logo.png'))).toBe(true);
+    expect(fs.existsSync(path.join(stageDir, 'img/key art.png'))).toBe(false);
+
+    // A quoted path ending in the stem counts too, in either kind of quotes, and URL-encoded.
+    for (const mention of ["load('titles1/Logo')", 'load(`img/key%20art`)', "load('key art')"]) {
+      writeFiles(dir, { 'data/System.json': '{}', 'js/main.js': mention });
+      const again = await stageGame(testCtx(dir), cfg(art));
+      const kept = ['img/titles1/Logo.png', 'img/key art.png'].filter((f) => fs.existsSync(path.join(again.stageDir, f)));
+      expect(kept, mention).toEqual([mention.includes('Logo') ? 'img/titles1/Logo.png' : 'img/key art.png']);
+    }
+    // Unquoted, or only part of a name: not a mention.
+    writeFiles(dir, { 'js/main.js': 'const Logo = 1; const s = "MyLogo"; const t = "Logo2";' });
+    const none = await stageGame(testCtx(dir), cfg(art));
+    expect(fs.existsSync(path.join(none.stageDir, 'img/titles1/Logo.png'))).toBe(false);
+  });
+
   it('removes a folder that held only the store art', async () => {
     const dir = makeTmpDir();
     writeFiles(dir, { 'index.html': '<html></html>', 'art/store/key-art.png': 'key art', 'art/store/logo.png': 'logo' });

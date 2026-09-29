@@ -44,6 +44,8 @@ export interface SmokeOptions {
   env?: NodeJS.ProcessEnv;
   /** What the shell captures during the run (`play --screenshot`, `check`); passed as its GAMESHIPPER_* variables. */
   capture?: CaptureSettings;
+  /** File names of the key art and logo (stage.ts storeArtNames), which builds leave out unless the game names them. */
+  storeArt?: string[];
 }
 
 /**
@@ -57,6 +59,19 @@ const CLOSE_GRACE_MS = 2000;
 
 const IGNORED_MISSING = new Set(['favicon.ico']);
 const shortUrl = (url: string) => url.replace(/^app:\/\/game\//, '');
+
+/** The file name a URL asks for: no query or fragment, URL-decoded. */
+function requestedName(url: string): string {
+  const name = url.replace(/[?#].*$/, '').split('/').pop() ?? '';
+  try {
+    return decodeURIComponent(name);
+  } catch {
+    return name;
+  }
+}
+
+const STORE_ART_FIX =
+  "This file was left out of the build because it's your store art; if the game shows it, mention its name in the game's code or set it apart from keyArt/logo.";
 
 function formatSeconds(ms: number): string {
   const n = Math.max(1, Math.round(ms / 1000));
@@ -96,7 +111,7 @@ function capEvent(event: DiagEvent): DiagEvent {
  */
 export function summaryToIssues(
   summary: DiagSummary,
-  opts: { seconds?: number; eventsLog?: string } = {},
+  opts: { seconds?: number; eventsLog?: string; storeArt?: string[] } = {},
 ): { errors: GsError[]; warnings: GsError[] } {
   const errors: GsError[] = [];
   const warnings: GsError[] = [];
@@ -143,7 +158,9 @@ export function summaryToIssues(
             `The game requested ${shortUrl(e.url)}, which isn't in the build.`,
             actual
               ? `The file is named ${actual}: use exactly that letter case in your code.`
-              : "Check the path's spelling and letter case, and that the file is inside your game folder.",
+              : opts.storeArt?.includes(requestedName(e.url))
+                ? STORE_ART_FIX
+                : "Check the path's spelling and letter case, and that the file is inside your game folder.",
           ),
         );
         break;
@@ -504,7 +521,7 @@ export async function runSmoke(ctx: Ctx, opts: SmokeOptions): Promise<Result<Smo
       summary === 'missing' ? `The game didn't report back (${ended}).` : `The game's report ${outFile} couldn't be read (${ended}).`;
     return fail([gsError('SMOKE_NO_RESULT', message, `Run \`npx gameshipper play\` to watch it start. ${details}`), ...timeout]);
   }
-  const { errors, warnings } = summaryToIssues(summary, { seconds: opts.seconds, eventsLog });
+  const { errors, warnings } = summaryToIssues(summary, { seconds: opts.seconds, eventsLog, storeArt: opts.storeArt });
   const all = [...errors, ...timeout];
   const data: SmokeData = { summary: truncateSummary(summary), eventsLog, exitCode: run.exitCode };
   return all.length ? fail(all, warnings, data) : ok(data, warnings);

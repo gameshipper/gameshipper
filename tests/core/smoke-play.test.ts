@@ -108,6 +108,23 @@ describe('summaryToIssues', () => {
     expect(summaryToIssues({ droppedInfo: 0, events }).errors[0].message).toBe("The game's page never finished loading.");
   });
 
+  it("says when a missing file is store art the build left out", () => {
+    const events: DiagEvent[] = [
+      { kind: 'missing-file', url: 'app://game/img/titles1/Logo.png' },
+      { kind: 'missing-file', url: 'app://game/img/key%20art.png?v=2' },
+      { kind: 'missing-file', url: 'app://game/img/other.png' },
+    ];
+    const { errors } = summaryToIssues({ droppedInfo: 0, events }, { storeArt: ['Logo.png', 'key art.png'] });
+    expect(errors.map((e) => e.code)).toEqual(['GAME_FILE_MISSING', 'GAME_FILE_MISSING', 'GAME_FILE_MISSING']);
+    for (const e of errors.slice(0, 2)) {
+      expect(e.fix).toBe(
+        "This file was left out of the build because it's your store art; if the game shows it, mention its name in the game's code or set it apart from keyArt/logo.",
+      );
+    }
+    expect(errors[2].fix).toContain('spelling');
+    expect(summaryToIssues({ droppedInfo: 0, events }).errors[0].fix).toContain('spelling');
+  });
+
   it('ignores event kinds from a newer shell instead of failing', () => {
     const events = [{ kind: 'from-the-future', detail: 1 }] as unknown as DiagEvent[];
     expect(summaryToIssues({ droppedInfo: 0, events })).toEqual({ errors: [], warnings: [] });
@@ -135,6 +152,16 @@ describe('runPlay --smoke', () => {
     expect(r.data!.smoke!.summary.events).toHaveLength(1);
     expect(r.data!.smoke!.eventsLog.startsWith(path.join(dir, '.gameshipper', 'logs'))).toBe(true);
     expect(r.warnings.map((w) => w.code)).toEqual(['ICON_MISSING', 'STEAM_SDK_MISSING']);
+  });
+
+  it('points a missing file at the store art it left out', async () => {
+    const { dir, shellDir } = project(`
+      const summary = { droppedInfo: 0, events: [{ kind: 'missing-file', url: 'app://game/art/Logo.png' }] };
+      require('fs').writeFileSync(process.env.GAMESHIPPER_SMOKE_OUT, JSON.stringify(summary));
+    `);
+    writeFiles(dir, { 'art/Logo.png': 'logo' });
+    const r = await runPlay(testCtx(dir), parseConfig({ name: 'x', version: '1.0.0', logo: 'art/Logo.png' }).data!, { shellDir, smokeSeconds: 1, electronPath: process.execPath });
+    expect(r.errors).toEqual([expect.objectContaining({ code: 'GAME_FILE_MISSING', fix: expect.stringContaining('store art') })]);
   });
 
   it('passes the smoke settings to the game process', async () => {

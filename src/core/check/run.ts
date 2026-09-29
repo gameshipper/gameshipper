@@ -5,6 +5,7 @@ import type { DiagEvent } from '../../shell/diagnostics.js';
 import { frameInfo, type FrameInfo } from '../assets/inspect.js';
 import type { Config, DesktopTarget } from '../config/schema.js';
 import type { Ctx } from '../context.js';
+import { storeArtNames } from '../prepare/stage.js';
 import { fail, GsFailure, ok, type GsError, type Result } from '../result.js';
 import { loggedEvents, runSmoke, type SmokeData } from '../smoke.js';
 import { launchChecks } from './launch.js';
@@ -64,6 +65,7 @@ export async function runCheck(ctx: Ctx, config: Config, opts: CheckOptions = {}
         userDataDir: path.join(checkDir, 'data'),
         windowed: true,
         capture: { offline: true, viewport: DECK_SIZE, probeDir: checkDir },
+        storeArt: storeArtNames(config),
       });
       if (!smoke.data) {
         launchError = smoke.errors[0] ?? null;

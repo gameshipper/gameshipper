@@ -293,7 +293,7 @@ export async function stageGame(ctx: Ctx, config: Config, opts: StageOptions = {
         ),
       );
     }
-    for (const a of art) if (a.names.some((n) => text.includes(n))) mentioned.add(a.file);
+    for (const a of art) if (a.names.some((n) => text.includes(n)) || a.stem?.test(text)) mentioned.add(a.file);
   }
   for (const a of art.filter((x) => !mentioned.has(x.file))) leaveOut(ctx, stageDir, staged, a);
   return { stageDir, warnings };
@@ -304,6 +304,18 @@ interface StoreArt {
   file: string;
   /** How the game's code would name it: the file name, and the same URL-encoded. */
   names: string[];
+  /**
+   * The name without its extension as a whole quoted string, or the end of one after a "/" ("Logo",
+   * 'titles1/Logo'): engines such as RPG Maker add the extension themselves. null for a name without one.
+   */
+  stem: RegExp | null;
+}
+
+const escapeRegExp = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+/** The file names of keyArt and logo, when set: what a missing file the game asked for is compared with. */
+export function storeArtNames(config: Config): string[] {
+  return [config.keyArt, config.logo].flatMap((rel) => (rel ? [path.posix.basename(rel.split(path.sep).join('/'))] : []));
 }
 
 /** keyArt and logo, when set and present. */
@@ -314,7 +326,10 @@ function storeArt(projectDir: string, config: Config): StoreArt[] {
     const file = path.resolve(projectDir, rel);
     if (!fs.existsSync(file) || !fs.statSync(file).isFile() || art.some((a) => a.file === file)) continue;
     const name = path.basename(file);
-    art.push({ file, names: [...new Set([name, encodeURI(name)])] });
+    const base = path.parse(name).name;
+    const stems = base && base !== name ? [...new Set([base, encodeURI(base)])].map(escapeRegExp) : [];
+    const stem = stems.length ? new RegExp(`(["'\`])(?:[^"'\`\\n]*/)?(?:${stems.join('|')})\\1`) : null;
+    art.push({ file, names: [...new Set([name, encodeURI(name)])], stem });
   }
   return art;
 }
