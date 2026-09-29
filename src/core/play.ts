@@ -22,6 +22,8 @@ export interface PlayOptions extends PrepareOptions {
   onGameStarted?: (data: PlayData, warnings: GsError[]) => void;
   /** `--screenshot`: save a 1920x1080 store screenshot this many seconds after the game loads, for each entry, then quit. */
   screenshotAt?: number[];
+  /** Interactive play: called with what the shell tells the person playing, such as a failed F12 screenshot. */
+  onNotice?: (message: string) => void;
 }
 
 export interface PlayData {
@@ -91,7 +93,7 @@ export async function runPlay(ctx: Ctx, config: Config, opts: PlayOptions): Prom
         errors.push(
           gsError(
             'SCREENSHOT_FAILED',
-            `Saved ${screenshots.length} of the ${at.length} screenshots asked for.`,
+            `Saved ${screenshots.length} of the ${at.length} screenshot${at.length === 1 ? '' : 's'} asked for.`,
             'The SCREENSHOT_FAILED warnings say why. A screenshot time later than the game ran is skipped too: check the times, then try again.',
           ),
         );
@@ -104,7 +106,7 @@ export async function runPlay(ctx: Ctx, config: Config, opts: PlayOptions): Prom
     const data: PlayData = { appDir: prepared.appDir, eventsLog };
     // On Ctrl+C the game gets to quit properly, finishing any save in flight; smoke runs are stopped at once.
     const env = { ...gameEnv(eventsLog, userDataDir, windowed), ...captureEnv(capture) };
-    const running = launch(ctx, electron, [prepared.appDir], { env, quitGraceMs: QUIT_GRACE_MS });
+    const running = launch(ctx, electron, [prepared.appDir], { env, quitGraceMs: QUIT_GRACE_MS, onNotice: opts.onNotice });
     opts.onGameStarted?.(data, prepared.warnings);
     const run = await running;
     data.screenshots = savedScreenshots(eventsLog);

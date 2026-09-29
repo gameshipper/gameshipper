@@ -65,7 +65,8 @@ export function playSummary(r: Result<PlayData>, opts: { smoke: boolean }): stri
     const found = `✗ Found ${plural(problemCount(r.errors), 'problem')} while the game ran.`;
     return [r.ok ? '✓ The game ran with no errors.' : found, `Events: ${smoke.eventsLog}`, ...saved];
   }
-  if (!r.ok) return [];
+  // A game that quit with an error explains itself (GAME_EXITED), but what it saved before is still saved.
+  if (!r.ok) return saved;
   return ['Game closed.', ...(r.data.eventsLog ? [`Events: ${r.data.eventsLog}`] : []), ...saved];
 }
 

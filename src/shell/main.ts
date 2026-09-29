@@ -4,13 +4,14 @@ import * as path from 'node:path';
 import { Readable } from 'node:stream';
 import { PageCamera } from './camera.js';
 import {
-  captureSettings,
   DECK_SIZE,
   isAllowedOffline,
+  noticeLine,
   QUIT_TIMEOUT_EXIT_CODE,
   QUIT_TIMEOUT_MS,
   SCREENSHOT_SIZE,
   screenshotFileName,
+  shellCaptureSettings,
   type Size,
 } from './capture.js';
 import { floatingKeyboardArgs } from './deck-keyboard.js';
@@ -48,8 +49,8 @@ const env = process.env;
 const diagnostics = createDiagnostics(env.GAMESHIPPER_LOG ?? null);
 const smokeSeconds = Number(env.GAMESHIPPER_SMOKE_SECONDS ?? '0');
 const smoke = smokeSeconds > 0;
-/** What `play` and `check` asked the shell to capture (capture.ts); nothing for a shipped game. */
-const capture = captureSettings(env);
+/** What `play` and `check` asked the shell to capture (capture.ts); nothing when a player launches a shipped game. */
+const capture = shellCaptureSettings(env, app.isPackaged);
 
 const errorText = (e: unknown): string => {
   try {
@@ -532,6 +533,8 @@ function takeScreenshot(camera: PageCamera, dir: string): Promise<void> {
       diagnostics.record({ kind: 'screenshot', file, width: SCREENSHOT_SIZE.width, height: SCREENSHOT_SIZE.height });
     } catch (e) {
       diagnostics.record({ kind: 'screenshot-failed', error: errorText(e) });
+      // In interactive play only F12 takes screenshots, and the person pressing it should hear that it failed.
+      if (!smoke) process.stderr.write(noticeLine(`Couldn't save the F12 screenshot: ${errorText(e)}`));
     }
   });
   return screenshotQueue;

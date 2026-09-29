@@ -1,7 +1,7 @@
 import { spawn } from 'node:child_process';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { CAPTURE_ENV_NAMES, captureEnv, type CaptureSettings } from '../shell/capture.js';
+import { CAPTURE_ENV_NAMES, captureEnv, noticesIn, type CaptureSettings } from '../shell/capture.js';
 import { LOAD_BACKSTOP_EXTRA_SECONDS, LOAD_TIMEOUT_DESCRIPTION, type DiagEvent, type DiagSummary } from '../shell/diagnostics.js';
 import type { Ctx } from './context.js';
 import { killTree, OUTPUT_BUFFER_CHARS, outputTail, releaseAfterExit, stopWithGameshipper } from './proc.js';
@@ -304,6 +304,8 @@ export interface LaunchOptions {
    * flight) before stopping its tree. Without it, the tree is stopped at once, as smoke runs want.
    */
   quitGraceMs?: number;
+  /** Called with each notice the shell prints for the person playing (capture.ts noticeLine). */
+  onNotice?: (message: string) => void;
 }
 
 export interface LaunchResult {
@@ -336,6 +338,11 @@ export function launch(ctx: Ctx, command: string, args: string[], opts: LaunchOp
     };
     child.stdout.setEncoding('utf8').on('data', onData);
     child.stderr.setEncoding('utf8').on('data', onData);
+    if (opts.onNotice) {
+      // Each stream on its own, so a line split across chunks is put back together.
+      child.stdout.on('data', noticesIn(opts.onNotice));
+      child.stderr.on('data', noticesIn(opts.onNotice));
+    }
     const detach = stopWithGameshipper(child, { quitGraceMs: opts.quitGraceMs });
 
     let settled = false;

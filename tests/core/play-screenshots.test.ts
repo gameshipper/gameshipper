@@ -4,7 +4,8 @@ import { main, type CliIO } from '../../src/cli/main.js';
 import { playSummary } from '../../src/cli/summaries.js';
 import { parseConfig } from '../../src/core/config/load.js';
 import { parseScreenshotTimes, runPlay, screenshotRunSeconds } from '../../src/core/play.js';
-import { ok } from '../../src/core/result.js';
+import { fail, gsError, ok } from '../../src/core/result.js';
+import { noticeLine } from '../../src/shell/capture.js';
 import { testCtx } from '../helpers/ctx.js';
 import { makeTmpDir, writeFiles } from '../helpers/tmp.js';
 
@@ -75,6 +76,9 @@ describe('runPlay screenshots', () => {
     expect(r.ok).toBe(false);
     expect(r.errors.map((e) => [e.code, e.message])).toEqual([['SCREENSHOT_FAILED', 'Saved 1 of the 2 screenshots asked for.']]);
     expect(r.data!.screenshots).toHaveLength(1);
+    const none = project(fakeShell(0, true));
+    const one = await runPlay(testCtx(none.dir), config, { shellDir: none.shellDir, electronPath: process.execPath, screenshotAt: [1] });
+    expect(one.errors.map((e) => e.message)).toEqual(['Saved 0 of the 1 screenshot asked for.']);
   });
 
   it('interactive play enables F12 and lists what it saved once the game closes', async () => {
@@ -85,6 +89,19 @@ describe('runPlay screenshots', () => {
     expect(r.data!.screenshots).toEqual([`${shots}/shot-1.png`]);
     expect(playSummary(r, { smoke: false })).toEqual(['Game closed.', `Events: ${r.data!.eventsLog}`, `Saved 1 screenshot (1920x1080) in ${shots}`]);
     expect(playSummary(ok({ appDir: '/a', eventsLog: '/e.jsonl', screenshots: [] }), { smoke: false })).toEqual(['Game closed.', 'Events: /e.jsonl']);
+  });
+
+  it('lists the screenshots even when the game then quit with an error', () => {
+    const r = fail(gsError('GAME_EXITED', 'The game quit unexpectedly (exit code 1).'), [], { appDir: '/a', eventsLog: '/e.jsonl', screenshots: ['/p/shots/1.png'] });
+    expect(playSummary(r, { smoke: false })).toEqual(['Saved 1 screenshot (1920x1080) in /p/shots']);
+  });
+
+  it('passes on what the shell tells the person playing, like a failed F12 screenshot', async () => {
+    const { dir, shellDir } = project(`process.stderr.write(${JSON.stringify(`some GPU chatter\n${noticeLine("Couldn't save the screenshot: no frame")}`)});`);
+    const notices: string[] = [];
+    const r = await runPlay(testCtx(dir), config, { shellDir, electronPath: process.execPath, onNotice: (m) => notices.push(m) });
+    expect(r.ok).toBe(true);
+    expect(notices).toEqual(["Couldn't save the screenshot: no frame"]);
   });
 });
 

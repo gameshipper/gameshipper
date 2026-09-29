@@ -81,6 +81,46 @@ export function captureSettings(env: NodeJS.ProcessEnv): CaptureSettings {
   return settings;
 }
 
+/**
+ * The capture settings the shell honours. Only runs Gameshipper makes to look at the game use them: a smoke run
+ * (`play --smoke`, `play --screenshot`, `check`) or the unpackaged app `play` runs. A player's launch of a shipped
+ * game ignores them, so nothing in a player's environment can make it save screenshots or cut it off the network.
+ */
+export function shellCaptureSettings(env: NodeJS.ProcessEnv, isPackaged: boolean): CaptureSettings {
+  const smoke = Number(env.GAMESHIPPER_SMOKE_SECONDS ?? '0') > 0;
+  return smoke || !isPackaged ? captureSettings(env) : {};
+}
+
+/**
+ * Starts a line the shell prints on stderr for the person playing (a failed F12 screenshot, say). The game's
+ * output only goes to the run log; interactive `play` also shows these lines on its own stderr.
+ */
+const NOTICE_PREFIX = 'gameshipper-notice: ';
+/** Longest output line searched for a notice; longer lines are only logged. */
+const MAX_NOTICE_LINE_CHARS = 4096;
+
+/** The line the shell prints for `message`, on one line. */
+export function noticeLine(message: string): string {
+  return `${NOTICE_PREFIX}${message.replace(/\s*[\r\n]+\s*/g, ' ')}\n`;
+}
+
+/**
+ * A handler for one output stream's text, in chunks as they arrive: calls `onNotice` with the message of each
+ * notice line (noticeLine), however the chunks split it.
+ */
+export function noticesIn(onNotice: (message: string) => void): (chunk: string) => void {
+  let pending = '';
+  return (chunk) => {
+    const lines = (pending + chunk).split('\n');
+    pending = lines.pop() ?? '';
+    if (pending.length > MAX_NOTICE_LINE_CHARS) pending = '';
+    for (const line of lines) {
+      const at = line.indexOf(NOTICE_PREFIX);
+      if (at !== -1) onNotice(line.slice(at + NOTICE_PREFIX.length).trimEnd());
+    }
+  };
+}
+
 /** screenshot-2026-09-29T10-15-30-123Z.png: sorts by time and is a valid file name on every OS. */
 export function screenshotFileName(now: Date = new Date()): string {
   return `screenshot-${now.toISOString().replace(/[:.]/g, '-')}.png`;

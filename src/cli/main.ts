@@ -283,6 +283,8 @@ async function playCommand(projectDir: string, values: Values, io: CliIO, run: R
           frozenLock,
           steamSdk: steamSdkFlag(values),
           onGameStarted: (data, warnings) => (run.playing = { data, warnings }),
+          // stdout carries only the result, so what the game tells the person goes to stderr.
+          onNotice: (message) => void process.stderr.write(`! ${message}\n`),
         }),
       ctx.log,
     );

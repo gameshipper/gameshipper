@@ -6,6 +6,9 @@ import {
   captureEnv,
   captureSettings,
   isAllowedOffline,
+  noticeLine,
+  noticesIn,
+  shellCaptureSettings,
   parseSecondsList,
   parseSize,
   screenshotFileName,
@@ -47,6 +50,24 @@ describe('capture settings', () => {
     expect(captureSettings(env)).toEqual(all);
     expect(captureEnv({})).toEqual({});
     expect(captureSettings({})).toEqual({});
+  });
+
+  it('a shipped game honours them only in a smoke or check run; the unpackaged app `play` runs always does', () => {
+    const env = captureEnv({ screenshotDir: '/p/out/store/screenshots', offline: true });
+    // A player launching the shipped game with these set in their environment gets none of it.
+    expect(shellCaptureSettings(env, true)).toEqual({});
+    expect(shellCaptureSettings({ ...env, GAMESHIPPER_SMOKE_SECONDS: '0' }, true)).toEqual({});
+    expect(shellCaptureSettings({ ...env, GAMESHIPPER_SMOKE_SECONDS: '15' }, true)).toEqual({ screenshotDir: '/p/out/store/screenshots', offline: true });
+    expect(shellCaptureSettings(env, false)).toEqual({ screenshotDir: '/p/out/store/screenshots', offline: true });
+  });
+
+  it('notices for the person playing are single lines found in the output, wherever the chunks split', () => {
+    expect(noticeLine("Couldn't save the screenshot:\nno frame")).toBe("gameshipper-notice: Couldn't save the screenshot: no frame\n");
+    const found: string[] = [];
+    const feed = noticesIn((m) => found.push(m));
+    const text = `[1234:ERROR] gpu\n${noticeLine('first')}plain line\n${noticeLine('second')}`;
+    for (const chunk of [text.slice(0, 20), text.slice(20, 41), text.slice(41)]) feed(chunk);
+    expect(found).toEqual(['first', 'second']);
   });
 
   it('screenshotFileName is sortable and file-safe', () => {
