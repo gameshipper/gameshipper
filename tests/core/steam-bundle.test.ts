@@ -77,11 +77,31 @@ describe('bundleSteam', () => {
     expect(r.warnings[0].message).toContain('linux64/libsteam_api.so');
   });
 
+  it('warns once per target without its library', async () => {
+    const appDir = makeTmpDir();
+    const natives = [
+      { platform: 'linux', arch: 'x64' },
+      { platform: 'linux', arch: 'x64' },
+      { platform: 'darwin', arch: 'arm64' },
+    ];
+    const r = await bundleSteam(testCtx(appDir), appDir, fakeSdk(['mac']), natives, { installed: fakeNatives() });
+    expect(r.warnings.map((w) => w.code)).toEqual(['STEAM_SDK_MISSING']);
+  });
+
   it('turns an unsupported computer into a warning, without Steam', async () => {
     const appDir = makeTmpDir();
     const r = await bundleSteam(testCtx(appDir), appDir, fakeSdk(), [{ platform: 'linux', arch: 'riscv64' }], { installed: () => null });
     expect(r.included).toBe(false);
     expect(r.warnings.map((w) => w.code)).toEqual(['STEAM_UNSUPPORTED_PLATFORM']);
+  });
+
+  it('never uses an npm-installed koffi for a CPU Steam has no libraries for (arm64 Linux and Windows)', async () => {
+    for (const platform of ['linux', 'win32']) {
+      const appDir = makeTmpDir();
+      const r = await bundleSteam(testCtx(appDir), appDir, fakeSdk(), [{ platform, arch: 'arm64' }], { installed: fakeNatives() });
+      expect(r, platform).toMatchObject({ included: false, warnings: [expect.objectContaining({ code: 'STEAM_UNSUPPORTED_PLATFORM' })] });
+      expect(fs.existsSync(path.join(appDir, 'node_modules')), platform).toBe(false);
+    }
   });
 
   it('produces a bridge that loads in Node on this computer', async () => {

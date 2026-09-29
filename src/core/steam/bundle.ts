@@ -54,10 +54,14 @@ export async function bundleSteam(
   const warnings: GsError[] = [];
   const ids = new Set<string>();
   const targets = new Set<DesktopTarget>();
+  const unsupported = new Set<DesktopTarget>();
   for (const native of natives) {
     const target = sdkTargetFor(native.platform);
     if (!target) continue;
     if (!sdk.targets.includes(target)) {
+      // One warning per target, however many OS/CPU builds it has.
+      if (unsupported.has(target)) continue;
+      unsupported.add(target);
       warnings.push(
         sdkMissingWarning(
           `The Steamworks SDK at ${sdk.found.path} has no ${target} library (redistributable_bin/${SDK_LIBS[target]}), so the ${target} build has no Steam features.`,
@@ -70,6 +74,8 @@ export async function bundleSteam(
   }
   if (targets.size === 0) return { ...none, warnings };
 
+  // ensureKoffiNative refuses any OS/CPU without a pinned package (such as arm64 Linux and Windows, which
+  // Steam has no libraries for) before it looks at the one npm installed here.
   const nativeDirs = new Map<string, string>();
   for (const id of ids) {
     try {

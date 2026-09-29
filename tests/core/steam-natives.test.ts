@@ -52,6 +52,31 @@ describe('ensureKoffiNative', () => {
     expect(await ensureKoffiNative(ctx, 'win32-x64', { registry: 'http://127.0.0.1:9', pins, installed: () => null })).toBe(dir);
   });
 
+  it('only counts a cached package that has its koffi.node', async () => {
+    server = await startServer({ [route]: { body: tgz } });
+    const ctx = testCtx(makeTmpDir());
+    const cached = path.join(ctx.cacheDir, 'koffi', KOFFI_VERSION, 'win32-x64');
+    fs.mkdirSync(cached, { recursive: true });
+    fs.writeFileSync(path.join(cached, 'package.json'), '{}');
+    expect(await ensureKoffiNative(ctx, 'win32-x64', { registry: server.base, pins, installed: () => null })).toBe(cached);
+    expect(fs.readFileSync(path.join(cached, 'win32_x64', 'koffi.node'), 'utf8')).toBe('native');
+  });
+
+  it('refuses packages with paths outside the package', async () => {
+    for (const bad of ['package/../../evil.txt', '/etc/evil.txt', 'package/win32_x64/../../../evil.txt']) {
+      const evil = makeTgz({ 'package/package.json': '{}', 'package/win32_x64/koffi.node': 'native', [bad]: 'evil' });
+      const evilPins = { 'win32-x64': `sha512-${createHash('sha512').update(evil).digest('base64')}` };
+      server = await startServer({ [route]: { body: evil } });
+      const ctx = testCtx(makeTmpDir());
+      await expect(ensureKoffiNative(ctx, 'win32-x64', { registry: server.base, pins: evilPins, installed: () => null }), bad).rejects.toMatchObject({
+        error: { code: 'STEAM_NATIVE_DOWNLOAD_FAILED', message: expect.stringContaining(`unsafe path ${bad}`) },
+      });
+      expect(fs.existsSync(path.join(ctx.cacheDir, 'koffi', KOFFI_VERSION, 'win32-x64')), bad).toBe(false);
+      await server.close();
+      server = undefined;
+    }
+  });
+
   it('uses the package npm installed for this computer', async () => {
     const ctx = testCtx(makeTmpDir());
     expect(await ensureKoffiNative(ctx, 'win32-x64', { installed: () => '/installed/koffi-win32-x64' })).toBe('/installed/koffi-win32-x64');
@@ -73,10 +98,16 @@ describe('ensureKoffiNative', () => {
     });
   });
 
-  it('STEAM_UNSUPPORTED_PLATFORM for an id with no pinned package', async () => {
+  it('STEAM_UNSUPPORTED_PLATFORM for an id with no pinned package, even when npm installed one', async () => {
     await expect(ensureKoffiNative(testCtx(makeTmpDir()), 'freebsd-x64', { installed: () => null })).rejects.toMatchObject({
       error: { code: 'STEAM_UNSUPPORTED_PLATFORM' },
     });
+    // Steam's libraries are x64 only on Windows and Linux: an arm64 koffi couldn't load them.
+    for (const id of ['linux-arm64', 'win32-arm64']) {
+      await expect(ensureKoffiNative(testCtx(makeTmpDir()), id, { installed: () => '/installed/koffi' }), id).rejects.toMatchObject({
+        error: { code: 'STEAM_UNSUPPORTED_PLATFORM' },
+      });
+    }
   });
 });
 

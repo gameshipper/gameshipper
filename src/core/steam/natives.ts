@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import * as fs from 'node:fs';
 import { createRequire } from 'node:module';
 import * as path from 'node:path';
+import { moveIntoCache } from '../cache.js';
 import type { DesktopTarget } from '../config/schema.js';
 import type { Ctx } from '../context.js';
 import { GsFailure } from '../result.js';
@@ -80,12 +81,20 @@ function downloadFailed(id: string, reason: string): GsFailure {
   );
 }
 
-/** Returns a folder containing the @koromix/koffi-<id> package, downloading it into the cache if needed. */
+/** The native module inside a koffi package folder, e.g. <dir>/darwin_arm64/koffi.node. */
+const koffiNode = (dir: string, id: string): string => path.join(dir, id.replace('-', '_'), 'koffi.node');
+
+/** A path inside a package tarball that could write outside the package: absolute, or with a ".." part. */
+function unsafeTarPath(name: string): boolean {
+  return path.posix.isAbsolute(name) || path.win32.isAbsolute(name) || name.split(/[\\/]/).includes('..');
+}
+
+/**
+ * Returns a folder containing the @koromix/koffi-<id> package, downloading it into the cache if needed.
+ * Only the pinned OS/CPUs are supported, even when npm installed another one here: Steam's Windows and
+ * Linux libraries are x64 only, so an arm64 koffi could never load them.
+ */
 export async function ensureKoffiNative(ctx: Ctx, id: string, opts: KoffiNativeOptions = {}): Promise<string> {
-  const cached = path.join(ctx.cacheDir, 'koffi', KOFFI_VERSION, id);
-  if (fs.existsSync(path.join(cached, 'package.json'))) return cached;
-  const installed = (opts.installed ?? installedKoffiNative)(id);
-  if (installed) return installed;
   const integrity = (opts.pins ?? KOFFI_NATIVES)[id];
   if (!integrity) {
     throw new GsFailure(
@@ -94,6 +103,11 @@ export async function ensureKoffiNative(ctx: Ctx, id: string, opts: KoffiNativeO
       'Steam builds are supported for Windows x64, Linux x64 and macOS. Remove this target, or ignore Steam for it.',
     );
   }
+  const cached = path.join(ctx.cacheDir, 'koffi', KOFFI_VERSION, id);
+  const complete = (dir: string) => fs.existsSync(koffiNode(dir, id));
+  if (complete(cached)) return cached;
+  const installed = (opts.installed ?? installedKoffiNative)(id);
+  if (installed) return installed;
   const registry = (opts.registry ?? process.env.GAMESHIPPER_NPM_REGISTRY ?? process.env.npm_config_registry ?? 'https://registry.npmjs.org').replace(/\/+$/, '');
   const url = `${registry}/@koromix/koffi-${id}/-/koffi-${id}-${KOFFI_VERSION}.tgz`;
   ctx.log(`downloading ${url}`);
@@ -115,13 +129,13 @@ export async function ensureKoffiNative(ctx: Ctx, id: string, opts: KoffiNativeO
   const tmp = fs.mkdtempSync(path.join(parent, '.download-'));
   try {
     for (const [name, data] of readTgz(tgz)) {
+      if (unsafeTarPath(name)) throw new Error(`the package has an unsafe path ${name}`);
       if (!name.startsWith('package/')) continue;
       const dest = path.join(tmp, ...name.slice('package/'.length).split('/'));
       fs.mkdirSync(path.dirname(dest), { recursive: true });
       fs.writeFileSync(dest, data);
     }
-    fs.rmSync(cached, { recursive: true, force: true });
-    fs.renameSync(tmp, cached);
+    moveIntoCache(tmp, cached, complete);
   } catch (e) {
     fs.rmSync(tmp, { recursive: true, force: true });
     throw downloadFailed(id, (e as Error).message);
