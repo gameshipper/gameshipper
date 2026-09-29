@@ -1,5 +1,14 @@
 import * as fs from 'node:fs';
 
+/** A plugin copied into the app (see core/plugins.ts). */
+export interface RuntimePlugin {
+  name: string;
+  /** Module path relative to the app folder, with forward slashes, e.g. "plugins/echo/echo.mjs". */
+  entry: string;
+  /** The plugin's `main` functions the game may call. */
+  functions: string[];
+}
+
 /** Written by core/desktop/assemble.ts into <app>/shell/config.json. */
 export interface RuntimeConfig {
   name: string;
