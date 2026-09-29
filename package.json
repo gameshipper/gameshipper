@@ -19,8 +19,10 @@
     "electron": "44.4.5",
     "es-module-lexer": "3.0.2",
     "filenamify": "6.0.0",
+    "koffi": "3.3.2",
     "parse5": "8.0.1",
     "png2icons": "2.0.1",
+    "steamworks-ffi-node": "0.11.3",
     "zod": "4.6.5"
   },
   "devDependencies": {
