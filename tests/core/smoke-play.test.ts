@@ -1,6 +1,6 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { parseConfig } from '../../src/core/config/load.js';
 import { runPlay } from '../../src/core/play.js';
 import { runSmoke, summaryToIssues } from '../../src/core/smoke.js';
@@ -192,6 +192,47 @@ describe('runPlay', () => {
     expect(env.GAMESHIPPER_WINDOWED).toBe('');
     expect(env.GAMESHIPPER_SMOKE_SECONDS).toBeUndefined();
     expect(env.ELECTRON_RUN_AS_NODE).toBeUndefined();
+  });
+});
+
+describe.skipIf(process.platform === 'win32')('runPlay on Ctrl+C', () => {
+  /** A game that says when it's running, and on SIGTERM takes a moment to save before it quits. */
+  const SAVES_ON_QUIT = `
+    const fs = require('fs');
+    const path = require('path');
+    const dir = process.env.GAMESHIPPER_USER_DATA;
+    process.on('SIGTERM', () => setTimeout(() => { fs.writeFileSync(path.join(dir, 'saved.txt'), 'yes'); process.exit(0); }, 200));
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, 'running.txt'), '');
+    setInterval(() => {}, 1000);
+  `;
+
+  async function interrupt(smokeSeconds?: number) {
+    const { dir, shellDir } = project(SAVES_ON_QUIT);
+    const userData = path.join(dir, '.gameshipper', 'play-data');
+    const cli = vi.fn(); // stands in for the CLI's own handler, which decides how Gameshipper exits
+    process.on('SIGINT', cli);
+    try {
+      const playing = runPlay(testCtx(dir), config, { shellDir, smokeSeconds, electronPath: process.execPath });
+      expect(await waitFor(() => fs.existsSync(path.join(userData, 'running.txt')), 20_000)).toBe(true);
+      process.emit('SIGINT', 'SIGINT');
+      return { result: await playing, saved: fs.existsSync(path.join(userData, 'saved.txt')) };
+    } finally {
+      process.off('SIGINT', cli);
+    }
+  }
+
+  it('asks an interactive game to quit, so it can finish saving', async () => {
+    const { result, saved } = await interrupt();
+    expect(result.ok).toBe(true);
+    expect(saved).toBe(true);
+  });
+
+  it('stops a smoke run at once', async () => {
+    const { result, saved } = await interrupt(30);
+    expect(result.errors.map((e) => e.code)).toEqual(['SMOKE_NO_RESULT']);
+    expect(result.errors[0].message).toContain('SIGKILL');
+    expect(saved).toBe(false);
   });
 });
 

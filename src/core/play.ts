@@ -3,6 +3,7 @@ import { prepareApp, type PrepareOptions, type PreparedApp } from './build.js';
 import type { Config } from './config/schema.js';
 import type { Ctx } from './context.js';
 import { electronBinary } from './electron.js';
+import { QUIT_GRACE_MS } from './proc.js';
 import { fail, GsFailure, gsError, ok, type Result } from './result.js';
 import { eventsLogPath, gameEnv, launch, runSmoke, type SmokeData } from './smoke.js';
 
@@ -39,9 +40,11 @@ export async function runPlay(ctx: Ctx, config: Config, opts: PlayOptions): Prom
     }
     const eventsLog = eventsLogPath(ctx.projectDir);
     ctx.log(`playing: ${electron} ${prepared.appDir}`);
-    const run = await launch(ctx, electron, [prepared.appDir], { env: gameEnv(eventsLog, userDataDir, windowed) });
+    // On Ctrl+C the game gets to quit properly, finishing any save in flight; smoke runs are stopped at once.
+    const run = await launch(ctx, electron, [prepared.appDir], { env: gameEnv(eventsLog, userDataDir, windowed), quitGraceMs: QUIT_GRACE_MS });
     const data: PlayData = { appDir: prepared.appDir, eventsLog };
-    // Interactive play has no timeout, so any signal came from outside Gameshipper (a crash or a kill).
+    // Interactive play has no timeout, so any signal came from outside Gameshipper (a crash or a kill), or
+    // from stopping a game that didn't quit after Ctrl+C, which the CLI reports as INTERRUPTED instead.
     if (run.exitCode === 0) return ok(data, prepared.warnings);
     const how = run.signal ? `stopped by ${run.signal}` : `exit code ${run.exitCode}`;
     const message = run.outputTail.trim()

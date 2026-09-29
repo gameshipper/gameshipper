@@ -11,6 +11,7 @@ import { TARGETS, type Target } from '../core/config/schema.js';
 import { createCtx, type Ctx } from '../core/context.js';
 import { checkProjectDir } from '../core/fsutil.js';
 import { runPlay } from '../core/play.js';
+import { childrenStopped, QUIT_GRACE_MS } from '../core/proc.js';
 import { capture, errorDetails, fail, gsError, internalError, ok, type GsError, type Result } from '../core/result.js';
 import { saveLastRun } from '../core/runs.js';
 import { getStatus } from '../core/status.js';
@@ -338,25 +339,33 @@ function crash(e: unknown, io: CliIO, run: RunState): number {
   return 1;
 }
 
-/** Writes the final output, then exits once it's flushed (a pipe to an agent may be asynchronous). */
+/**
+ * Writes the final output, then exits once it's flushed (a pipe to an agent may be asynchronous) and any
+ * game asked to quit has stopped (exiting kills it). The backstop covers a write that never finishes.
+ */
 function exitAfterWriting(text: string, code: number): void {
   process.exitCode = code;
-  const backstop = setTimeout(() => process.exit(code), 2000);
-  try {
-    realStdoutWrite(text, () => {
+  const backstop = setTimeout(() => process.exit(code), 2000 + QUIT_GRACE_MS);
+  // Runs after the signal's other listeners (like the one asking the game to quit), so it waits for them.
+  const exit = (): void => {
+    void childrenStopped().then(() => {
       clearTimeout(backstop);
       process.exit(code);
     });
+  };
+  try {
+    realStdoutWrite(text, exit);
   } catch {
-    process.exit(code);
+    setImmediate(exit);
   }
 }
 
 /**
  * While the real CLI runs a command: a signal ends it with an INTERRUPTED Result (exit 128 + signal number),
  * and an uncaught error or unhandled rejection with an INTERNAL_ERROR Result (exit 1). Either is printed
- * once and recorded as the last run. The child-stopping handlers in core/proc.ts still stop builds and games,
- * and leave the exit to these. Returns the function that removes the handlers.
+ * once and recorded as the last run. The child-stopping handlers in core/proc.ts still stop builds and games
+ * (an interactive game is first asked to quit), and leave the exit to these. Returns the function that
+ * removes the handlers.
  */
 function watchProcess(run: RunState): () => void {
   const onSignal = (signal: NodeJS.Signals): void => {

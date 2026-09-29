@@ -198,6 +198,11 @@ export interface LaunchOptions {
   env: NodeJS.ProcessEnv;
   /** Stop the game, and everything it started, after this many milliseconds. */
   timeoutMs?: number;
+  /**
+   * When Gameshipper is stopped (Ctrl+C), ask the game to quit and give it this long to finish (saves in
+   * flight) before stopping its tree. Without it, the tree is stopped at once, as smoke runs want.
+   */
+  quitGraceMs?: number;
 }
 
 export interface LaunchResult {
@@ -230,7 +235,7 @@ export function launch(ctx: Ctx, command: string, args: string[], opts: LaunchOp
     };
     child.stdout.setEncoding('utf8').on('data', onData);
     child.stderr.setEncoding('utf8').on('data', onData);
-    const detach = stopWithGameshipper(child);
+    const detach = stopWithGameshipper(child, { quitGraceMs: opts.quitGraceMs });
 
     let settled = false;
     let timedOut = false;
@@ -273,6 +278,7 @@ export function launch(ctx: Ctx, command: string, args: string[], opts: LaunchOp
     child.on('exit', (code, signal) => {
       // After a timeout the run has already settled; the kill's own exit needs no grace period.
       if (settled) return;
+      ctx.log(signal ? `game stopped by ${signal}` : `game exited with code ${code}`);
       exit = { code, signal };
       graceTimer = setTimeout(() => {
         releaseAfterExit(child);

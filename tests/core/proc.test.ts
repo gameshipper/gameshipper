@@ -1,6 +1,9 @@
 import { spawn } from 'node:child_process';
+import * as fs from 'node:fs';
+import * as path from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
-import { releaseAfterExit, stopWithGameshipper } from '../../src/core/proc.js';
+import { childrenStopped, releaseAfterExit, stopWithGameshipper } from '../../src/core/proc.js';
+import { makeTmpDir } from '../helpers/tmp.js';
 
 const alive = (pid: number): boolean => {
   try {
@@ -33,6 +36,102 @@ describe.skipIf(process.platform === 'win32')('stopWithGameshipper', () => {
       process.off('SIGINT', cli);
       detach();
       child.kill('SIGKILL');
+    }
+  });
+});
+
+async function waitFor(check: () => boolean, ms = 5000): Promise<boolean> {
+  for (const end = Date.now() + ms; Date.now() < end; await new Promise((r) => setTimeout(r, 50))) {
+    if (check()) return true;
+  }
+  return check();
+}
+
+describe.skipIf(process.platform === 'win32')('stopWithGameshipper with quitGraceMs (interactive play)', () => {
+  /**
+   * A game that starts a helper in its process group, then on SIGTERM takes `quitMs` to save and exit
+   * (or ignores SIGTERM when `quitMs` is null). Prints "ready" once its SIGTERM handler is in place.
+   */
+  function game(quitMs: number | null) {
+    const dir = makeTmpDir();
+    const code = `
+      const fs = require('fs');
+      const helper = require('child_process').spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: 'ignore' });
+      fs.writeFileSync('helper.pid', String(helper.pid));
+      process.on('SIGTERM', () => {
+        ${quitMs === null ? '' : `setTimeout(() => { fs.writeFileSync('saved.txt', 'yes'); process.exit(0); }, ${quitMs});`}
+      });
+      setInterval(() => {}, 1000);
+      console.log('ready');
+    `;
+    const child = spawn(process.execPath, ['-e', code], { cwd: dir, detached: true, stdio: ['ignore', 'pipe', 'ignore'] });
+    const ready = new Promise<void>((resolve) => child.stdout.on('data', () => resolve()));
+    const exited = new Promise<{ code: number | null; signal: NodeJS.Signals | null }>((resolve) =>
+      child.on('exit', (code, signal) => resolve({ code, signal })),
+    );
+    const helperPid = () => Number(fs.readFileSync(path.join(dir, 'helper.pid'), 'utf8'));
+    return { dir, child, ready, exited, helperPid };
+  }
+
+  it('asks the game to quit and lets it finish saving, then stops what it left behind', async () => {
+    const g = game(300);
+    const cli = vi.fn();
+    process.on('SIGINT', cli);
+    const detach = stopWithGameshipper(g.child, { quitGraceMs: 3000 });
+    try {
+      await g.ready;
+      const started = Date.now();
+      process.emit('SIGINT', 'SIGINT');
+      await childrenStopped();
+      expect(await g.exited).toEqual({ code: 0, signal: null });
+      expect(fs.readFileSync(path.join(g.dir, 'saved.txt'), 'utf8')).toBe('yes');
+      expect(Date.now() - started).toBeLessThan(2500);
+      expect(await waitFor(() => !alive(g.helperPid()))).toBe(true);
+    } finally {
+      process.off('SIGINT', cli);
+      detach();
+      g.child.kill('SIGKILL');
+    }
+  });
+
+  it('stops the whole tree once the grace period is over', async () => {
+    const g = game(null);
+    const cli = vi.fn();
+    process.on('SIGINT', cli);
+    const detach = stopWithGameshipper(g.child, { quitGraceMs: 300 });
+    try {
+      await g.ready;
+      const started = Date.now();
+      process.emit('SIGINT', 'SIGINT');
+      await childrenStopped();
+      expect(await g.exited).toEqual({ code: null, signal: 'SIGKILL' });
+      expect(Date.now() - started).toBeGreaterThanOrEqual(290);
+      expect(await waitFor(() => !alive(g.helperPid()))).toBe(true);
+    } finally {
+      process.off('SIGINT', cli);
+      detach();
+      g.child.kill('SIGKILL');
+    }
+  });
+
+  it('removes its handlers once the game has stopped', async () => {
+    const g = game(0);
+    const cli = vi.fn();
+    process.on('SIGINT', cli);
+    const events = ['SIGINT', 'SIGTERM', 'SIGHUP', 'exit'] as const;
+    const counts = () => events.map((e) => process.listenerCount(e));
+    const before = counts();
+    stopWithGameshipper(g.child, { quitGraceMs: 3000 });
+    try {
+      await g.ready;
+      process.emit('SIGINT', 'SIGINT');
+      // Until the game is gone, Gameshipper exiting must still take it down.
+      expect(process.listenerCount('exit')).toBe(before[3] + 1);
+      await childrenStopped();
+      expect(counts()).toEqual(before);
+    } finally {
+      process.off('SIGINT', cli);
+      g.child.kill('SIGKILL');
     }
   });
 });
