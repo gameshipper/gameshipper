@@ -31,6 +31,10 @@ export function parseConfig(raw: unknown): Result<Config> {
   return ok(config);
 }
 
+/**
+ * Reads and validates gameshipper.json. When the config is valid but a file it names doesn't exist
+ * (ENTRY_MISSING, ASSET_MISSING), the result fails but still carries the config as `data`.
+ */
 export function loadConfig(projectDir: string): Result<Config> {
   const file = path.join(projectDir, CONFIG_FILE);
   if (!fs.existsSync(file)) {
@@ -71,5 +75,6 @@ export function loadConfig(projectDir: string): Result<Config> {
       errors.push(gsError('ASSET_MISSING', `${key}: ${rel} doesn't exist.`, `Fix the ${key} path in gameshipper.json or set it to null.`));
     }
   }
-  return errors.length ? fail(errors) : ok(config);
+  // The config itself is valid, so return it with the errors: `status` still shows it.
+  return errors.length ? fail(errors, [], config) : ok(config);
 }

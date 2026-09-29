@@ -56,19 +56,32 @@ describe('loadConfig', () => {
     expect(loadConfig(dir).errors[0].code).toBe('CONFIG_INVALID');
   });
 
-  it('ENTRY_MISSING when the entry file does not exist', () => {
+  it('ENTRY_MISSING when the entry file does not exist, still returning the parsed config', () => {
     const dir = makeTmpDir();
     writeFiles(dir, { 'gameshipper.json': JSON.stringify({ name: 'x', version: '1.0.0' }) });
-    expect(loadConfig(dir).errors[0].code).toBe('ENTRY_MISSING');
+    const r = loadConfig(dir);
+    expect(r.ok).toBe(false);
+    expect(r.errors[0].code).toBe('ENTRY_MISSING');
+    expect(r.data?.name).toBe('x');
   });
 
-  it('ASSET_MISSING when icon points nowhere', () => {
+  it('ASSET_MISSING when icon points nowhere, still returning the parsed config', () => {
     const dir = makeTmpDir();
     writeFiles(dir, {
       'index.html': '<html></html>',
       'gameshipper.json': JSON.stringify({ name: 'x', version: '1.0.0', icon: 'nope.png' }),
     });
-    expect(loadConfig(dir).errors[0].code).toBe('ASSET_MISSING');
+    const r = loadConfig(dir);
+    expect(r.ok).toBe(false);
+    expect(r.errors.map((e) => e.code)).toEqual(['ASSET_MISSING']);
+    expect(r.data?.icon).toBe('nope.png');
+  });
+
+  it('returns no config when the file is missing or invalid', () => {
+    const dir = makeTmpDir();
+    expect(loadConfig(dir).data).toBeUndefined();
+    writeFiles(dir, { 'gameshipper.json': JSON.stringify({ name: 'x', version: 'one' }) });
+    expect(loadConfig(dir).data).toBeUndefined();
   });
 
   it('loads a valid project', () => {
