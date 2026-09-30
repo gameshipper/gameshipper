@@ -10,6 +10,7 @@ describe('steam config', () => {
   it('defaults steam.sdk to null and steam.overlay to auto', () => {
     expect(parseConfig({ name: 'x', version: '1.0.0' }).data!.steam).toEqual({
       appId: 480,
+      user: null,
       depots: { windows: null, mac: null, linux: null },
       sdk: null,
       overlay: 'auto',

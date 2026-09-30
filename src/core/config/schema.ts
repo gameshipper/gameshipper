@@ -12,6 +12,11 @@ export const BUNDLE_ID_PATTERN = /^[A-Za-z][A-Za-z0-9]*(\.[A-Za-z][A-Za-z0-9]*)+
 
 const relPath = z.string().min(1);
 
+/** steam.user: a Steam account name, the one you sign in with (3-64 letters, digits or underscores). */
+export const STEAM_USER_PATTERN = /^[A-Za-z0-9_]{3,64}$/;
+/** github.repo: owner/name. */
+export const GITHUB_REPO_PATTERN = /^[A-Za-z0-9-]+\/[A-Za-z0-9._-]+$/;
+
 export const ConfigSchema = z.strictObject({
   $schema: z.string().optional(),
   name: z.string().min(1).max(100),
@@ -41,6 +46,8 @@ export const ConfigSchema = z.strictObject({
   steam: z
     .strictObject({
       appId: z.number().int().positive().default(480),
+      /** The Steam account that uploads builds (publish). A name, never a password: SteamCMD keeps the login. */
+      user: z.string().regex(STEAM_USER_PATTERN, 'must be a Steam account name: 3-64 letters, numbers or _').nullable().default(null),
       depots: z
         .strictObject({
           windows: z.number().int().positive().nullable().default(null),
@@ -66,6 +73,12 @@ export const ConfigSchema = z.strictObject({
   itch: z
     .strictObject({
       project: z.string().regex(/^[\w-]+\/[\w-]+$/, 'must look like username/game').nullable().default(null),
+    })
+    .prefault({}),
+  /** GitHub Releases (publish). The token comes from GITHUB_TOKEN or GH_TOKEN, never from this file. */
+  github: z
+    .strictObject({
+      repo: z.string().regex(GITHUB_REPO_PATTERN, 'must look like owner/repo').nullable().default(null),
     })
     .prefault({}),
   plugins: z.array(relPath).default([]),
