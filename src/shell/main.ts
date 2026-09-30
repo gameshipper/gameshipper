@@ -185,7 +185,9 @@ if (smoke) {
 }
 
 // Everything below must happen before the app is ready.
-for (const [name, value] of chromiumSwitches(process.platform)) app.commandLine.appendSwitch(name, value);
+for (const [name, value] of chromiumSwitches(process.platform, { softwareGl: env.GAMESHIPPER_SOFTWARE_GL === '1' })) {
+  app.commandLine.appendSwitch(name, value);
+}
 // Electron names the save folder after the app name the first time something asks for it, so pin it
 // to the file-safe productName from package.json ("Moon- Rising") before setName switches to the
 // display name ("Moon: Rising" isn't a valid folder name on Windows).

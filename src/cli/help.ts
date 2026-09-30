@@ -113,6 +113,10 @@ export const ENVIRONMENT: Array<{ name: string; description: string }> = [
     name: 'GAMESHIPPER_NPM_REGISTRY',
     description: "The npm registry other OSes' native Steam bridges (@koromix/koffi-*) are downloaded from. Default: npm_config_registry, then https://registry.npmjs.org.",
   },
+  {
+    name: 'GAMESHIPPER_SOFTWARE_GL',
+    description: 'Set to 1 on machines without a GPU (hosted CI runners) so games may render WebGL in software. The `ci init` workflow sets it.',
+  },
   ...Object.entries(APPLE_ENV).map(([name, description]) => ({ name, description })),
 ];
 
