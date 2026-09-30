@@ -41,6 +41,8 @@ $('save').onclick = () =>
   });
 $('load').onclick = () => run("saves.load('release-check')", () => saves.load('release-check'));
 $('quit').onclick = () => window.close();
+// Steam Deck: the on-screen keyboard opens for this field, and what's typed lands in it.
+$('typing').onchange = () => log(`typed: ${JSON.stringify($('typing').value)}`);
 
 function showGamepads() {
   const pads = [...navigator.getGamepads()].filter(Boolean);
