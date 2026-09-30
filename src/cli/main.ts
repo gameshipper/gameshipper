@@ -3,6 +3,7 @@ import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseArgs, type ParseArgsOptionsConfig } from 'node:util';
 import { runBuild } from '../core/build.js';
+import { initCi } from '../core/ci/init.js';
 import { findBuilds } from '../core/check/review.js';
 import { DEFAULT_CHECK_SECONDS, hostTarget, runCheck } from '../core/check/run.js';
 import { detectProject } from '../core/config/detect.js';
@@ -21,7 +22,7 @@ import { GAMESHIPPER_VERSION } from '../core/version.js';
 import { COMMANDS, commandHelpText, GLOBAL_FLAGS, helpData, helpText, type CommandHelp } from './help.js';
 import { exitCodeFor, renderHuman, renderJson } from './output.js';
 import { createPrompter, type Prompter } from './prompt.js';
-import { buildSummary, checkSummary, initSummary, playSummary, plural, statusSummary } from './summaries.js';
+import { buildSummary, checkSummary, ciSummary, initSummary, playSummary, plural, statusSummary } from './summaries.js';
 
 /** The compiled shell that gets bundled into every game: dist/cli/main.js → dist/shell/. */
 export const SHELL_DIR = fileURLToPath(new URL('../shell/', import.meta.url));
@@ -369,6 +370,17 @@ async function checkCommand(projectDir: string, values: Values, io: CliIO, run: 
   return { result, human: checkSummary(result as Parameters<typeof checkSummary>[0]) };
 }
 
+/** `ci init`: writes the GitHub Actions workflow. Like init, it writes no run log and records only a success. */
+function ciCommand(projectDir: string, values: Values): Outcome {
+  const loaded = loadConfig(projectDir);
+  // The workflow needs only the name and targets: a config whose game files are missing still gets one.
+  const invalid = notAProject(loaded);
+  if (invalid) return invalid;
+  const result = initCi(projectDir, loaded.data!, { force: values.force === true });
+  if (result.ok) recordRun(projectDir, 'ci', result);
+  return { result, human: ciSummary(result, projectDir) };
+}
+
 async function dispatch(argv: string[], io: CliIO, run: RunState): Promise<number> {
   let values: Values;
   let positionals: string[];
@@ -401,6 +413,13 @@ async function dispatch(argv: string[], io: CliIO, run: RunState): Promise<numbe
 
   const spec = COMMANDS.find((c) => c.name === command);
   if (!spec) return emit(io, run, usage(`Unknown command "${command}".`, 'Run `npx gameshipper help` to see the commands.'));
+  // A command with actions (`ci init`) takes one of them first; with --help it shows its help instead.
+  const action = spec.actions ? extra.shift() : undefined;
+  if (spec.actions && !values.help && (action === undefined || !spec.actions.includes(action))) {
+    const fix = `Run ${spec.actions.map((a) => `\`npx gameshipper ${command} ${a}\``).join(' or ')}.`;
+    const message = action === undefined ? `${command} needs an action: ${spec.actions.join(', ')}.` : `Unknown ${command} action "${action}".`;
+    return emit(io, run, usage(message, fix));
+  }
   if (extra.length) return emit(io, run, usage(`${command} doesn't take "${extra[0]}"; options are flags.`, flagsFix(spec)));
   const allowed = new Set([...GLOBAL_FLAGS, ...spec.flags].map((f) => f.name));
   const stray = Object.keys(values).find((k) => !allowed.has(k));
@@ -428,6 +447,8 @@ async function dispatch(argv: string[], io: CliIO, run: RunState): Promise<numbe
       return emit(io, run, await playCommand(projectDir, values, io, run));
     case 'check':
       return emit(io, run, await checkCommand(projectDir, values, io, run));
+    case 'ci':
+      return emit(io, run, ciCommand(projectDir, values));
     default: {
       const result = getStatus(projectDir);
       return emit(io, run, { result, human: statusSummary(result) });

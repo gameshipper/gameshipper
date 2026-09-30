@@ -14,6 +14,8 @@ export interface FlagHelp {
 
 export interface CommandHelp {
   name: string;
+  /** Words the command needs right after its name, exactly one of them: `ci init`. */
+  actions?: string[];
   summary: string;
   usage: string;
   flags: FlagHelp[];
@@ -100,6 +102,13 @@ export const COMMANDS: CommandHelp[] = [
     summary: 'Show config, what this computer can build, outputs and the last result of each command.',
     usage: 'npx gameshipper status',
     flags: [],
+  },
+  {
+    name: 'ci',
+    actions: ['init'],
+    summary: 'ci init: write a GitHub Actions workflow that builds, runs and uploads each desktop target on its own OS.',
+    usage: 'npx gameshipper ci init [--force]',
+    flags: [{ name: 'force', description: 'Replace an existing .github/workflows/gameshipper.yml.' }],
   },
 ];
 

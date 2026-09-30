@@ -40,6 +40,9 @@ const USAGE_CODES = new Set([
   'GAME_DIR_INVALID',
   // `play --packaged` before `build` made this computer's build.
   'PACKAGED_BUILD_MISSING',
+  // `ci init`: the workflow is already there (no --force), or there is no desktop target to build.
+  'CI_WORKFLOW_EXISTS',
+  'CI_NO_DESKTOP_TARGETS',
 ]);
 
 export function exitCodeFor(result: Result<unknown>): number {

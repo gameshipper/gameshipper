@@ -1,6 +1,7 @@
 import * as path from 'node:path';
 import type { BuildData } from '../core/build.js';
 import type { CheckReport, CheckStatus } from '../core/check/types.js';
+import type { CiData } from '../core/ci/init.js';
 import type { InitData } from '../core/config/init.js';
 import type { PlayData } from '../core/play.js';
 import type { Result } from '../core/result.js';
@@ -118,6 +119,14 @@ export function statusSummary(r: Result<StatusData>): string[] {
     lines.push(`Last ${run.command}: ${run.ok ? '✓' : '✗'} ${run.at}${run.logPath ? ` (${run.logPath})` : ''}`);
   }
   return lines;
+}
+
+export function ciSummary(r: Result<CiData>, projectDir: string): string[] {
+  if (!r.ok || !r.data) return [];
+  return [
+    `✓ Wrote ${rel(projectDir, r.data.path)} (builds ${r.data.targets.join(', ')})`,
+    'Commit it (with gameshipper.lock, if your game has one) and push: every push to main and every pull request then builds the game on GitHub Actions, runs each build for a few seconds and uploads it.',
+  ];
 }
 
 const CHECK_SYMBOL: Record<CheckStatus, string> = { pass: '✓', warn: '!', fail: '✗', info: 'i', skip: '-' };
