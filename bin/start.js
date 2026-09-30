@@ -7,8 +7,10 @@ const SIGNALS = ['SIGINT', 'SIGTERM', 'SIGHUP'];
 
 /**
  * process.exit(), once it can't crash Node. With NODE_USE_SYSTEM_CA=1 (or --use-system-ca), Node reads the OS's
- * certificate store on a thread while it starts, and exiting during that read crashes Node 24 (SIGSEGV), losing the
- * exit code: exactly when a signal stops the CLI as it loads. Asking for the store waits for that thread (~30 ms).
+ * certificate store on a thread while it starts, and exiting during that read crashed Node 24.7 on macOS (SIGSEGV),
+ * losing the exit code: exactly when a signal stops the CLI as it loads. Asking for the store waits for that thread
+ * (~30 ms). Remove this once the oldest Node that Gameshipper supports (package.json "engines") no longer crashes:
+ * without it, "a signal as the CLI starts never crashes Node" in tests/cli/process.test.ts must still pass.
  * A copy of src/core/proc.ts exitProcess, which can't be imported before the CLI has loaded.
  */
 function exitProcess(code) {

@@ -249,6 +249,37 @@ describe.skipIf(process.platform === 'win32' || !canRunTs)('the CLI process', ()
     for (const r of runs) expect(JSON.parse(r.stdout)).toMatchObject({ errors: [{ code: 'INTERRUPTED' }] });
   });
 
+  it("bin/start.js waits for Node's read of the system certificate store only when Node reads it", async () => {
+    // A stand-in for node:tls records the read, so this doesn't depend on the crash's timing.
+    const script = (setup: string) =>
+      [
+        "import { writeSync } from 'node:fs';",
+        'const builtin = process.getBuiltinModule;',
+        "process.getBuiltinModule = (id) => (id === 'node:tls' ? { getCACertificates: (which) => (writeSync(2, `read ${which}\\n`), []) } : builtin(id));",
+        setup,
+        `const { start } = await import(${JSON.stringify(new URL('../../bin/start.js', import.meta.url).href)});`,
+        "process.exitCode = await start(['status', '--json'], async () => {",
+        "  process.emit('SIGINT', 'SIGINT');",
+        '  return new Promise(() => {});',
+        '});',
+      ].join('\n');
+    const once = (ca: string, setup: string) =>
+      new Promise<{ code: number | null; stderr: string }>((resolve) => {
+        const env = { ...process.env, NODE_USE_SYSTEM_CA: ca, NODE_OPTIONS: '' };
+        const child = spawn(process.execPath, ['--input-type=module', '-e', script(setup)], { stdio: ['ignore', 'ignore', 'pipe'], env });
+        let stderr = '';
+        child.stderr.setEncoding('utf8').on('data', (d: string) => (stderr += d));
+        child.on('close', (code) => resolve({ code, stderr }));
+      });
+    const cases: Array<[string, string, string, string]> = [
+      ['NODE_USE_SYSTEM_CA=1', '1', '', 'read system\n'],
+      ['--use-system-ca in NODE_OPTIONS', '', "process.env.NODE_OPTIONS = '--max-old-space-size=512 --use-system-ca';", 'read system\n'],
+      ['--use-system-ca on the command line', '', "process.execArgv.push('--use-system-ca');", 'read system\n'],
+      ['neither', '0', "process.env.NODE_OPTIONS = '--max-old-space-size=512';", ''],
+    ];
+    for (const [name, ca, setup, stderr] of cases) expect(await once(ca, setup), name).toEqual({ code: 130, stderr });
+  });
+
   it('a signal that arrives while loading blocks the process is handed to the CLI, not dropped', async () => {
     const cli = startCli(['status', '--json', '--dir', makeTmpDir()], 'busy-load');
     try {
