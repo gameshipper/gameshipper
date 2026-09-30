@@ -102,6 +102,15 @@ export function packagedGame(projectDir: string, config: Config, host: NodeJS.Pl
 }
 
 export async function runPlay(ctx: Ctx, config: Config, opts: PlayOptions): Promise<Result<PlayData>> {
+  if (opts.detach && (opts.smokeSeconds || opts.screenshotAt?.length)) {
+    return fail(
+      gsError(
+        'USAGE',
+        "detach can't be combined with a timed run (smokeSeconds or screenshotAt).",
+        'Drop detach: timed runs always wait for the game to finish.',
+      ),
+    );
+  }
   let prepared: PreparedApp | null = null;
   try {
     // --packaged runs the build as it is. Otherwise the app is prepared with Steam support for this computer only:

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { main, type CliIO } from '../../src/cli/main.js';
+import { main, playStartLine, type CliIO } from '../../src/cli/main.js';
 import { playSummary } from '../../src/cli/summaries.js';
 import { ok } from '../../src/core/result.js';
 import { makeTmpDir, writeFiles } from '../helpers/tmp.js';
@@ -35,6 +35,13 @@ describe('play --packaged and --detach', () => {
     const r = await run(['play', '--packaged', '--smoke', '--json', '--dir', game()]);
     expect([r.code, r.json().errors[0].code]).toEqual([2, 'PACKAGED_BUILD_MISSING']);
     expect(r.json().logPath).toMatch(/play-.+\.log$/);
+  });
+
+  it("tells a person a detached game keeps running, not to close its window when they're done", () => {
+    expect(playStartLine({ detach: true })).toBe('Starting the game; it keeps running after this command returns. F12 saves a 1920x1080 store screenshot.\n');
+    expect(playStartLine({ detach: true, packaged: true })).toBe('Starting the build in out/; it keeps running after this command returns.\n');
+    expect(playStartLine({})).toContain("Close its window when you're done.");
+    expect(playStartLine({ packaged: true })).toContain("Close its window when you're done.");
   });
 
   it('a detached game is reported as started, not closed', () => {

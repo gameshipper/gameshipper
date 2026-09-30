@@ -310,7 +310,7 @@ async function playCommand(projectDir: string, values: Values, io: CliIO, run: R
   const ctx = startRun(projectDir, 'play', run);
   let result: Result<unknown>;
   if (loaded.ok) {
-    if (!run.json) io.write(playStartLine(smoke ? seconds : undefined, screenshotAt, packaged));
+    if (!run.json) io.write(playStartLine({ smokeSeconds: smoke ? seconds : undefined, screenshotAt, packaged, detach }));
     const frozenLock = values['frozen-lock'] === true;
     result = await capture(
       () =>
@@ -337,15 +337,17 @@ async function playCommand(projectDir: string, values: Values, io: CliIO, run: R
 }
 
 /** What a person sees while `play` starts the game. */
-function playStartLine(smokeSeconds: number | undefined, screenshotAt: number[] | undefined, packaged: boolean): string {
-  if (screenshotAt) {
-    const seconds = screenshotRunSeconds(screenshotAt, smokeSeconds);
-    return `Running the game for ${plural(seconds, 'second')} to save ${plural(screenshotAt.length, 'screenshot')}…\n`;
+export function playStartLine(o: { smokeSeconds?: number; screenshotAt?: number[]; packaged?: boolean; detach?: boolean }): string {
+  if (o.screenshotAt) {
+    const seconds = screenshotRunSeconds(o.screenshotAt, o.smokeSeconds);
+    return `Running the game for ${plural(seconds, 'second')} to save ${plural(o.screenshotAt.length, 'screenshot')}…\n`;
   }
-  if (smokeSeconds !== undefined) return `Running the game for ${plural(smokeSeconds, 'second')} to check it…\n`;
+  if (o.smokeSeconds !== undefined) return `Running the game for ${plural(o.smokeSeconds, 'second')} to check it…\n`;
+  // --detach returns at once, so there's no window to close before the command is done.
+  const after = o.detach ? '; it keeps running after this command returns.' : ". Close its window when you're done.";
   // A packaged game ignores F12 outside smoke runs: in a shipped game it's Steam's screenshot key.
-  if (packaged) return "Starting the build in out/. Close its window when you're done.\n";
-  return "Starting the game. Close its window when you're done. F12 saves a 1920x1080 store screenshot.\n";
+  if (o.packaged) return `Starting the build in out/${after}\n`;
+  return `Starting the game${after} F12 saves a 1920x1080 store screenshot.\n`;
 }
 
 /** What a person sees while `check` runs: how long the game runs, when there is a build for this computer to run. */

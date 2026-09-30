@@ -73,6 +73,16 @@ describe('play --detach', () => {
     expect(await waitFor(() => fs.readFileSync(ctx.logPath, 'utf8').includes('detached game says hi'))).toBe(true);
   });
 
+  it('USAGE, before anything runs, when combined with a timed run', async () => {
+    for (const timed of [{ smokeSeconds: 3 }, { screenshotAt: [5] }]) {
+      const dir = makeTmpDir();
+      const r = await runPlay(testCtx(dir), config, { shellDir: makeTmpDir(), detach: true, electronPath: path.join(dir, 'no-electron'), ...timed });
+      expect(r.errors.map((e) => e.code), JSON.stringify(timed)).toEqual(['USAGE']);
+      expect(r.errors[0].message).toBe("detach can't be combined with a timed run (smokeSeconds or screenshotAt).");
+      expect(fs.existsSync(path.join(dir, '.gameshipper', 'app'))).toBe(false);
+    }
+  });
+
   it('LAUNCH_FAILED, with the reason, when the game cannot start', async () => {
     const dir = makeTmpDir();
     writeFiles(dir, { 'index.html': '<html></html>' });
