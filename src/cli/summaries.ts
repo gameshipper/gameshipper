@@ -125,7 +125,7 @@ export function ciSummary(r: Result<CiData>, projectDir: string): string[] {
   if (!r.ok || !r.data) return [];
   return [
     `✓ Wrote ${rel(projectDir, r.data.path)} (builds ${r.data.targets.join(', ')})`,
-    'Commit it (with gameshipper.lock, if your game has one) and push: every push to main and every pull request then builds the game on GitHub Actions, runs each build for a few seconds and uploads it.',
+    'Commit it (with gameshipper.lock, if your game has one) and push: every push to main or master and every pull request then builds the game on GitHub Actions, runs each build for a few seconds and uploads it.',
   ];
 }
 

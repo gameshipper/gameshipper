@@ -22,8 +22,8 @@ export interface WorkflowOptions {
 const gh = (expr: string): string => '${{ ' + expr + ' }}';
 
 /**
- * A GitHub Actions workflow for a game repository: on every push to main and every pull request, each desktop
- * target is built on its own OS, run for a few seconds (`play --packaged --smoke`) and uploaded as a tarball.
+ * A GitHub Actions workflow for a game repository: on every push to main or master and every pull request, each
+ * desktop target is built on its own OS, run for a few seconds (`play --packaged --smoke`) and uploaded as a tarball.
  */
 export function githubWorkflow(o: WorkflowOptions): string {
   const cli = `npx --yes gameshipper@${o.version}`;
