@@ -8,8 +8,12 @@ import { killTree, OUTPUT_BUFFER_CHARS, outputTail, releaseAfterExit, stopWithGa
 import { GsFailure, gsError, type GsError } from '../result.js';
 
 const SKIP_ANYWHERE = new Set(['.git', '.DS_Store', 'Thumbs.db', 'steam_appid.txt']);
-/** Also skipped at the top level: every dot entry (.gameshipper, .claude, .vscode, .github, ...). */
-const SKIP_TOP_LEVEL = new Set([
+/**
+ * The project's own files, skipped at the top of the game folder when that is the project folder. A game folder
+ * below it (game.dir "game", or a build's outputDir) may have its own out/ or node_modules, which are the game's.
+ * Every dot entry at the top (.gameshipper, .claude, .vscode, .github, ...) is skipped either way.
+ */
+const PROJECT_TOP_LEVEL = new Set([
   'out',
   'gameshipper.json',
   'gameshipper.lock',
@@ -63,12 +67,12 @@ export function realOrSelf(p: string): string {
   }
 }
 
-/** `rel` is relative to the game folder. */
-function isSkipped(rel: string): boolean {
+/** `rel` is relative to the game folder; `atProjectRoot` says whether that is the project folder. */
+function isSkipped(rel: string, atProjectRoot: boolean): boolean {
   const parts = rel.split(path.sep);
   const base = parts[parts.length - 1];
   if (isSkippedAnywhere(base)) return true;
-  return parts.length === 1 && (base.startsWith('.') || SKIP_TOP_LEVEL.has(base));
+  return parts.length === 1 && (base.startsWith('.') || (atProjectRoot && PROJECT_TOP_LEVEL.has(base)));
 }
 
 export function isWithin(child: string, parent: string): boolean {
@@ -240,7 +244,7 @@ export async function stageGame(ctx: Ctx, config: Config, opts: StageOptions = {
   const keep = (src: string): boolean => {
     const rel = path.relative(source, src);
     if (rel === '') return true;
-    if (isSkipped(rel) || excluded.has(realOrSelf(src)) || holdsSteamworksSdk(src)) return false;
+    if (isSkipped(rel, realSource === project) || excluded.has(realOrSelf(src)) || holdsSteamworksSdk(src)) return false;
     if (!fs.lstatSync(src).isSymbolicLink()) return true;
     let target: string;
     try {

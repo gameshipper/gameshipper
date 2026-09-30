@@ -114,6 +114,24 @@ describe('stageGame', () => {
     }
   });
 
+  it("skips the project's own files only when the game folder is the project folder", async () => {
+    const projectOnly = ['out/intro.txt', 'node_modules/lib/index.js', 'gameshipper.json', 'gameshipper.lock', 'CLAUDE.md', 'AGENTS.md', 'package-lock.json', 'yarn.lock'];
+    const neverShipped = ['.hidden/x.txt', '.npmrc', '.env', 'steam_appid.txt', 'sub/.DS_Store', 'sub/.env.local'];
+    const game = (prefix: string) => Object.fromEntries(['index.html', ...projectOnly, ...neverShipped].map((f) => [`${prefix}${f}`, 'x']));
+    for (const [where, extra] of [
+      ['game.dir', { game: { dir: 'game' } }],
+      ['game.outputDir', { game: { buildCommand: 'true', outputDir: 'game' } }],
+    ] as const) {
+      const dir = makeTmpDir();
+      writeFiles(dir, { ...game('game/'), 'out/mac/old.txt': 'x' });
+      const { stageDir } = await stageGame(testCtx(dir), cfg(extra));
+      const exists = (rel: string) => fs.existsSync(path.join(stageDir, rel));
+      // A game's own out/ folder (game/out/intro.txt) and the like are part of the game here.
+      for (const kept of ['index.html', ...projectOnly]) expect(exists(kept), `${where}: ${kept}`).toBe(true);
+      for (const skipped of neverShipped) expect(exists(skipped), `${where}: ${skipped}`).toBe(false);
+    }
+  });
+
   it('skips top-level package manager lockfiles but keeps nested ones', async () => {
     const dir = makeTmpDir();
     const lockfiles = ['package-lock.json', 'yarn.lock', 'pnpm-lock.yaml', 'bun.lockb', 'bun.lock'];
