@@ -28,6 +28,7 @@
     "@electron/notarize": "3.1.1",
     "@electron/osx-sign": "2.7.1",
     "@electron/packager": "20.3.0",
+    "@modelcontextprotocol/server": "2.2.0",
     "electron": "44.4.5",
     "es-module-lexer": "3.0.2",
     "filenamify": "6.0.0",
@@ -39,8 +40,10 @@
     "zod": "4.6.5"
   },
   "devDependencies": {
+    "@modelcontextprotocol/client": "2.2.0",
     "@types/node": "^24.0.0",
     "typescript": "7.0.2",
-    "vitest": "5.0.2"
+    "vitest": "5.0.2",
+    "yaml": "2.9.1"
   }
 }
