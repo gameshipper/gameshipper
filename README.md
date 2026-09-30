@@ -510,6 +510,8 @@ GAMESHIPPER_STEAM_E2E=1 GAMESHIPPER_STEAM_E2E_SDK=/path/to/steamworks_sdk_165.zi
   npm run test:integration -- tests/integration/steam.int.test.ts --reporter=verbose
 ```
 
+While it runs, Steam shows your friends that you're playing Spacewar (App ID 480, Valve's test game), once for every game the test launches, and Spacewar appears in your recent activity. Set your status to Invisible in Steam's Friends list first if you'd rather they didn't see it.
+
 Steam's overlay can only hook a game on an unlocked screen, so on a locked one the overlay-hook test is reported as skipped, with the reason.
 
 ## License
