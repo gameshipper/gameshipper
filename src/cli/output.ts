@@ -47,7 +47,8 @@ const USAGE_CODES = new Set([
   'BUILD_MISSING',
   'STEAM_TEST_APP',
   'STEAM_DEFAULT_BRANCH',
-  // The game folder's path has a quote (or a backslash on macOS/Linux), which SteamCMD's build scripts can't hold.
+  // The game folder's path has a quote (or a backslash on macOS/Linux), which SteamCMD's build scripts can't hold,
+  // or the cache folder's path has a ':' on macOS, which can't go on SteamCMD's PATH.
   'STEAM_PATH_UNSUPPORTED',
   'STEAM_LOGIN_REQUIRED',
   'ITCH_LOGIN_REQUIRED',

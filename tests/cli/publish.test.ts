@@ -167,7 +167,8 @@ describe('gameshipper publish', () => {
     expect(loop.slice(-2)).toEqual(publish);
     for (const step of publish) expect(step).toContain('only when the human asks');
     expect(publish[0]).toContain('a separate step');
-    expect(publish[0]).toContain('itch.io makes them public at once');
+    expect(publish[0]).toContain('The dry run uploads nothing');
+    expect(publish[0]).toContain('itch.io makes the uploads public at once');
     expect(publish[0]).toContain("butler's saved itch.io login");
     expect(publish[0]).toContain('STEAM_LOGIN_REQUIRED, ITCH_LOGIN_REQUIRED');
   });

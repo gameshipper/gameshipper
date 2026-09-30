@@ -62,8 +62,8 @@ export function releaseAfterExit(child: ChildProcess, platform: NodeJS.Platform 
 /**
  * With NODE_USE_SYSTEM_CA=1 (or --use-system-ca), Node reads the OS's certificate store on a thread while it starts,
  * and a process.exit() during that read crashed Node 24.7 on macOS (SIGSEGV in OpenSSL's cleanup), so the exit code
- * was lost. Asking for the store waits for that thread (about 30 ms). Remove this, and bin/start.js's copy (it runs
- * before this loads), once the oldest Node that Gameshipper supports (package.json "engines") no longer crashes:
+ * was lost. Asking for the store waits for that thread (about 30 ms). Remove this, bin/start.js's copy (it runs
+ * before this loads) and scripts/agent-e2e.mjs's, once the oldest Node that Gameshipper supports (package.json "engines") no longer crashes:
  * without them, "a signal as the CLI starts never crashes Node" in tests/cli/process.test.ts must still pass.
  */
 export function waitForSystemCaLoad(): void {

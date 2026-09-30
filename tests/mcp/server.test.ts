@@ -67,7 +67,7 @@ describe('MCP server', () => {
     expect(text).not.toContain('then gameshipper_publish');
     expect(text).toContain('Publishing is a separate step: call gameshipper_publish only when the human asks you to');
     // Why: the uploads are real and can be public at once, and a saved itch.io login is used without asking anyone.
-    expect(text).toContain('itch.io makes them public at once');
+    expect(text).toContain('itch.io makes the uploads public at once');
     expect(text).toContain("butler's saved itch.io login");
     expect(text).toContain('dryRun: true first');
     expect(instructions(mcpTools(COMMANDS.filter((c) => c.name !== 'publish')))).not.toMatch(/publish/i);

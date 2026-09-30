@@ -178,7 +178,7 @@ export function helpData() {
       'npx gameshipper play --smoke --json   (fix errors, repeat until ok is true)',
       'npx gameshipper build --json',
       'npx gameshipper check --json   (fix what failed, build again, repeat)',
-      "npx gameshipper publish --dry-run --json   (a separate step, only when the human asks: it uploads to the human's store accounts, itch.io makes them public at once if the game's page is public, and butler's saved itch.io login is used without asking. STEAM_LOGIN_REQUIRED, ITCH_LOGIN_REQUIRED: the human runs the fix's command in their own terminal once)",
+      "npx gameshipper publish --dry-run --json   (a separate step, only when the human asks. The dry run uploads nothing; publish without it uploads to the human's store accounts, itch.io makes the uploads public at once if the game's page is public, and butler's saved itch.io login is used without asking. STEAM_LOGIN_REQUIRED, ITCH_LOGIN_REQUIRED: the human runs the fix's command in their own terminal once)",
       'npx gameshipper publish --json   (only when the human asks)',
     ],
     /** Every gameshipper.json field; fields with defaults are optional. */

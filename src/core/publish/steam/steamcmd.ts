@@ -60,12 +60,15 @@ export const LAUNCHCTL_CALLS_LOG = 'launchctl-calls.log';
  *
  * On macOS SteamCMD also writes a com.valvesoftware.steamclean LaunchAgent into $HOME and runs `launchctl remove` and
  * `launchctl load` on it through the shell, which would replace the Steam client's loaded job with one pointing into
- * the cache. So a stand-in `launchctl` (writeLaunchctlShim) comes first on its PATH: the client's background jobs
- * never change. It never gets the GitHub token, butler's key or the Apple signing variables.
+ * the cache. So a stand-in `launchctl` (writeLaunchctlShim) comes first on its PATH: SteamCMD never loads or removes
+ * the client's background jobs. It never gets the GitHub token, butler's key or the Apple signing variables.
  */
 export function steamCmdEnv(paths: SteamCmdPaths, platform: NodeJS.Platform, baseEnv: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
   const env = withoutSecrets(baseEnv);
   if (platform === 'win32') return env;
+  // steamcmd.sh runs under bash, which would first run the file BASH_ENV (or ENV, for sh) names: it could set PATH back.
+  delete env.BASH_ENV;
+  delete env.ENV;
   const home = path.resolve(paths.homeDir);
   if (platform === 'darwin') return { ...env, HOME: home, PATH: `${path.resolve(paths.shimDir)}:${env.PATH || DEFAULT_PATH}` };
   const xdg =

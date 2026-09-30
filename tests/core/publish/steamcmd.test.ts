@@ -37,7 +37,7 @@ describe('where SteamCMD lives and how it runs', () => {
     expect(steamCmdEnv(mac, 'win32', { USERPROFILE: 'C:\\u' })).toEqual({ USERPROFILE: 'C:\\u' });
   });
 
-  it('on macOS, finds a stand-in launchctl first on its PATH, so it never changes the Steam client\'s background jobs', () => {
+  it('on macOS, finds a stand-in launchctl first on its PATH, so it never loads or removes the Steam client\'s background jobs', () => {
     const mac = steamCmdPaths('/c', 'darwin');
     expect(steamCmdEnv(mac, 'darwin', { PATH: '/opt/bin:/usr/bin:/bin' }).PATH).toBe(`${mac.shimDir}:/opt/bin:/usr/bin:/bin`);
     // Without a PATH (or an empty one, which would mean the current folder), the shell's own default follows the shim.
@@ -45,6 +45,16 @@ describe('where SteamCMD lives and how it runs', () => {
     // Linux and Windows have no launchd.
     expect(steamCmdEnv(steamCmdPaths('/c', 'linux'), 'linux', { PATH: '/usr/bin' }).PATH).toBe('/usr/bin');
     expect(steamCmdEnv(steamCmdPaths('/c', 'win32'), 'win32', { PATH: 'C:\\Windows' }).PATH).toBe('C:\\Windows');
+  });
+
+  it('runs no BASH_ENV or ENV file first, which could set its PATH back', () => {
+    const base = { PATH: '/bin', BASH_ENV: '/Users/me/.bashenv', ENV: '/Users/me/.shrc' };
+    for (const platform of ['darwin', 'linux'] as const) {
+      const env = steamCmdEnv(steamCmdPaths('/c', platform), platform, base);
+      expect(env).not.toHaveProperty('BASH_ENV');
+      expect(env).not.toHaveProperty('ENV');
+    }
+    expect(base).toHaveProperty('BASH_ENV');
   });
 
   it('its HOME is an absolute path, even with a relative cache folder', () => {

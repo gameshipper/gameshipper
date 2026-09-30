@@ -36,7 +36,7 @@ export function instructions(tools: readonly McpTool[]): string {
     'then gameshipper_check, fixing what fails and building again.',
     ...(publish
       ? [
-          "Publishing is a separate step: call gameshipper_publish only when the human asks you to, with dryRun: true first. It uploads to the human's store accounts: itch.io makes them public at once if the game's page is public, and butler's saved itch.io login on this computer is used without asking.",
+          "Publishing is a separate step: call gameshipper_publish only when the human asks you to, with dryRun: true first. Publishing uploads to the human's store accounts: itch.io makes the uploads public at once if the game's page is public, and butler's saved itch.io login on this computer is used without asking.",
         ]
       : []),
     'Every tool returns { ok, data, errors[], warnings[], logPath }; each error has a code, a message and a fix: do what the fix says.',
