@@ -152,6 +152,13 @@ describe('gameshipper publish', () => {
     expect([r.code, r.json().data.destinations[0].details.repo]).toEqual([0, 'moonstudio/moon-game']);
   });
 
+  it('an empty --steam-user= falls back to steam.user', async () => {
+    await useFakes(true);
+    const p = fakeProject({ steam: { appId: 1234560, user: 'builder' } });
+    const r = await run(['publish', '--to', 'steam', '--steam-user=', '--json', '--dir', p.dir]);
+    expect([r.code, r.json().errors, r.json().data.destinations[0].details.user]).toEqual([0, [], 'builder']);
+  });
+
   it('help --json tells agents that publish is a separate step, only when the human asks', () => {
     const loop = helpData().agentLoop;
     const publish = loop.filter((step) => step.includes('gameshipper publish'));

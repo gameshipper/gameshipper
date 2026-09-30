@@ -70,7 +70,8 @@ export async function publishSteam(ctx: Ctx, config: Config, builds: DesktopBuil
       ),
     );
   }
-  const user = opts.steamUser ?? config.steam.user;
+  // An empty --steam-user (`--steam-user=`) means none was given, as with --repo.
+  const user = opts.steamUser || config.steam.user;
   if (!user) {
     return fail(
       gsError(

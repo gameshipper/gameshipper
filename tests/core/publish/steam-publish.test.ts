@@ -148,9 +148,11 @@ describe('publishSteam', () => {
     expect((await publishSteam(testCtx(p.dir), p.config, p.builds, setup({ steamUser: 'a b' }).opts)).errors[0].code).toBe('USAGE');
   });
 
-  it('uses steam.user from gameshipper.json when no flag is given', async () => {
+  it('uses steam.user from gameshipper.json when no flag is given, or an empty one', async () => {
     const p = fakeProject({ steam: { appId: 1234560, user: 'builder' } });
-    expect((await publishSteam(testCtx(p.dir), p.config, p.builds, setup({ steamUser: null }).opts)).details?.user).toBe('builder');
+    for (const steamUser of [null, '']) {
+      expect((await publishSteam(testCtx(p.dir), p.config, p.builds, setup({ steamUser }).opts)).details?.user, JSON.stringify(steamUser)).toBe('builder');
+    }
   });
 
   it("STEAM_UPLOAD_FAILED carries SteamCMD's reasons; Access Denied points at the account's permissions and the depots", async () => {
