@@ -17,6 +17,20 @@ Your game doesn't need a build step or npm. A folder with an `index.html` is eno
 
 Needs Node.js 22.12 or newer. The first build for each OS downloads Electron (120 to 160 MB, cached after that).
 
+## Status of 0.1.0
+
+`gameshipper` isn't published to npm yet, so `npx gameshipper` doesn't run it: run `node bin/gameshipper.js` from a clone of this repository (after `npm install` and `npm run build`) until the first release.
+
+Verified on macOS: every command on the fixture games, builds for all three OSes (cross-built from the Mac), the Mac app ad-hoc signed and running with the hardened runtime, Steam with Valve's test app 480 on a signed-in client (achievements, stats, the overlay hooking the game), the iOS project building and running in the Simulator, the MCP server end to end, and Claude Code shipping a game through the plugin loaded from this folder.
+
+Not verified yet:
+
+- notarization with a real Apple Developer account (only a stand-in for Apple's notary service is tested);
+- Steam on Windows, desktop Linux and the Steam Deck: overlay, achievements, gamepads, the on-screen keyboard and clean exits (the manual checks in [docs/release-checklist.md](docs/release-checklist.md));
+- CI on real GitHub-hosted runners, including software WebGL (`GAMESHIPPER_SOFTWARE_GL`) on runners without a GPU, for this repository's workflows and the one `ci init` writes;
+- installing the Claude Code plugin from the marketplace (`/plugin marketplace add gameshipper/gameshipper`);
+- the iOS and Android projects on real devices, and the Android project in Android Studio.
+
 ## Commands
 
 ### `init`
@@ -235,7 +249,7 @@ Without the plugin, copy `plugin/skills/ship-web-game/SKILL.md` from this reposi
 npx gameshipper ci init
 ```
 
-This writes `.github/workflows/gameshipper.yml`. On every push to `main` and every pull request it builds each desktop target on its own OS (`windows-latest`, `macos-latest`, `ubuntu-latest`) with `--frozen-lock`, runs the build for a few seconds with `play --packaged --smoke` (under a virtual display on Linux), and uploads it as an artifact: `<game>-windows.tar.gz`, `-mac` and `-linux`, tarballs so file permissions and the Mac app survive. Commit `gameshipper.lock` with it if your game has one. Hosted runners have no GPU, so the workflow sets `GAMESHIPPER_SOFTWARE_GL=1`. The workflow pins the Gameshipper version that wrote it; its comments say how to add your Steamworks SDK and Mac signing.
+This writes `.github/workflows/gameshipper.yml`. On every push to `main` or `master` and every pull request it builds each desktop target on its own OS (`windows-latest`, `macos-latest`, `ubuntu-latest`) with `--frozen-lock`, runs the build for a few seconds with `play --packaged --smoke` (under a virtual display on Linux), and uploads it as an artifact: `<game>-windows.tar.gz`, `-mac` and `-linux`, tarballs so file permissions and the Mac app survive. Commit `gameshipper.lock` with it if your game has one. Hosted runners have no GPU, so the workflow sets `GAMESHIPPER_SOFTWARE_GL=1`. The workflow pins the Gameshipper version that wrote it, checks out without keeping the repository's token, and uses no secrets; its comments say how to add your Steamworks SDK and Mac signing without handing those secrets to pull requests.
 
 ## `gameshipper.json`
 
