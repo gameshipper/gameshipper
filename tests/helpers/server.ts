@@ -61,3 +61,15 @@ export async function startServer(routes: Record<string, Route>): Promise<TestSe
       }),
   };
 }
+
+/**
+ * A URL on 127.0.0.1 where nothing listens: connections are refused (ECONNREFUSED). Not port 9 and the like: fetch
+ * refuses those "bad ports" before connecting.
+ */
+export async function refusedUrl(): Promise<string> {
+  const server = http.createServer();
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const { port } = server.address() as AddressInfo;
+  await new Promise<void>((resolve) => server.close(() => resolve()));
+  return `http://127.0.0.1:${port}`;
+}
