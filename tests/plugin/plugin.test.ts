@@ -32,6 +32,19 @@ describe('Claude Code plugin', () => {
   });
 });
 
+describe('npm package', () => {
+  it('is MIT licensed by the Gameshipper contributors, with the LICENSE file npm always packs', () => {
+    expect(json('package.json').license).toBe('MIT');
+    const license = read('LICENSE');
+    expect(license.split('\n')[0]).toBe('MIT License');
+    expect(license).toContain('Copyright (c) 2026 Gameshipper contributors');
+  });
+
+  it('names its repository, which npm trusted publishing and provenance check', () => {
+    expect(json('package.json').repository).toEqual({ type: 'git', url: 'git+https://github.com/gameshipper/gameshipper.git' });
+  });
+});
+
 describe('ship-web-game skill', () => {
   it('has frontmatter Claude Code can load', () => {
     const front = /^---\nname: (.+)\ndescription: (.+)\n---\n/.exec(skill);

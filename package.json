@@ -3,6 +3,7 @@
   "version": "0.1.0",
   "description": "Turn any web game folder into Steam-ready Windows, Mac and Linux builds. Built for AI agents.",
   "license": "MIT",
+  "repository": { "type": "git", "url": "git+https://github.com/gameshipper/gameshipper.git" },
   "type": "module",
   "bin": { "gameshipper": "bin/gameshipper.js" },
   "exports": {

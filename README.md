@@ -441,4 +441,4 @@ Steam's overlay can only hook a game on an unlocked screen, so on a locked one t
 
 ## License
 
-MIT
+MIT: see [LICENSE](LICENSE).
