@@ -481,6 +481,7 @@ Set these in `gameshipper.json`; they're names, not secrets:
 |---|---|
 | `STEAM_LOGIN_REQUIRED`, `ITCH_LOGIN_REQUIRED` | No saved login, and nobody at a terminal to log in (an agent, `--json` or `--yes`): run the command in the fix once in your own terminal. Exit code 2. |
 | `BUILD_MISSING`, `STEAM_TEST_APP`, `STEAM_DEFAULT_BRANCH`, `GITHUB_TOKEN_MISSING`, `GITHUB_AUTH_FAILED`, `GITHUB_REPO_NOT_FOUND`, `GITHUB_RELEASE_PUBLISHED` | Something to set or fix first; exit code 2. |
+| `STEAM_PATH_UNSUPPORTED` | The game folder's path has a `"` (or, on macOS and Linux, a `\`), which SteamCMD's build scripts can't hold: move or rename the folder. Exit code 2. |
 | `STEAM_UPLOAD_FAILED`, `STEAM_SET_LIVE_FAILED`, `STEAM_LOGIN_FAILED`, `STEAMCMD_CANT_RUN`, `ITCH_PUSH_FAILED`, `ITCH_LOGIN_FAILED`, `GITHUB_API_FAILED`, `ZIP_FAILED`, `TOOL_DOWNLOAD_FAILED`, `TOOL_CHECKSUM_MISMATCH`, `TOOL_UNSUPPORTED_HOST` | The upload or a tool failed; the message says why and the run log has the tool's output. Exit code 1. |
 | `ITCH_UPLOADS_LIVE` | A warning: itch.io uploads are public at once if the page is. |
 

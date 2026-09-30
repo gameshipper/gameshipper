@@ -9,7 +9,7 @@ import { failedDestination, type DestinationResult, type PublishEnv } from '../t
 import { steamDashboard, type SteamDashboard } from './dashboard.js';
 import { judgeSteamRun, STEAM_LOGIN_PROMPT, type SteamOutcome } from './judge.js';
 import { ensureSteamCmd } from './steamcmd.js';
-import { writeSteamScripts, type SteamScripts } from './vdf.js';
+import { steamScriptPaths, steamUnreadablePath, writeSteamScripts, type SteamScripts } from './vdf.js';
 
 export interface SteamDetails {
   appId: number;
@@ -98,6 +98,17 @@ export async function publishSteam(ctx: Ctx, config: Config, builds: DesktopBuil
     if (!BRANCH_PATTERN.test(branch)) return fail(gsError('USAGE', `"${branch}" isn't a branch name.`, 'Name an existing beta branch, e.g. --branch beta.'));
   }
 
+  const unreadable = steamUnreadablePath(steamScriptPaths(ctx.projectDir, config, builds), opts.platform);
+  if (unreadable) {
+    return fail(
+      gsError(
+        'STEAM_PATH_UNSUPPORTED',
+        `SteamCMD can't read the path ${unreadable}: its build scripts can't hold a quote${opts.platform === 'win32' ? '' : ' or a backslash'}.`,
+        'Move or rename the project folder so its path has no quotes (or backslashes on macOS/Linux), then publish again.',
+      ),
+    );
+  }
+
   const tool = await ensureSteamCmd(ctx, { env: opts.env, platform: opts.platform, arch: opts.arch });
   const preview = opts.dryRun;
   const scripts = writeSteamScripts(ctx.projectDir, config, builds, { preview, setLive: branch });
@@ -141,15 +152,12 @@ export async function publishSteam(ctx: Ctx, config: Config, builds: DesktopBuil
   switch (outcome.kind) {
     case 'cant-run':
       return fail(gsError('STEAMCMD_CANT_RUN', `SteamCMD can't run on this computer: ${outcome.reason}`, cantRunFix(opts.platform)), details);
-    case 'failed':
-      return fail(
-        gsError(
-          'STEAM_UPLOAD_FAILED',
-          `The SteamCMD ${preview ? 'preview' : 'upload'} failed: ${outcome.reasons.join('; ')}`,
-          `"Access Denied" means ${user} can't upload builds for app ${appId}: give it Edit App Metadata and Publish App Changes To Steam in Steamworks (Users & Permissions), and check the depot IDs match SteamPipe → Depots (steam.depots in gameshipper.json; by default the App ID + 1, 2 and 3). SteamCMD's full output is in ${ctx.logPath}.`,
-        ),
-        details,
-      );
+    case 'failed': {
+      const fix = outcome.reasons.some((r) => r.includes('Access Denied'))
+        ? `"Access Denied" means ${user} can't upload builds for app ${appId}: give it Edit App Metadata and Publish App Changes To Steam in Steamworks (Users & Permissions), and check the depot IDs match SteamPipe → Depots (steam.depots in gameshipper.json; by default the App ID + 1, 2 and 3). SteamCMD's full output is in ${ctx.logPath}.`
+        : `SteamCMD's full output is in ${ctx.logPath}: fix what it reports, then publish again.`;
+      return fail(gsError('STEAM_UPLOAD_FAILED', `The SteamCMD ${preview ? 'preview' : 'upload'} failed: ${outcome.reasons.join('; ')}`, fix), details);
+    }
     case 'previewed':
       return { to: 'steam', status: 'previewed', details, errors: [], warnings: [] };
     case 'uploaded':

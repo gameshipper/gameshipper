@@ -1,6 +1,7 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { describe, expect, it } from 'vitest';
+import { findDesktopBuilds } from '../../../src/core/publish/builds.js';
 import { publishSteam, type SteamOptions } from '../../../src/core/publish/steam/publish.js';
 import { steamCmdPaths } from '../../../src/core/publish/steam/steamcmd.js';
 import { runExternal, type ToolCommand } from '../../../src/core/tools/run.js';
@@ -45,9 +46,14 @@ const jsonl = (file: string): any[] =>
 const steamProject = () => fakeProject({ steam: { appId: 1234560 } });
 
 describe('publishSteam', () => {
-  it('uploads one build with a depot per OS, leaves steam_appid.txt out, and reports the BuildID', async () => {
+  it('uploads one build with a depot per OS, leaves every steam_appid.txt out, and reports the BuildID', async () => {
     const p = steamProject();
-    writeFiles(p.dir, { 'out/windows/steam_appid.txt': '1234560' });
+    writeFiles(p.dir, {
+      'out/windows/steam_appid.txt': '1234560',
+      'out/windows/resources/steam_appid.txt': '1234560',
+      'out/linux/resources/app/deep/steam_appid.txt': '1234560',
+      'out/linux/my_steam_appid.txt': 'kept',
+    });
     const s = setup();
     const ctx = testCtx(p.dir);
     const r = await publishSteam(ctx, p.config, p.builds, s.opts);
@@ -62,6 +68,7 @@ describe('publishSteam', () => {
     const [build] = jsonl(path.join(s.state, 'builds.jsonl'));
     expect(build).toMatchObject({ appId: 1234560, preview: false, setLive: null });
     expect(build.depots[0].files).toEqual(['LICENSE', 'Moon Game.exe', 'resources/app.asar']);
+    expect(build.depots[2].files).toEqual(['LICENSE', 'moon-game', 'my_steam_appid.txt', 'resources/app.asar']);
     const [run] = jsonl(path.join(s.state, 'runs.jsonl'));
     expect(run.args.slice(0, 7)).toEqual(['+@ShutdownOnFailedCommand', '1', '+@NoPromptForPassword', '1', '+login', 'builder', '+run_app_build']);
     if (process.platform !== 'win32') expect(run.home).toBe(steamCmdPaths(ctx.cacheDir, process.platform).homeDir);
@@ -137,11 +144,39 @@ describe('publishSteam', () => {
     expect((await publishSteam(testCtx(p.dir), p.config, p.builds, setup({ steamUser: null }).opts)).details?.user).toBe('builder');
   });
 
-  it("STEAM_UPLOAD_FAILED carries SteamCMD's reasons", async () => {
+  it("STEAM_UPLOAD_FAILED carries SteamCMD's reasons; Access Denied points at the account's permissions and the depots", async () => {
     const p = steamProject();
-    const r = await publishSteam(testCtx(p.dir), p.config, p.builds, setup({}, 'access-denied').opts);
+    const ctx = testCtx(p.dir);
+    const r = await publishSteam(ctx, p.config, p.builds, setup({}, 'access-denied').opts);
     expect(r.errors[0].code).toBe('STEAM_UPLOAD_FAILED');
     expect(r.errors[0].message).toContain('Failed to initialize build on server (Access Denied)');
+    expect(r.errors[0].fix).toContain('"Access Denied" means builder can\'t upload builds for app 1234560');
+    expect(r.errors[0].fix).toContain('depot IDs');
+    expect(r.errors[0].fix).toContain(ctx.logPath);
+  });
+
+  it('STEAM_UPLOAD_FAILED for anything else points at the run log, not at permissions', async () => {
+    const p = steamProject();
+    const ctx = testCtx(p.dir);
+    const r = await publishSteam(ctx, p.config, p.builds, setup({}, 'no-connection').opts);
+    expect([r.errors[0].code, r.errors[0].message]).toEqual(['STEAM_UPLOAD_FAILED', 'The SteamCMD upload failed: Steam login: No Connection']);
+    expect(r.errors[0].fix).not.toMatch(/Access Denied|depot/);
+    expect(r.errors[0].fix).toContain(ctx.logPath);
+  });
+
+  it.skipIf(process.platform === 'win32')("STEAM_PATH_UNSUPPORTED for a project folder SteamCMD can't read, before SteamCMD runs", async () => {
+    for (const name of ['Moon "Game"', 'Moon\\Game']) {
+      const p = steamProject();
+      const dir = path.join(makeTmpDir(), name);
+      fs.cpSync(p.dir, dir, { recursive: true, verbatimSymlinks: true });
+      const s = setup();
+      const r = await publishSteam(testCtx(dir), p.config, findDesktopBuilds(dir, p.config).builds, s.opts);
+      expect([r.status, r.errors[0].code], name).toEqual(['failed', 'STEAM_PATH_UNSUPPORTED']);
+      expect(r.errors[0].message).toContain(path.join(dir, 'out'));
+      expect(r.errors[0].fix).toBe('Move or rename the project folder so its path has no quotes (or backslashes on macOS/Linux), then publish again.');
+      expect(fs.existsSync(path.join(s.state, 'runs.jsonl'))).toBe(false);
+      expect(fs.existsSync(path.join(dir, '.gameshipper', 'steam'))).toBe(false);
+    }
   });
 
   it('STEAMCMD_CANT_RUN when this computer cannot run SteamCMD', async () => {

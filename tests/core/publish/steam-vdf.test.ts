@@ -2,15 +2,33 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { parseConfig } from '../../../src/core/config/load.js';
-import { appBuildVdf, depotBuildVdf, vdfString, writeSteamScripts } from '../../../src/core/publish/steam/vdf.js';
+import { appBuildVdf, depotBuildVdf, steamScriptPaths, steamUnreadablePath, vdfString, writeSteamScripts } from '../../../src/core/publish/steam/vdf.js';
 import { makeTmpDir } from '../../helpers/tmp.js';
 
 const slashes = (p: string) => p.split(path.sep).join('/');
 
 describe('SteamPipe build scripts', () => {
-  it('quotes and escapes strings', () => {
-    expect(vdfString('Moon "Game"')).toBe('"Moon \\"Game\\""');
-    expect(vdfString('a\\b')).toBe('"a\\\\b"');
+  it("quotes strings, and never writes one SteamCMD's parser can't read (it has no escapes)", () => {
+    expect(vdfString('/p/Moon Game/out')).toBe('"/p/Moon Game/out"');
+    expect(() => vdfString('Moon "Game"')).toThrow('SteamCMD');
+    expect(() => vdfString('a\\b')).toThrow('SteamCMD');
+  });
+
+  it('finds paths SteamCMD would fail on: a quote anywhere, a backslash on macOS and Linux', () => {
+    expect(steamUnreadablePath(['/p/Moon Game/out', '/p/x'], 'darwin')).toBeNull();
+    expect(steamUnreadablePath(['/p/ok', '/p/Moon "Game"/out'], 'linux')).toBe('/p/Moon "Game"/out');
+    expect(steamUnreadablePath(['/p/Moon\\Game/out'], 'darwin')).toBe('/p/Moon\\Game/out');
+    expect(steamUnreadablePath(['C:\\Games\\Moon\\out'], 'win32')).toBeNull();
+    expect(steamUnreadablePath(['C:\\Games\\Moon"\\out'], 'win32')).toBe('C:\\Games\\Moon"\\out');
+  });
+
+  it('names every path the scripts hold: content roots, the build output folder and the scripts themselves', () => {
+    const config = parseConfig({ name: 'Moon Game', version: '2.0.0', steam: { appId: 1000 } }).data!;
+    const builds = [{ target: 'linux' as const, dir: path.join('/p', 'out', 'linux'), executable: path.join('/p', 'out', 'linux', 'moon-game') }];
+    const steam = path.join('/p', '.gameshipper', 'steam');
+    expect(steamScriptPaths('/p', config, builds).sort()).toEqual(
+      [path.join('/p', 'out'), path.join(steam, 'output'), path.join(steam, 'app_build_1000.vdf'), builds[0].dir, path.join(steam, 'depot_build_1003.vdf')].sort(),
+    );
   });
 
   it('an app build uploads only: no SetLive', () => {
@@ -52,7 +70,7 @@ describe('SteamPipe build scripts', () => {
     expect(vdf).toContain('\t"Preview" "1"\n\t"SetLive" "beta"\n');
   });
 
-  it('a depot is a whole folder, and never ships steam_appid.txt', () => {
+  it('a depot is a whole folder, and never ships a steam_appid.txt, at its top or in any folder', () => {
     expect(depotBuildVdf(1234562, '/p/out/mac')).toBe(
       [
         '"DepotBuild"',
@@ -66,6 +84,7 @@ describe('SteamPipe build scripts', () => {
         '\t\t"Recursive" "1"',
         '\t}',
         '\t"FileExclusion" "steam_appid.txt"',
+        '\t"FileExclusion" "*/steam_appid.txt"',
         '}',
         '',
       ].join('\n'),

@@ -3,13 +3,27 @@ import * as path from 'node:path';
 import { resolveDepots, type Config, type DesktopTarget } from '../../config/schema.js';
 import type { DesktopBuild } from '../builds.js';
 
-/** A quoted VDF string. Paths use forward slashes, so a backslash only appears if a name has one. */
+/**
+ * A quoted VDF string. SteamCMD's VDF parser has no escapes: a " in a value fails the build with "App build file has
+ * invalid format", and on macOS and Linux a \ breaks it even earlier. So a value never has either: numbers, names
+ * checked against patterns, and paths that steamUnreadablePath found none in. Throws if one does anyway.
+ */
 export function vdfString(value: string): string {
-  return `"${value.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
+  if (/["\\]/.test(value)) throw new Error(`SteamCMD's build scripts can't hold ${JSON.stringify(value)}: it has a quote or a backslash.`);
+  return `"${value}"`;
 }
 
 /** SteamCMD takes forward slashes on every OS. */
 const slashes = (p: string) => p.split(path.sep).join('/');
+
+/** The first path SteamCMD couldn't read from its scripts: one with a ", or a \ on macOS and Linux. */
+export function steamUnreadablePath(paths: string[], platform: NodeJS.Platform): string | null {
+  return paths.find((p) => p.includes('"') || (platform !== 'win32' && p.includes('\\'))) ?? null;
+}
+
+const scriptsDir = (projectDir: string) => path.join(projectDir, '.gameshipper', 'steam');
+const appBuildScript = (dir: string, appId: number) => path.join(dir, `app_build_${appId}.vdf`);
+const depotBuildScript = (dir: string, depotId: number) => path.join(dir, `depot_build_${depotId}.vdf`);
 
 export interface AppBuildInput {
   appId: number;
@@ -43,7 +57,11 @@ export function appBuildVdf(input: AppBuildInput): string {
   return `${lines.join('\n')}\n`;
 }
 
-/** One depot: everything in contentRoot except steam_appid.txt, which must never ship. */
+/**
+ * One depot: everything in contentRoot except steam_appid.txt, which must never ship. SteamCMD matches an exclusion
+ * against the path relative to the content root, with * matching / too: the first line is the file at the top, the
+ * second one in any folder.
+ */
 export function depotBuildVdf(depotId: number, contentRoot: string): string {
   const lines = [
     '"DepotBuild"',
@@ -57,6 +75,7 @@ export function depotBuildVdf(depotId: number, contentRoot: string): string {
     '\t\t"Recursive" "1"',
     '\t}',
     '\t"FileExclusion" "steam_appid.txt"',
+    '\t"FileExclusion" "*/steam_appid.txt"',
     '}',
   ];
   return `${lines.join('\n')}\n`;
@@ -69,19 +88,34 @@ export interface SteamScripts {
   depots: Array<{ target: DesktopTarget; depotId: number; script: string }>;
 }
 
-/** Writes the app and depot scripts to .gameshipper/steam/ (written again on every publish). */
+/** Every path writeSteamScripts writes into the scripts or passes to SteamCMD: SteamCMD must be able to read each. */
+export function steamScriptPaths(projectDir: string, config: Config, builds: DesktopBuild[]): string[] {
+  const dir = scriptsDir(projectDir);
+  const ids = resolveDepots(config);
+  return [
+    path.join(projectDir, 'out'),
+    path.join(dir, 'output'),
+    appBuildScript(dir, config.steam.appId),
+    ...builds.flatMap((b) => [b.dir, depotBuildScript(dir, ids[b.target])]),
+  ];
+}
+
+/**
+ * Writes the app and depot scripts to .gameshipper/steam/ (written again on every publish). Check steamScriptPaths
+ * with steamUnreadablePath first: this throws on a path SteamCMD can't read.
+ */
 export function writeSteamScripts(projectDir: string, config: Config, builds: DesktopBuild[], opts: { preview: boolean; setLive: string | null }): SteamScripts {
-  const dir = path.join(projectDir, '.gameshipper', 'steam');
+  const dir = scriptsDir(projectDir);
   const outputDir = path.join(dir, 'output');
   fs.mkdirSync(outputDir, { recursive: true });
   const ids = resolveDepots(config);
   const depots = builds.map((b) => {
     const depotId = ids[b.target];
-    const script = path.join(dir, `depot_build_${depotId}.vdf`);
+    const script = depotBuildScript(dir, depotId);
     fs.writeFileSync(script, depotBuildVdf(depotId, b.dir));
     return { target: b.target, depotId, script };
   });
-  const appBuild = path.join(dir, `app_build_${config.steam.appId}.vdf`);
+  const appBuild = appBuildScript(dir, config.steam.appId);
   fs.writeFileSync(
     appBuild,
     appBuildVdf({

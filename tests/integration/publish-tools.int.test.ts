@@ -9,8 +9,9 @@ import { createCtx } from '../../src/core/context.js';
 import { butlerResult, ensureButler, parseButlerJson } from '../../src/core/publish/itch/butler.js';
 import { checkButlerLogin } from '../../src/core/publish/itch/publish.js';
 import { judgeSteamRun } from '../../src/core/publish/steam/judge.js';
-import { ensureSteamCmd, steamCmdPaths } from '../../src/core/publish/steam/steamcmd.js';
+import { ensureSteamCmd, STEAMCMD_ARCHIVES, steamCmdPaths } from '../../src/core/publish/steam/steamcmd.js';
 import { writeSteamScripts } from '../../src/core/publish/steam/vdf.js';
+import { isInstalled } from '../../src/core/tools/download.js';
 import { runExternal } from '../../src/core/tools/run.js';
 import { cli } from '../helpers/built-cli.js';
 import { fakeProject } from '../helpers/fake-builds.js';
@@ -53,14 +54,17 @@ describe.skipIf(!steamHost)('the real SteamCMD', () => {
       expect(fs.existsSync(path.join(home, 'Library', 'LaunchAgents', 'com.valvesoftware.steamclean.plist'))).toBe(true);
     }
     expect(USER_STEAM.map(fingerprint)).toEqual(before);
+    // SteamCMD updated itself in its folder, and kept Gameshipper's record of the archive: it isn't downloaded again.
+    const paths = steamCmdPaths(CACHE, process.platform);
+    expect(isInstalled(paths.installDir, STEAMCMD_ARCHIVES[process.platform]!, paths.program)).toBe(true);
   });
 
-  it("refuses an anonymous preview build, and Gameshipper reads the refusal and leaves steam_appid.txt out", async () => {
+  it('refuses an anonymous preview build, and Gameshipper reads the refusal and leaves every steam_appid.txt out', async () => {
     const c = ctx();
     const tool = await ensureSteamCmd(c, { env: process.env });
     const config = parseConfig({ name: 'Probe', version: '0.0.1', steam: { appId: 480 } }).data!;
     const dir = path.join(c.projectDir, 'out', 'linux');
-    writeFiles(dir, { probe: 'x', 'steam_appid.txt': '480' });
+    writeFiles(dir, { probe: 'x', 'steam_appid.txt': '480', 'resources/deep/steam_appid.txt': '480' });
     const scripts = writeSteamScripts(c.projectDir, config, [{ target: 'linux', dir, executable: path.join(dir, 'probe') }], { preview: true, setLive: null });
     const args = ['+@ShutdownOnFailedCommand', '1', '+@NoPromptForPassword', '1', '+login', 'anonymous', '+run_app_build', scripts.appBuild, '+quit'];
     const r = await runExternal(tool, args, { timeoutMs: 10 * 60_000, onLine: c.log });
@@ -68,7 +72,8 @@ describe.skipIf(!steamHost)('the real SteamCMD', () => {
     const output = `${r.output}\n${fs.existsSync(log) ? fs.readFileSync(log, 'utf8') : ''}`;
     const outcome = judgeSteamRun({ appId: 480, preview: true, exitCode: r.exitCode, timedOut: r.timedOut, spawnError: r.spawnError, output });
     expect(outcome, output).toMatchObject({ kind: 'failed', reasons: expect.arrayContaining([expect.stringContaining('Access Denied')]) });
-    expect(fs.readFileSync(path.join(scripts.outputDir, 'depot_build_483.log'), 'utf8')).toContain('Found 1 files');
+    // probe, resources/ and resources/deep/ (SteamCMD counts folders too): both steam_appid.txt files are left out.
+    expect(fs.readFileSync(path.join(scripts.outputDir, 'depot_build_483.log'), 'utf8')).toContain('Found 3 files (0 MB) for depot 483');
   });
 
   it('`publish` without a saved login is STEAM_LOGIN_REQUIRED, and asks Steam nothing about the account', () => {

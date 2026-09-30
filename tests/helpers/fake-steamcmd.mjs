@@ -16,13 +16,19 @@ const TS = '[2026-09-29 10:00:00]:';
 const say = (line) => process.stdout.write(`${line}\n`);
 const saved = (user) => path.join(state, `login-${user}`);
 
-function listFiles(root, skip) {
+// A FileExclusion as SteamCMD applies it: to each file's path relative to the content root, with `*` matching any
+// characters, / included. So "steam_appid.txt" only matches the file at the top, and "*/steam_appid.txt" the ones in
+// folders (checked with the real SteamCMD).
+const exclusion = (glob) => new RegExp(`^${glob.split('*').map((part) => part.replace(/[.+?^${}()|[\]\\]/g, '\\$&')).join('.*')}$`);
+
+function listFiles(root, exclusions) {
+  const skip = exclusions.map(exclusion);
   const out = [];
   const walk = (dir, rel) => {
     for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
       const r = rel ? `${rel}/${e.name}` : e.name;
       if (e.isDirectory()) walk(path.join(dir, e.name), r);
-      else if (!skip.includes(e.name)) out.push(r);
+      else if (!skip.some((x) => x.test(r))) out.push(r);
     }
   };
   walk(root, '');
