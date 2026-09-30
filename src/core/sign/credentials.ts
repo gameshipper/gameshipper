@@ -81,7 +81,14 @@ export function readAppleCredentials(
     if (/[\r\n]|BEGIN/.test(key)) {
       return invalid('GAMESHIPPER_NOTARY_KEY holds the private key itself; it must be the path to the .p8 file.', KEY_FILE_FIX);
     }
-    if (!fileExists(key)) return invalid(`GAMESHIPPER_NOTARY_KEY points at ${key}, which doesn't exist.`, KEY_FILE_FIX);
+    if (!fileExists(key)) {
+      // Repeated only when it looks like a path: anything else may be the key itself (its base64, or its bare body).
+      const looksLikePath = key.length <= 256 && /\.p8$/i.test(key) && !/\s/.test(key);
+      return invalid(
+        looksLikePath ? `GAMESHIPPER_NOTARY_KEY points at ${key}, which doesn't exist.` : "GAMESHIPPER_NOTARY_KEY doesn't name an existing .p8 file (its value isn't shown).",
+        KEY_FILE_FIX,
+      );
+    }
     notary = { kind: 'api-key', appleApiKey: key, appleApiKeyId: keyId, ...(issuer ? { appleApiIssuer: issuer } : {}) };
   }
   return { credentials: { identity, notary }, error: null };

@@ -78,6 +78,17 @@ describe('readAppleCredentials', () => {
     expect(r.error?.message).toContain('/nope.p8');
   });
 
+  it('never repeats a GAMESHIPPER_NOTARY_KEY that does not look like a path to a .p8 file', () => {
+    const body = 'MIGTAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBHkwdwIBAQQgFAKEKEYFAKEKEYFAKEKEYFAKEKEYFAKEKEYFAKEKEYoAoGCCqGSM49AwEHoUQDQgAE';
+    const base64 = Buffer.from(`-----BEGIN PRIVATE KEY-----\n${body}\n-----END PRIVATE KEY-----\n`).toString('base64');
+    for (const key of [base64, body, `/keys/${'x'.repeat(260)}.p8`, '/keys/AuthKey X.p8', 'AuthKey_X.txt']) {
+      const r = readAppleCredentials({ GAMESHIPPER_MAC_IDENTITY: ID, GAMESHIPPER_NOTARY_KEY: key, GAMESHIPPER_NOTARY_KEY_ID: 'X' }, () => false);
+      expect(r.error, key).toMatchObject({ code: 'APPLE_CREDENTIALS_INVALID', message: "GAMESHIPPER_NOTARY_KEY doesn't name an existing .p8 file (its value isn't shown)." });
+      expect(JSON.stringify(r.error)).not.toContain(key);
+      expect(JSON.stringify(r.error)).not.toContain(body.slice(0, 16));
+    }
+  });
+
   it('documents every variable it reads', () => {
     expect(Object.keys(APPLE_ENV)).toEqual([
       'GAMESHIPPER_MAC_IDENTITY',
