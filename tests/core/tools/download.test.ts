@@ -2,7 +2,7 @@ import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import * as http from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { installArchive, isInstalled, TOOL_DOWNLOAD_MAX_BYTES, type ToolArchive } from '../../../src/core/tools/download.js';
@@ -12,10 +12,17 @@ import { refusedUrl, startServer, type TestServer } from '../../helpers/server.j
 import { makeTgz } from '../../helpers/tgz.js';
 import { makeTmpDir, writeFiles } from '../../helpers/tmp.js';
 
+// spawnSync, watched: the tests see what installArchive runs tar with. It still runs.
+vi.mock('node:child_process', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('node:child_process')>();
+  return { ...actual, spawnSync: vi.fn(actual.spawnSync) };
+});
+
 const sha = (b: Buffer) => createHash('sha256').update(b).digest('hex');
 
 let server: TestServer | undefined;
 afterEach(async () => {
+  vi.unstubAllEnvs();
   await server?.close();
   server = undefined;
 });
@@ -70,6 +77,31 @@ describe('installArchive', () => {
     const installDir = path.join(makeTmpDir(), 'steamcmd', 'app');
     await installArchive(testCtx(makeTmpDir()), 'SteamCMD', { url: `${server.base}/s.tar.gz`, sha256: sha(body), format: 'tar.gz' }, installDir, 'steamcmd.sh');
     expect(fs.readlinkSync(path.join(installDir, 'Frameworks', 'B.framework', 'Versions', 'Current'))).toBe('A');
+  });
+
+  it.skipIf(process.platform === 'win32')("gives tar none of the secrets Gameshipper holds for others", async () => {
+    const secrets = {
+      GITHUB_TOKEN: 'gs-secret-github',
+      GH_TOKEN: 'gs-secret-gh',
+      BUTLER_API_KEY: 'gs-secret-butler',
+      GAMESHIPPER_MAC_IDENTITY: 'Developer ID Application: Someone (ABCDE12345)',
+      GAMESHIPPER_NOTARY_PROFILE: 'gs-secret-profile',
+    };
+    for (const [name, value] of Object.entries(secrets)) vi.stubEnv(name, value);
+    vi.mocked(spawnSync).mockClear();
+    const body = makeTgz({ 'steamcmd.sh': '#!/bin/sh\n' });
+    server = await startServer({ '/s.tar.gz': { body } });
+    const installDir = path.join(makeTmpDir(), 'steamcmd', 'app');
+    await installArchive(testCtx(makeTmpDir()), 'SteamCMD', { url: `${server.base}/s.tar.gz`, sha256: sha(body), format: 'tar.gz' }, installDir, 'steamcmd.sh');
+    expect(fs.existsSync(path.join(installDir, 'steamcmd.sh'))).toBe(true);
+    const tar = vi.mocked(spawnSync).mock.calls.filter(([command]) => /(^|\/)tar$/.test(command));
+    expect(tar).toHaveLength(1);
+    const env = (tar[0][2] as { env?: NodeJS.ProcessEnv } | undefined)?.env;
+    expect(env, 'tar gets an environment of its own').toBeDefined();
+    for (const name of Object.keys(secrets)) expect(env, name).not.toHaveProperty(name);
+    expect(JSON.stringify(env)).not.toContain('gs-secret');
+    // Everything else it may need is still there.
+    expect(env!.PATH).toBe(process.env.PATH);
   });
 
   it.skipIf(process.platform === 'win32')('never unpacks a tar.gz entry outside the install folder', async () => {

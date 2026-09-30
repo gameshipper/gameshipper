@@ -5,6 +5,7 @@ import * as path from 'node:path';
 import { moveIntoCache } from '../cache.js';
 import type { Ctx } from '../context.js';
 import { GsFailure } from '../result.js';
+import { withoutSecrets } from './run.js';
 import { unzipTo } from './zip.js';
 
 /** A vendor's archive, pinned by URL and SHA-256 (spec §12: the cache keeps checksums). */
@@ -105,7 +106,8 @@ export async function installArchive(
       const file = `${tmp}.tar.gz`;
       fs.writeFileSync(file, body);
       try {
-        const r = spawnSync(TAR, ['-xzf', file, '-C', tmp], { encoding: 'utf8' });
+        // Like every tool Gameshipper runs, tar never gets the GitHub token, butler's key or the Apple variables.
+        const r = spawnSync(TAR, ['-xzf', file, '-C', tmp], { encoding: 'utf8', env: withoutSecrets(process.env) });
         if (r.status !== 0) throw new Error((r.stderr || r.error?.message || 'tar failed').trim());
       } finally {
         fs.rmSync(file, { force: true });
