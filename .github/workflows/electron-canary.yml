@@ -19,16 +19,26 @@ jobs:
     env:
       GAMESHIPPER_SOFTWARE_GL: '1'
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-node@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 24
           cache: npm
       - run: npm ci
+      # Not `npm install --no-save electron@latest`: that hits npm/cli#4828 and removes the platform packages of
+      # rolldown, lightningcss and fsevents, so vitest can't start. The package is swapped in place instead, and its
+      # installer downloads the new binary. Its dependencies stay those of the pinned version.
       - name: Install the newest stable Electron
         run: |
           pinned="$(node -p "require('./package.json').dependencies.electron")"
           latest="$(npm view electron@latest version)"
-          npm install --no-save "electron@$latest"
+          npm pack "electron@$latest" --pack-destination "$RUNNER_TEMP"
+          rm -rf node_modules/electron
+          mkdir node_modules/electron
+          tar -xzf "$RUNNER_TEMP/electron-$latest.tgz" -C node_modules/electron --strip-components=1
+          node node_modules/electron/install.js
+          test "$(node -p "require('electron/package.json').version")" = "$latest"
           echo "Testing Electron $latest (pinned: $pinned)" >> "$GITHUB_STEP_SUMMARY"
       - run: npm run test:integration
