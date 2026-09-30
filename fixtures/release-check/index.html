@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Release Check</title>
+  <style>
+    html, body { margin: 0; height: 100%; background: #14161a; color: #e8e8e8; font: 16px/1.4 system-ui, sans-serif; }
+    main { padding: 24px; max-width: 900px; }
+    button { font: inherit; margin: 4px 8px 4px 0; padding: 8px 14px; }
+    pre { background: #0c0d10; padding: 12px; white-space: pre-wrap; min-height: 3em; }
+    canvas { position: fixed; right: 24px; top: 24px; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Gameshipper release check</h1>
+    <p>Steam: <span id="steam"></span></p>
+    <p>Player: <span id="player">(unknown)</span></p>
+    <p>
+      <button id="unlock">Unlock ACH_WIN_ONE_GAME</button>
+      <button id="clear">Clear ACH_WIN_ONE_GAME</button>
+      <button id="overlay">Open the overlay (achievements)</button>
+    </p>
+    <p>
+      <button id="save">Save (count + 1)</button>
+      <button id="load">Load</button>
+      <button id="quit">Quit</button>
+    </p>
+    <h2>Gamepads</h2>
+    <pre id="pads"></pre>
+    <h2>Log</h2>
+    <pre id="log"></pre>
+  </main>
+  <canvas id="spinner" width="120" height="120"></canvas>
+  <script src="./main.js"></script>
+</body>
+</html>
