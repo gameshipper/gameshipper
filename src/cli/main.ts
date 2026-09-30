@@ -21,7 +21,7 @@ import { saveLastRun } from '../core/runs.js';
 import { getStatus } from '../core/status.js';
 import { GAMESHIPPER_VERSION } from '../core/version.js';
 import { serveMcp } from '../mcp/server.js';
-import { COMMANDS, commandHelpText, GLOBAL_FLAGS, helpData, helpText, type CommandHelp } from './help.js';
+import { COMMANDS, commandHelpText, GLOBAL_FLAGS, helpData, helpText, MAX_SECONDS, type CommandHelp } from './help.js';
 import { exitCodeFor, renderHuman, renderJson } from './output.js';
 import { createPrompter, type Prompter } from './prompt.js';
 import { buildSummary, checkSummary, ciSummary, initSummary, playSummary, plural, statusSummary } from './summaries.js';
@@ -281,8 +281,6 @@ async function buildCommand(projectDir: string, values: Values, run: RunState): 
   return { result, human: buildSummary(result as Parameters<typeof buildSummary>[0], projectDir) };
 }
 
-/** The longest run --seconds asks for, in play and check. */
-export const MAX_SECONDS = 600;
 const badSeconds = (seconds: number) => !Number.isFinite(seconds) || seconds <= 0 || seconds > MAX_SECONDS;
 const secondsUsage = (example: number) => usage(`--seconds must be a positive number of at most ${MAX_SECONDS}.`, `For example: --seconds ${example}`);
 

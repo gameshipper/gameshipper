@@ -21,6 +21,9 @@ export interface CommandHelp {
   flags: FlagHelp[];
 }
 
+/** The longest run --seconds asks for, in play and check. */
+export const MAX_SECONDS = 600;
+
 export const GLOBAL_FLAGS: FlagHelp[] = [
   { name: 'json', description: 'Print the result as JSON on stdout and nothing else (for agents and scripts).' },
   { name: 'verbose', description: 'Also stream the run log to stderr.' },

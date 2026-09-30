@@ -71,6 +71,37 @@ describe('mcpTools', () => {
     expect(play.toArgs({ screenshot: [5, 10] })).toEqual(['play', '--screenshot=5,10']);
   });
 
+  it('describes tools and inputs without CLI syntax, for commands added to the catalog later too', () => {
+    for (const tool of [...mcpTools(), ...mcpTools([PUBLISH])]) {
+      expect(tool.description, tool.name).not.toMatch(/--[a-z]|comma-separated/i);
+      for (const [key, schema] of Object.entries(tool.inputSchema.shape)) {
+        expect(schema.description, `${tool.name}.${key}`).toBeTruthy();
+        expect(schema.description, `${tool.name}.${key}`).not.toMatch(/--[a-z]|comma-separated/i);
+      }
+    }
+    expect(byName('gameshipper_build').inputSchema.shape.target.description).toContain('["mac"]');
+    expect(byName('gameshipper_play').inputSchema.shape.seconds.description).toContain('Implies smoke.');
+  });
+
+  it('puts the limits in the schema: runs of at most 600 seconds, up to 20 screenshots', () => {
+    const play = byName('gameshipper_play').inputSchema;
+    expect(play.safeParse({ seconds: 600 }).success).toBe(true);
+    expect(play.safeParse({ seconds: 601 }).success).toBe(false);
+    expect(play.safeParse({ screenshot: Array.from({ length: 20 }, (_, i) => i + 1) }).success).toBe(true);
+    expect(play.safeParse({ screenshot: Array.from({ length: 21 }, (_, i) => i + 1) }).success).toBe(false);
+    expect(play.safeParse({ screenshot: [601] }).success).toBe(false);
+    expect(byName('gameshipper_check').inputSchema.safeParse({ seconds: 601 }).success).toBe(false);
+  });
+
+  it('says which folder each path is relative to', () => {
+    const serverFolder = "relative to the server's folder";
+    expect(byName('gameshipper_build').inputSchema.shape.dir.description).toContain(serverFolder);
+    expect(byName('gameshipper_build').inputSchema.shape.steamSdk.description).toContain(serverFolder);
+    expect(byName('gameshipper_play').inputSchema.shape.steamSdk.description).toContain(serverFolder);
+    const init = byName('gameshipper_init').inputSchema.shape;
+    for (const key of ['icon', 'keyArt', 'logo', 'entry', 'outputDir'] as const) expect(init[key].description, key).toContain('relative to the game folder');
+  });
+
   it('never has an input for a password, token or code', () => {
     for (const tool of [...mcpTools(), ...mcpTools([PUBLISH])]) {
       for (const key of Object.keys(tool.inputSchema.shape)) {

@@ -54,6 +54,10 @@ describe('MCP server', () => {
     expect(tools.find((t) => t.name === 'gameshipper_status')?.annotations?.readOnlyHint).toBe(true);
     expect(client.getInstructions()).toBe(instructions(mcpTools()));
     expect(client.getInstructions()).toContain('Never ask the user for passwords');
+    // Error fixes are written for the CLI.
+    expect(client.getInstructions()).toContain('`npx gameshipper build --target mac` in a fix means the tool gameshipper_build with target: ["mac"]');
+    expect(client.getInstructions()).toContain("don't run npx yourself");
+    expect(client.getInstructions()).toContain('relative to the game folder');
   });
 
   it('mentions publish in the loop only once the tool exists', () => {

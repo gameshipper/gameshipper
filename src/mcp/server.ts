@@ -33,6 +33,9 @@ export function instructions(tools: readonly McpTool[]): string {
     `then gameshipper_check, fixing what fails and building again${publish ? '; then gameshipper_publish' : ''}.`,
     'Every tool returns { ok, data, errors[], warnings[], logPath }; each error has a code, a message and a fix: do what the fix says.',
     'gameshipper_play without smoke opens the game for the human and returns at once.',
+    'Fixes are written for the CLI: `npx gameshipper build --target mac` in a fix means the tool gameshipper_build with target: ["mac"] (each --flag-name is the input flagName, and `ci init` is gameshipper_ci_init);',
+    "don't run npx yourself, and leave a command the fix says the human must run in their terminal to the human.",
+    "dir and steamSdk are absolute or relative to the server's folder; init's icon, keyArt, logo, entry and outputDir are relative to the game folder.",
     'Never ask the user for passwords, tokens or 2FA codes, and never pass them to a tool: logins happen in their own terminal.',
   ].join(' ');
 }
