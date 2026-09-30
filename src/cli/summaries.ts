@@ -147,7 +147,7 @@ export function checkSummary(r: Result<CheckReport>): string[] {
   return lines;
 }
 
-/** The Steamworks settings a developer enters once by hand after the first upload (spec §10). */
+/** The Steamworks settings a developer enters once by hand after the first upload. */
 function steamSetup(s: SteamDetails): string[] {
   const d = s.dashboard;
   const col = (os: string) => os.padEnd(16);

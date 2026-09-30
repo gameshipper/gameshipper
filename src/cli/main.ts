@@ -402,7 +402,7 @@ function ciCommand(projectDir: string, values: Values): Outcome {
 
 const DESTINATION_NAMES: Record<Destination, string> = { steam: 'Steam', itch: 'itch.io', github: 'GitHub Releases' };
 
-/** What a person sees before the uploads start: they can take minutes, and itch.io's are public at once (spec §10). */
+/** What a person sees before the uploads start: they can take minutes, and itch.io's are public at once. */
 export function publishStartLine(to: Destination[], dryRun: boolean): string {
   const names = to.map((d) => DESTINATION_NAMES[d]);
   const list = names.length > 1 ? `${names.slice(0, -1).join(', ')} and ${names.at(-1)}` : names.join('');

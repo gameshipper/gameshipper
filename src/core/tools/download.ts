@@ -8,7 +8,7 @@ import { GsFailure } from '../result.js';
 import { withoutSecrets } from './run.js';
 import { unzipTo } from './zip.js';
 
-/** A vendor's archive, pinned by URL and SHA-256 (spec §12: the cache keeps checksums). */
+/** A vendor's archive, pinned by URL and SHA-256 (the cache keeps checksums). */
 export interface ToolArchive {
   url: string;
   sha256: string;

@@ -23,7 +23,7 @@ export interface DesktopOutput {
   /** The file to launch: .exe, Linux binary, or the binary inside the .app bundle. */
   executable: string;
   warnings: GsError[];
-  /** Mac only: how build signed the app, after its afterPackage hooks (spec §7.3 step 6). */
+  /** Mac only: how build signed the app, after its afterPackage hooks. */
   mac?: MacSigningInfo;
 }
 

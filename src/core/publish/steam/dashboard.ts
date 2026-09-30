@@ -24,7 +24,7 @@ export interface SteamDashboard {
 }
 
 /**
- * What the developer sets once by hand in Steamworks after the first upload (spec §10).
+ * What the developer sets once by hand in Steamworks after the first upload.
  * Launch options name the files players run, relative to the depot. For macOS Valve prefers the .app bundle to the
  * binary inside it (partner.steamgames.com/doc/sdk/uploading), so it's the bundle.
  * Auto-Cloud mirrors where the shell keeps saves: <appData>/<fileSafeName(name)>/saves (src/shell/main.ts pins

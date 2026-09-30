@@ -15,7 +15,7 @@ import { appAsarPath, scanBuildCode } from './scan.js';
 import { aiDisclosureCheck, screenshotsCheck, storeImagesCheck, trailerCheck } from './store.js';
 import { checkIssues, countStatuses, type CheckReport } from './types.js';
 
-/** How long `check` runs the game with the network blocked (spec §9: about 15 s). */
+/** How long `check` runs the game with the network blocked (about 15 s). */
 export const DEFAULT_CHECK_SECONDS = 15;
 
 export interface CheckOptions {
@@ -40,7 +40,7 @@ export function checkDirFor(projectDir: string): string {
 }
 
 /**
- * The readiness report (spec §9): launches the build for this computer once, offline and at Steam Deck size, then
+ * The readiness report: launches the build for this computer once, offline and at Steam Deck size, then
  * adds the review and store checks. Never builds anything itself.
  */
 export async function runCheck(ctx: Ctx, config: Config, opts: CheckOptions = {}): Promise<Result<CheckReport>> {

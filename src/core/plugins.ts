@@ -29,7 +29,7 @@ export interface AfterPackageContext extends PluginHookContext {
   executable: string;
 }
 
-/** The whole v1 plugin API (spec §7.6): a module whose default export looks like this. */
+/** The whole v1 plugin API: a module whose default export looks like this. */
 export interface GameshipperPlugin {
   name: string;
   /** Functions the game calls as gameshipper.plugins.<name>.<fn>(...args); they run in Electron's main process. */

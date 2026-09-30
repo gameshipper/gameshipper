@@ -51,7 +51,7 @@ const HOW_TO_SIGN =
   'With a paid Apple Developer account, set GAMESHIPPER_MAC_IDENTITY and GAMESHIPPER_NOTARY_PROFILE, then build again on this Mac. `npx gameshipper help --json` lists the variables under "environment".';
 
 /**
- * The last step of a Mac target (spec §7.3 step 6), after its afterPackage hooks: sign with the hardened runtime
+ * The last step of a Mac target, after its afterPackage hooks: sign with the hardened runtime
  * (with Steam's entitlements when `deps.steam`), then notarize and staple when a notary login is set. Nothing may
  * change the .app afterwards. Throws GsFailure when Developer ID signing or notarization fails; ad-hoc trouble is a
  * warning.

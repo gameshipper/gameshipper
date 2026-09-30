@@ -40,7 +40,7 @@ export interface MobileNextSteps {
   steps: string[];
 }
 
-/** iOS and Android aren't uploaded (spec §4): publish says what to do in Xcode and Android Studio instead. */
+/** iOS and Android aren't uploaded: publish says what to do in Xcode and Android Studio instead. */
 export function mobileNextSteps(projectDir: string, config: Config): MobileNextSteps[] {
   const built = (target: string) => fs.existsSync(path.join(projectDir, 'out', target));
   const out: MobileNextSteps[] = [];

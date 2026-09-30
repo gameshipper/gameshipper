@@ -28,7 +28,7 @@ export interface StoreImageSpec extends Size {
 }
 
 /**
- * Steam's store and library images (spec §8), all made from keyArt + logo. The logo boxes are a design choice,
+ * Steam's store and library images, all made from keyArt + logo. The logo boxes are a design choice,
  * not a Steam rule: small capsules get a large box so the title stays readable at 462x174, and portrait capsules
  * keep the logo to about a third of the height so the art shows.
  */

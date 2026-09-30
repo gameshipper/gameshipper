@@ -114,7 +114,7 @@ function clearStoreImages(ctx: Ctx, dir: string): void {
 }
 
 /**
- * Builds every Steam store and library image (spec §8) from keyArt + logo into out/store/, replacing the images an
+ * Builds every Steam store and library image from keyArt + logo into out/store/, replacing the images an
  * earlier build made. Never throws: problems come back as errors and warnings, so the desktop builds still count.
  * When the images are skipped or fail, out/store is left without any. Leaves out/store/screenshots/ alone.
  */

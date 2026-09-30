@@ -83,7 +83,7 @@ function notRun(ev: LaunchEvidence): { run: CheckResult; reason: string } {
   };
 }
 
-/** Offline, launch and Steam Deck checks (spec §9), from one run of the build for this computer. */
+/** Offline, launch and Steam Deck checks, from one run of the build for this computer. */
 export function launchChecks(ev: LaunchEvidence): CheckResult[] {
   const otherOs: CheckResult = {
     id: 'launch.other-os',

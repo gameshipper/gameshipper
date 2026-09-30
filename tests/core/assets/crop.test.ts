@@ -6,7 +6,7 @@ import { screenshotDirFor, STORE_IMAGES, storeDirFor } from '../../../src/core/a
 const K4 = { width: 3840, height: 2160 };
 
 describe('STORE_IMAGES', () => {
-  it('lists the eight Steam images at the sizes in spec §8', () => {
+  it('lists the eight Steam images at their Steam sizes', () => {
     expect(STORE_IMAGES.map((s) => [s.file, s.width, s.height, s.kind])).toEqual([
       ['header_capsule.png', 920, 430, 'art+logo'],
       ['small_capsule.png', 462, 174, 'art+logo'],

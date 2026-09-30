@@ -1,6 +1,7 @@
-# Local research (not part of the tool)
+# Local research and internal design docs (not part of the tool)
 reports/
 research_notes/
+docs/superpowers/
 
 # OS / editor
 .DS_Store

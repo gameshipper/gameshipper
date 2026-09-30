@@ -1,7 +1,7 @@
 import type { DesktopTarget } from '../config/schema.js';
 import { gsError, type GsError } from '../result.js';
 
-/** pass/warn/fail as in spec §9; info = a reminder only; skip = couldn't run here (the message says why). */
+/** pass/warn/fail; info = a reminder only; skip = couldn't run here (the message says why). */
 export type CheckStatus = 'pass' | 'warn' | 'fail' | 'info' | 'skip';
 export type CheckGroup = 'offline' | 'launch' | 'deck' | 'review' | 'store' | 'ai';
 

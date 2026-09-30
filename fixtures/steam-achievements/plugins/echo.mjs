@@ -1,7 +1,7 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 
-// An example plugin (spec §7.6): one function the game can call, and both build hooks.
+// An example plugin: one function the game can call, and both build hooks.
 export default {
   name: 'echo',
   main: {
