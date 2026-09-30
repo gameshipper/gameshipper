@@ -15,17 +15,30 @@ const HOST_TARGET = { darwin: 'mac', win32: 'windows', linux: 'linux' }[process.
 const MODEL = process.env.AGENT_E2E_MODEL || 'haiku';
 const BUDGET = process.env.AGENT_E2E_BUDGET_USD || '1';
 
+/** process.exit(), once Node has finished reading the system certificates: exiting during that read crashes Node 24.7 (see src/core/proc.ts). */
+function exit(code) {
+  const flags = [...process.execArgv, ...(process.env.NODE_OPTIONS ?? '').split(/\s+/)];
+  if (process.env.NODE_USE_SYSTEM_CA === '1' || flags.includes('--use-system-ca')) {
+    try {
+      process.getBuiltinModule('node:tls').getCACertificates?.('system');
+    } catch {
+      // Exiting matters more than the certificates.
+    }
+  }
+  process.exit(code);
+}
+
 if (process.env.GAMESHIPPER_AGENT_E2E !== '1') {
   console.log('SKIPPED: set GAMESHIPPER_AGENT_E2E=1 to run it (it uses a little Claude usage).');
-  process.exit(0);
+  exit(0);
 }
 if (spawnSync('claude', ['--version'], { stdio: 'ignore', shell: process.platform === 'win32' }).status !== 0) {
   console.log('SKIPPED: the claude CLI is not installed.');
-  process.exit(0);
+  exit(0);
 }
 if (!fs.existsSync(path.join(ROOT, 'dist', 'cli', 'main.js'))) {
   console.error('Run `npm run build` first.');
-  process.exit(2);
+  exit(2);
 }
 
 const work = fs.mkdtempSync(path.join(os.tmpdir(), 'gs-agent-'));
@@ -51,7 +64,7 @@ const KEEP = process.env.GAMESHIPPER_KEEP_TMP === '1';
 function finish(code) {
   if (KEEP) console.log(`Kept ${work} (GAMESHIPPER_KEEP_TMP=1).`);
   else fs.rmSync(work, { recursive: true, force: true, maxRetries: 3 });
-  process.exit(code);
+  exit(code);
 }
 
 console.log(`Running Claude Code (${MODEL}, at most $${BUDGET}) in ${game} ...`);
