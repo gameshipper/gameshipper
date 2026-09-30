@@ -85,6 +85,25 @@ export function butlerResult(messages: ButlerMessage[]): Record<string, unknown>
   return messages.find((m) => m.type === 'result')?.value ?? null;
 }
 
+/**
+ * butler's errors when it couldn't reach itch.io, or itch.io failed itself: logging in again wouldn't fix them. Seen
+ * from butler 15.31.0 on 2026-09-29, with itch.io's address pointed at a closed port, an unknown host, a server that
+ * hung up, one that never answered (or answered 503, which butler retries until it gives up) and one that answered 500:
+ *   Get "https://api.itch.io/wharf/status": dial tcp 127.0.0.1:1: connect: connection refused
+ *   Get "http://api.x.invalid/wharf/status": dial tcp: lookup api.x.invalid: no such host
+ *   Get "…": EOF
+ *   Get "…": context deadline exceeded
+ *   itch.io API error (500): /wharf/status: internal error
+ * plus Go's other network errors (i/o timeout, TLS handshake timeout, connection reset by peer).
+ */
+const UNREACHABLE =
+  /dial tcp|no such host|connection refused|connection reset|network is unreachable|i\/o timeout|TLS handshake|context deadline exceeded|Client\.Timeout|\bEOF\b|API error \(5\d\d\)|\bHTTP 5\d\d\b|\b503\b|Service Unavailable|Bad Gateway/i;
+
+/** True when butler's error says itch.io couldn't be reached or failed itself, rather than refusing the login. */
+export function butlerUnreachable(reason: string): boolean {
+  return UNREACHABLE.test(reason);
+}
+
 /** The first line of each error butler printed (the rest is a Go stack trace), or its last log line if none. */
 export function butlerErrors(messages: ButlerMessage[]): string[] {
   const first = (m: ButlerMessage) => (m.message ?? '').split('\n')[0].trim();

@@ -15,6 +15,7 @@ import { isInstalled } from '../../src/core/tools/download.js';
 import { runExternal } from '../../src/core/tools/run.js';
 import { cli } from '../helpers/built-cli.js';
 import { fakeProject } from '../helpers/fake-builds.js';
+import { refusedUrl } from '../helpers/server.js';
 import { makeTmpDir, writeFiles } from '../helpers/tmp.js';
 
 /**
@@ -99,7 +100,16 @@ describe('the real butler', () => {
     writeFiles(dir, { 'game.txt': 'x' });
     const push = await runExternal(tool, ['--json', 'push', '--dry-run', dir, 'gameshipper/probe:linux', '--userversion', '0.0.1'], { timeoutMs: 60_000 });
     expect(butlerResult(parseButlerJson(push.output))).toMatchObject({ dryRun: true, channel: 'linux' });
-    expect(await checkButlerLogin(c, tool)).toEqual({ ok: false, reason: 'No credentials and stdin is not a terminal - terminating.' });
+    expect(await checkButlerLogin(c, tool)).toEqual({ ok: false, reason: 'No credentials and stdin is not a terminal - terminating.', unreachable: false });
+  });
+
+  it("tells itch.io being unreachable from a refused login, and never sends the key anywhere", async () => {
+    const c = ctx();
+    // Every request goes through a proxy that refuses connections, so the made-up key never leaves this computer.
+    const proxy = await refusedUrl();
+    const env = { ...butlerEnv(), BUTLER_API_KEY: 'not-a-real-key', HTTPS_PROXY: proxy, HTTP_PROXY: proxy, https_proxy: proxy, http_proxy: proxy, NO_PROXY: '', no_proxy: '' };
+    const login = await checkButlerLogin(c, await ensureButler(c, { env }));
+    expect(login).toMatchObject({ ok: false, unreachable: true, reason: expect.stringContaining('proxyconnect tcp: dial tcp') });
   });
 
   it('`publish --to itch --dry-run` without a login previews the pushes and warns', () => {

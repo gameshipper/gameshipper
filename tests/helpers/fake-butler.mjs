@@ -2,8 +2,10 @@
 // A stand-in for itch.io's butler 15.31.0 in tests (GAMESHIPPER_BUTLER points at it). With --json it prints the JSON
 // lines the real one printed on 2026-09-29, and it records every run.
 //   FAKE_BUTLER_STATE  folder for runs.jsonl, pushes.jsonl and the saved "creds" file (required)
-//   FAKE_BUTLER_MODE   ok | push-fails | login-fails
-// BUTLER_API_KEY counts as a login; the value "bad" is refused the way itch.io refuses an invalid key.
+//   FAKE_BUTLER_MODE   ok | push-fails | login-fails | offline | server-error
+// BUTLER_API_KEY counts as a login; the value "bad" is refused the way itch.io refuses an invalid key. "offline" and
+// "server-error" fail every call that needs itch.io (checking a login, a real push) the way butler did with itch.io's
+// address pointed at an unknown host and at a server answering 500.
 // It never calls process.exit(): with NODE_USE_SYSTEM_CA=1, Node 24.7 on macOS can crash there.
 import * as fs from 'node:fs';
 import * as path from 'node:path';
@@ -25,6 +27,14 @@ const key = process.env.BUTLER_API_KEY;
 
 /** null when logged in, else the exit code after saying why not. */
 function refuse() {
+  if ((key || fs.existsSync(creds())) && mode === 'offline') {
+    error(`Get "https://api.itch.io/wharf/status": dial tcp: lookup api.itch.io: no such host${STACK}\nvalidating credentials`);
+    return 1;
+  }
+  if ((key || fs.existsSync(creds())) && mode === 'server-error') {
+    error(`itch.io API error (500): /wharf/status: internal error${STACK}\nvalidating credentials`);
+    return 1;
+  }
   if (key === 'bad') {
     error(`itch.io API error (403): /wharf/status: invalid key${STACK}`);
     return 1;

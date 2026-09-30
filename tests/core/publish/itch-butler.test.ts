@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { BUTLER_ARCHIVES, butlerErrors, butlerResult, butlerPaths, ensureButler, parseButlerJson } from '../../../src/core/publish/itch/butler.js';
+import { BUTLER_ARCHIVES, butlerErrors, butlerResult, butlerPaths, butlerUnreachable, ensureButler, parseButlerJson } from '../../../src/core/publish/itch/butler.js';
 import { testCtx } from '../../helpers/ctx.js';
 import { makeTmpDir } from '../../helpers/tmp.js';
 
@@ -32,6 +32,34 @@ describe('butler output', () => {
 
   it("keeps only the first line of an error, not butler's stack trace", () => {
     expect(butlerErrors(parseButlerJson(INVALID_KEY))).toEqual(['itch.io API error (403): /wharf/status: invalid key']);
+  });
+});
+
+describe("telling itch.io's refusals from failing to reach it", () => {
+  it('knows the network and server errors butler reports', () => {
+    // From butler 15.31.0 on 2026-09-29, with itch.io's address pointed at a closed port, an unknown host, a
+    // local server that hung up, one that never answered (or answered 503) and one that answered 500.
+    for (const reason of [
+      'Get "http://127.0.0.1:1/wharf/status": dial tcp 127.0.0.1:1: connect: connection refused',
+      'Get "https://api.itch.io/wharf/status": proxyconnect tcp: dial tcp 127.0.0.1:1: connect: connection refused',
+      'Get "http://api.gameshipper-probe.invalid/wharf/status": dial tcp: lookup api.gameshipper-probe.invalid: no such host',
+      'Get "http://127.0.0.1:59552/wharf/status": EOF',
+      'Get "http://127.0.0.1:59554/wharf/status": context deadline exceeded',
+      'itch.io API error (500): /wharf/status: internal error',
+      // Go's other network errors.
+      'Get "https://api.itch.io/wharf/status": net/http: TLS handshake timeout',
+      'read tcp 10.0.0.2:51234->151.101.1.1:443: i/o timeout',
+      'itch.io API error (503): /wharf/status: Service Unavailable',
+    ]) {
+      expect(butlerUnreachable(reason), reason).toBe(true);
+    }
+    for (const reason of [
+      'No credentials and stdin is not a terminal - terminating.',
+      'itch.io API error (403): /wharf/status: invalid key',
+      'itch.io API error (400): /wharf/builds: invalid target (bad user/game)',
+    ]) {
+      expect(butlerUnreachable(reason), reason).toBe(false);
+    }
   });
 });
 

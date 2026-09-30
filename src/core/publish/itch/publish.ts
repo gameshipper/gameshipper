@@ -4,7 +4,7 @@ import { gsError, type GsError } from '../../result.js';
 import { runExternal, type ToolCommand } from '../../tools/run.js';
 import type { DesktopBuild } from '../builds.js';
 import { failedDestination, type DestinationResult, type PublishEnv } from '../types.js';
-import { butlerErrors, butlerResult, ensureButler, parseButlerJson } from './butler.js';
+import { butlerErrors, butlerResult, butlerUnreachable, ensureButler, parseButlerJson } from './butler.js';
 
 export interface ItchDetails {
   project: string;
@@ -18,13 +18,23 @@ export type ItchOptions = PublishEnv & { timeoutMs?: number };
 const CHANNELS: Record<DesktopTarget, string> = { windows: 'windows', mac: 'mac', linux: 'linux' };
 const PUSH_TIMEOUT_MS = 6 * 60 * 60 * 1000;
 const LOGIN_CHECK_TIMEOUT_MS = 2 * 60 * 1000;
+const UNREACHABLE_FIX = 'Check your internet connection (and proxy, if you use one) and whether itch.io is up, then publish again.';
+
+export interface ButlerLogin {
+  ok: boolean;
+  /** Why not: the first line of butler's error. */
+  reason: string;
+  /** itch.io couldn't be reached, or failed itself: nothing a login would fix. */
+  unreachable: boolean;
+}
 
 /** Asks butler whether its login works, without it ever prompting (no stdin). */
-export async function checkButlerLogin(ctx: Ctx, tool: ToolCommand): Promise<{ ok: boolean; reason: string }> {
+export async function checkButlerLogin(ctx: Ctx, tool: ToolCommand): Promise<ButlerLogin> {
   const r = await runExternal(tool, ['--json', 'login'], { timeoutMs: LOGIN_CHECK_TIMEOUT_MS, onLine: (l) => ctx.log(`butler: ${l}`) });
   const messages = parseButlerJson(r.output);
-  if (r.exitCode === 0 && butlerResult(messages)?.status === 'success') return { ok: true, reason: '' };
-  return { ok: false, reason: butlerErrors(messages)[0] ?? r.spawnError ?? `butler exited with code ${r.exitCode}` };
+  if (r.exitCode === 0 && butlerResult(messages)?.status === 'success') return { ok: true, reason: '', unreachable: false };
+  const reason = butlerErrors(messages)[0] ?? r.spawnError ?? (r.timedOut ? "it didn't answer in time" : `butler exited with code ${r.exitCode}`);
+  return { ok: false, reason, unreachable: r.timedOut || butlerUnreachable(reason) };
 }
 
 /** Pushes out/windows, out/mac and out/linux to the itch.io channels windows, mac and linux, versioned. */
@@ -43,7 +53,8 @@ export async function publishItch(ctx: Ctx, config: Config, builds: DesktopBuild
   const [user, game] = project.split('/');
   const details: ItchDetails = {
     project,
-    pageUrl: `https://${user}.itch.io/${game}`,
+    // itch.io's subdomains have - where the username has _; butler takes the username as it is.
+    pageUrl: `https://${user.replace(/_/g, '-')}.itch.io/${game}`,
     channels: builds.map((b) => ({ target: b.target, channel: CHANNELS[b.target], buildId: null })),
   };
   const warnings: GsError[] = [
@@ -56,6 +67,10 @@ export async function publishItch(ctx: Ctx, config: Config, builds: DesktopBuild
   const tool = await ensureButler(ctx, { env: opts.env, platform: opts.platform, arch: opts.arch });
 
   const login = await checkButlerLogin(ctx, tool);
+  if (!login.ok && login.unreachable) {
+    // Not a login problem: logging in (or a browser) wouldn't help, and a dry run can't check the uploads either.
+    return failedDestination('itch', gsError('ITCH_PUSH_FAILED', `butler couldn't reach itch.io to check its login: ${login.reason}`, UNREACHABLE_FIX), warnings, details);
+  }
   if (!login.ok) {
     const apiKey = Boolean(opts.env.BUTLER_API_KEY);
     const required = apiKey
@@ -105,7 +120,9 @@ export async function publishItch(ctx: Ctx, config: Config, builds: DesktopBuild
       gsError(
         'ITCH_PUSH_FAILED',
         `Pushing ${build.target} to ${project}:${channel.channel} failed: ${reason}`,
-        `Check that itch.project (${project}) is a game your itch.io account owns: create its page on itch.io first. butler's full output is in ${ctx.logPath}.`,
+        butlerUnreachable(reason)
+          ? UNREACHABLE_FIX
+          : `Check that itch.project (${project}) is a game your itch.io account owns: create its page on itch.io first. butler's full output is in ${ctx.logPath}.`,
       ),
     );
   }

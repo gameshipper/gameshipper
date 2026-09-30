@@ -114,6 +114,41 @@ describe('publishItch', () => {
     expect(r.errors[0].message).toBe('Pushing windows to moonstudio/moon-game:windows failed: itch.io API error (400): /wharf/builds: invalid target (bad user/game)');
   });
 
+  it("ITCH_PUSH_FAILED when itch.io can't be reached: never a login problem, and no browser login", async () => {
+    const p = itchProject();
+    for (const [name, extra, apiKey] of [
+      ['saved login, at a terminal', { interactive: true }, undefined],
+      ['BUTLER_API_KEY', {}, 'a-key'],
+      ['dry run', { dryRun: true }, undefined],
+    ] as const) {
+      const s = setup(extra, 'offline', true, apiKey);
+      const r = await publishItch(testCtx(p.dir), p.config, p.builds, s.opts);
+      expect([r.status, r.errors.map((e) => e.code)], name).toEqual(['failed', ['ITCH_PUSH_FAILED']]);
+      expect(r.errors[0].message, name).toBe(
+        'butler couldn\'t reach itch.io to check its login: Get "https://api.itch.io/wharf/status": dial tcp: lookup api.itch.io: no such host',
+      );
+      expect(r.errors[0].fix, name).toContain('internet connection');
+      expect([s.handOffs, pushes(s.state)], name).toEqual([[], []]);
+    }
+  });
+
+  it("ITCH_PUSH_FAILED when itch.io fails itself, with butler's reason", async () => {
+    const p = itchProject();
+    const r = await publishItch(testCtx(p.dir), p.config, p.builds, setup({ interactive: true }, 'server-error').opts);
+    expect([r.errors[0].code, r.errors[0].message]).toEqual([
+      'ITCH_PUSH_FAILED',
+      "butler couldn't reach itch.io to check its login: itch.io API error (500): /wharf/status: internal error",
+    ]);
+  });
+
+  it("the page's address turns _ in the username into -, as itch.io's subdomains do; butler gets the name as it is", async () => {
+    const p = fakeProject({ itch: { project: 'moon_studio/moon-game' } });
+    const s = setup();
+    const r = await publishItch(testCtx(p.dir), p.config, p.builds, s.opts);
+    expect(r.details!.pageUrl).toBe('https://moon-studio.itch.io/moon-game');
+    expect(pushes(s.state).map((x) => x.target)).toEqual(['moon_studio/moon-game:windows', 'moon_studio/moon-game:mac', 'moon_studio/moon-game:linux']);
+  });
+
   it('INPUT_REQUIRED without itch.project', async () => {
     const p = fakeProject();
     const r = await publishItch(testCtx(p.dir), p.config, p.builds, setup().opts);
