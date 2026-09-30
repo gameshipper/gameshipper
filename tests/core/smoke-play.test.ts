@@ -252,15 +252,19 @@ describe('runPlay', () => {
 });
 
 describe.skipIf(process.platform === 'win32')('runPlay on Ctrl+C', () => {
-  /** A game that says when it's running, and on SIGTERM takes a moment to save before it quits. */
+  /**
+   * A game that says when it's running, and on SIGTERM takes a moment to save before it quits. It quits by letting its
+   * event loop run out, never with process.exit(): it inherits NODE_USE_SYSTEM_CA=1, and on a busy machine Node 24.7
+   * can still be reading the system certificates then, which crashes it (SIGSEGV) instead of exiting with code 0.
+   */
   const SAVES_ON_QUIT = `
     const fs = require('fs');
     const path = require('path');
     const dir = process.env.GAMESHIPPER_USER_DATA;
-    process.on('SIGTERM', () => setTimeout(() => { fs.writeFileSync(path.join(dir, 'saved.txt'), 'yes'); process.exit(0); }, 200));
+    const running = setInterval(() => {}, 1000);
+    process.on('SIGTERM', () => setTimeout(() => { fs.writeFileSync(path.join(dir, 'saved.txt'), 'yes'); clearInterval(running); }, 200));
     fs.mkdirSync(dir, { recursive: true });
     fs.writeFileSync(path.join(dir, 'running.txt'), '');
-    setInterval(() => {}, 1000);
   `;
 
   async function interrupt(smokeSeconds?: number) {
