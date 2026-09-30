@@ -6,7 +6,7 @@ import { serveStdio, StdioServerTransport } from '@modelcontextprotocol/server/s
 import { z } from 'zod';
 import { realOrSelf } from '../core/prepare/stage.js';
 import { exitProcess } from '../core/proc.js';
-import { errorDetails, type Result } from '../core/result.js';
+import { errorDetails, type GsError, type Result } from '../core/result.js';
 import { GAMESHIPPER_VERSION } from '../core/version.js';
 import { createProgress } from './progress.js';
 import { runCli, stopAllRuns, type RunCli } from './run-cli.js';
@@ -75,17 +75,33 @@ export function createFolderLock(): <T>(dir: string, fn: () => Promise<T>, onWai
   };
 }
 
+/** The longest issue message a tool returns. The CLI's own Result, the last-run record and the logs keep all of it. */
+export const MAX_AGENT_MESSAGE_CHARS = 300;
+const CUT = '… (see the log) …';
+/** How much of a long message's end is kept: where a console error happened, e.g. "(main.js:12)", comes last. */
+const KEPT_END_CHARS = 80;
+
+/** The issue with a message of at most MAX_AGENT_MESSAGE_CHARS: its start and its end, cut in between. */
+function shortIssue(issue: GsError): GsError {
+  const { message } = issue;
+  if (message.length <= MAX_AGENT_MESSAGE_CHARS) return issue;
+  const start = message.slice(0, MAX_AGENT_MESSAGE_CHARS - CUT.length - KEPT_END_CHARS);
+  return { ...issue, message: `${start}${CUT}${message.slice(-KEPT_END_CHARS)}` };
+}
+
 /**
- * The Result as a tool returns it. A smoke run's summary leaves out its list of events (`eventsLeftOut` counts
- * them): every problem in it is already in errors and warnings, and data.smoke.eventsLog has them all, so a noisy
- * game's result stays well under what an agent's tool output can hold.
+ * The Result as a tool returns it, well under what an agent's tool output can hold even for a noisy game. Each
+ * error's and warning's message is cut to MAX_AGENT_MESSAGE_CHARS. A smoke run's summary leaves out its list of
+ * events (`eventsLeftOut` counts them): every problem in it is already in errors and warnings, and
+ * data.smoke.eventsLog has them all.
  */
 export function resultForAgent(result: Result<unknown>): Result<unknown> {
+  const short = { ...result, errors: result.errors.map(shortIssue), warnings: result.warnings.map(shortIssue) };
   const data = result.data as { smoke?: { summary?: { events?: unknown } } } | undefined;
   const summary = data?.smoke?.summary;
-  if (!summary || !Array.isArray(summary.events)) return result;
+  if (!summary || !Array.isArray(summary.events)) return short;
   const { events, ...rest } = summary;
-  return { ...result, data: { ...data, smoke: { ...data.smoke, summary: { eventsLeftOut: events.length, ...rest } } } };
+  return { ...short, data: { ...data, smoke: { ...data.smoke, summary: { eventsLeftOut: events.length, ...rest } } } };
 }
 
 export function createMcpServer(opts: McpOptions): McpServer {

@@ -139,7 +139,7 @@ describe('MCP server', () => {
     const events: DiagEvent[] = Array.from({ length: 300 }, (_, i) => ({
       kind: 'console',
       level: 'error',
-      message: `TypeError: Cannot read properties of undefined (reading 'sprite${i}') ${'at update (main.js) '.repeat(12)}`,
+      message: `TypeError: Cannot read properties of undefined (reading 'sprite${i}') ${'at update (main.js) '.repeat(10)}`,
       source: 'app://game/main.js',
       line: i + 1,
     }));
@@ -154,6 +154,40 @@ describe('MCP server', () => {
     const smoke = (r.structuredContent as any).data.smoke;
     expect(smoke).toEqual({ summary: { eventsLeftOut: 100, droppedInfo: 5000, truncatedEvents: 200 }, eventsLog, exitCode: 0 });
     expect((r.structuredContent as any).errors).toEqual(errors);
+  });
+
+  it("cuts each issue's message to 300 characters, keeping its start and its end, so long messages keep the result small", async () => {
+    // 5,000-character console errors, each ending with where it happened.
+    const events: DiagEvent[] = Array.from({ length: 300 }, (_, i) => ({
+      kind: 'console',
+      level: 'error',
+      message: `TypeError: sprite${i} is undefined ${'at update (main.js) '.repeat(250)}`.slice(0, 5000),
+      source: 'app://game/main.js',
+      line: i + 1,
+    }));
+    const summary = truncateSummary({ events, droppedInfo: 0 });
+    const eventsLog = '/games/moon/.gameshipper/logs/play-events.jsonl';
+    const { errors, warnings } = summaryToIssues(summary, { seconds: 5, eventsLog });
+    const result = { ok: false, data: { appDir: '/games/moon/.gameshipper/app', smoke: { summary, eventsLog, exitCode: 0 }, screenshots: [] }, errors, warnings };
+    const client = await connect(fakeRun(result).run);
+    const r = await client.callTool({ name: 'gameshipper_play', arguments: { smoke: true } });
+    expect(JSON.stringify(r).length).toBeLessThan(20_000);
+    const shown = (r.structuredContent as any).errors as Array<{ code: string; message: string; fix: string }>;
+    expect(shown).toHaveLength(errors.length);
+    for (const [i, issue] of shown.entries()) {
+      expect(issue.message.length).toBeLessThanOrEqual(300);
+      expect(issue.fix).toBe(errors[i].fix);
+    }
+    expect(shown[3].message.startsWith('TypeError: sprite3 is undefined at update (main.js)')).toBe(true);
+    expect(shown[3].message).toContain('… (see the log) …');
+    // Where the error happened, at the end of the message, is still there.
+    expect(shown[3].message.endsWith('see the events log) (main.js:4)')).toBe(true);
+    // Short messages are left alone: the one counting the rest.
+    expect(shown.at(-1)).toEqual(errors.at(-1));
+    // Any tool's result, not just a smoke run's.
+    const long = fail(gsError('STEAM_UPLOAD_FAILED', `The SteamCMD upload failed: ${'ERROR! x; '.repeat(500)}`, 'fix'));
+    const upload = await (await connect(fakeRun(long).run)).callTool({ name: 'gameshipper_publish', arguments: {} });
+    expect((upload.structuredContent as any).errors[0].message).toHaveLength(300);
   });
 
   it('never runs two commands on the same game folder at once; status never waits', async () => {
