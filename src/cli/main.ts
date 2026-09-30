@@ -16,6 +16,8 @@ import { checkProjectDir } from '../core/fsutil.js';
 import { bundleIdProblem } from '../core/mobile/bundle-id.js';
 import { parseScreenshotTimes, runPlay, screenshotRunSeconds, type PlayData } from '../core/play.js';
 import { childrenStopped, exitProcess, QUIT_GRACE_MS } from '../core/proc.js';
+import { defaultDestinations, runPublish } from '../core/publish/publish.js';
+import { DESTINATIONS, type Destination } from '../core/publish/types.js';
 import { capture, errorDetails, fail, gsError, internalError, ok, type GsError, type Result } from '../core/result.js';
 import { saveLastRun } from '../core/runs.js';
 import { getStatus } from '../core/status.js';
@@ -24,7 +26,7 @@ import { serveMcp } from '../mcp/server.js';
 import { COMMANDS, commandHelpText, GLOBAL_FLAGS, helpData, helpText, MAX_SECONDS, type CommandHelp } from './help.js';
 import { exitCodeFor, renderHuman, renderJson } from './output.js';
 import { createPrompter, type Prompter } from './prompt.js';
-import { buildSummary, checkSummary, ciSummary, initSummary, playSummary, plural, statusSummary } from './summaries.js';
+import { buildSummary, checkSummary, ciSummary, initSummary, playSummary, plural, publishSummary, statusSummary } from './summaries.js';
 
 /** The compiled shell that gets bundled into every game: dist/cli/main.js → dist/shell/. */
 export const SHELL_DIR = fileURLToPath(new URL('../shell/', import.meta.url));
@@ -154,6 +156,19 @@ function parseTargets(raw: string | undefined): Target[] | Outcome | undefined {
   const bad = list.find((t) => !(TARGETS as readonly string[]).includes(t));
   if (bad) return usage(`Unknown target "${bad}".`, fix);
   return list as Target[];
+}
+
+function parseDestinations(raw: string | undefined): Destination[] | Outcome | undefined {
+  if (raw === undefined) return undefined;
+  const list = raw
+    .split(',')
+    .map((t) => t.trim())
+    .filter(Boolean);
+  const fix = `Use any of: ${DESTINATIONS.join(', ')}.`;
+  if (!list.length) return usage('--to needs at least one destination.', fix);
+  const bad = list.find((t) => !(DESTINATIONS as readonly string[]).includes(t));
+  if (bad) return usage(`Unknown destination "${bad}".`, fix);
+  return list as Destination[];
 }
 
 /** Records the run for `status`. Best-effort: a failure becomes a warning on the result. */
@@ -385,6 +400,52 @@ function ciCommand(projectDir: string, values: Values): Outcome {
   return { result, human: ciSummary(result, projectDir) };
 }
 
+const DESTINATION_NAMES: Record<Destination, string> = { steam: 'Steam', itch: 'itch.io', github: 'GitHub Releases' };
+
+/** What a person sees before the uploads start: they can take minutes, and itch.io's are public at once (spec §10). */
+export function publishStartLine(to: Destination[], dryRun: boolean): string {
+  const names = to.map((d) => DESTINATION_NAMES[d]);
+  const list = names.length > 1 ? `${names.slice(0, -1).join(', ')} and ${names.at(-1)}` : names.join('');
+  const first = dryRun ? `Checking the uploads to ${list}; nothing is uploaded` : `Publishing to ${list}`;
+  const itch = !dryRun && to.includes('itch') ? "\nNote: itch.io makes uploads downloadable at once if the game's page is public." : '';
+  return `${first} (add --verbose to follow SteamCMD and butler)…${itch}\n`;
+}
+
+/**
+ * `publish`: uploads what's in out/. Only the config matters, not the game's files: a config whose entry or art is
+ * missing can still publish its builds. SteamCMD and butler may take over the terminal to log in only for a person
+ * at one: never with --json or --yes, and never for an agent or the MCP server (no terminal on stdin).
+ */
+async function publishCommand(projectDir: string, values: Values, io: CliIO, run: RunState): Promise<Outcome> {
+  const to = parseDestinations(str(values.to));
+  if (to && !Array.isArray(to)) return to;
+  const loaded = loadConfig(projectDir);
+  const invalid = notAProject(loaded);
+  if (invalid) return invalid;
+  const config = loaded.data!;
+  const ctx = startRun(projectDir, 'publish', run);
+  const dryRun = values['dry-run'] === true;
+  const destinations = to ?? defaultDestinations(config);
+  if (!run.json && destinations.length) io.write(publishStartLine(destinations, dryRun));
+  const result = await capture(
+    () =>
+      runPublish(ctx, config, {
+        to,
+        dryRun,
+        steamUser: str(values['steam-user']) ?? null,
+        branch: str(values.branch) ?? null,
+        repo: str(values.repo) ?? null,
+        live: values.live === true,
+        interactive: io.stdinIsTTY && !run.json && values.yes !== true,
+        // stdout carries only the result; what the person must know before a tool asks them something goes to stderr.
+        notice: (message) => void process.stderr.write(`! ${message}\n`),
+      }),
+    ctx.log,
+  );
+  finishRun(ctx, 'publish', result, run);
+  return { result, human: publishSummary(result as Parameters<typeof publishSummary>[0]) };
+}
+
 /**
  * `mcp`: serves every command as an MCP tool until the client disconnects. From here on stdout carries only MCP
  * messages, written through io.write; anything else that writes to stdout still goes to stderr. When main owns the
@@ -475,6 +536,8 @@ async function dispatch(argv: string[], io: CliIO, run: RunState): Promise<numbe
       return emit(io, run, await playCommand(projectDir, values, io, run));
     case 'check':
       return emit(io, run, await checkCommand(projectDir, values, io, run));
+    case 'publish':
+      return emit(io, run, await publishCommand(projectDir, values, io, run));
     case 'ci':
       return emit(io, run, ciCommand(projectDir, values));
     case 'mcp':

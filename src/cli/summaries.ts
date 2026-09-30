@@ -4,6 +4,10 @@ import type { CheckReport, CheckStatus } from '../core/check/types.js';
 import type { CiData } from '../core/ci/init.js';
 import type { InitData } from '../core/config/init.js';
 import type { PlayData } from '../core/play.js';
+import type { GithubDetails } from '../core/publish/github/publish.js';
+import type { ItchDetails } from '../core/publish/itch/publish.js';
+import type { PublishData } from '../core/publish/publish.js';
+import type { SteamDetails } from '../core/publish/steam/publish.js';
 import type { Result } from '../core/result.js';
 import type { MacSigningInfo } from '../core/sign/mac.js';
 import { problemCount } from '../core/smoke.js';
@@ -140,5 +144,62 @@ export function checkSummary(r: Result<CheckReport>): string[] {
   lines.push('', `${counts.pass} passed, ${plural(counts.warn, 'warning')}, ${counts.fail} failed, ${plural(counts.info, 'note')}, ${counts.skip} skipped.`);
   if (r.data.deckScreenshot) lines.push(`Steam Deck screenshot: ${r.data.deckScreenshot}`);
   lines.push(`Report: ${r.data.reportFile}`);
+  return lines;
+}
+
+/** The Steamworks settings a developer enters once by hand after the first upload (spec §10). */
+function steamSetup(s: SteamDetails): string[] {
+  const d = s.dashboard;
+  const col = (os: string) => os.padEnd(16);
+  return [
+    '',
+    `Set the build live on the default branch: ${d.buildsUrl}`,
+    'Steamworks settings to enter once (then publish them on its Publish page):',
+    `  Launch options (Installation → General Installation): ${d.settingsUrl}`,
+    ...d.launchOptions.map((l) => `    ${col(l.os)} ${l.executable}`),
+    `  Steam Cloud → Auto-Cloud: ${d.cloudUrl}`,
+    `    Byte quota per user ${d.autoCloud.bytesPerUser}, number of files per user ${d.autoCloud.filesPerUser}`,
+    ...d.autoCloud.paths.map((p) => `    ${col(p.os)} root ${p.root}, subdirectory "${p.subdirectory}", pattern ${p.pattern}`),
+  ];
+}
+
+/** One line per destination, then the one-time Steamworks settings and the iOS and Android next steps. */
+export function publishSummary(r: Result<PublishData>): string[] {
+  const data = r.data;
+  if (!data) return [];
+  const lines: string[] = [];
+  const after: string[] = [];
+  for (const d of data.destinations) {
+    const name = d.to.padEnd(7);
+    if (d.status === 'failed') {
+      lines.push(`✗ ${name} failed (${d.errors.map((e) => e.code).join(', ')})`);
+      continue;
+    }
+    const mark = d.errors.length ? '✗' : '✓';
+    if (d.to === 'steam') {
+      const s = d.details as SteamDetails;
+      if (d.status === 'previewed') {
+        lines.push(`${mark} ${name} preview build for app ${s.appId} passed; nothing was uploaded`);
+      } else {
+        lines.push(`${mark} ${name} build ${s.buildId} uploaded to app ${s.appId}${s.branch ? `, live on "${s.branch}"` : ' (not live yet)'}`);
+        after.push(...steamSetup(s));
+      }
+    } else if (d.to === 'itch') {
+      const i = d.details as ItchDetails;
+      const channels = i.channels.map((c) => c.channel).join(', ');
+      lines.push(d.status === 'previewed' ? `${mark} ${name} dry run passed for ${channels}; nothing was pushed` : `${mark} ${name} pushed ${channels} to ${i.pageUrl}`);
+    } else {
+      const g = d.details as GithubDetails;
+      lines.push(
+        d.status === 'previewed'
+          ? `${mark} ${name} would ${g.action} draft release ${g.tag} on ${g.repo} with ${g.assets.map((a) => a.name).join(', ')}`
+          : `${mark} ${name} ${g.draft ? 'draft release' : 'release'} ${g.tag}: ${g.url}${g.draft ? ' (publish it there, or publish again with --live)' : ''}`,
+      );
+    }
+  }
+  lines.push(...after);
+  for (const m of data.mobile) {
+    lines.push('', `${m.target === 'ios' ? 'iOS' : 'Android'} isn't uploaded by Gameshipper. Next steps:`, ...m.steps.map((step, i) => `  ${i + 1}. ${step}`));
+  }
   return lines;
 }

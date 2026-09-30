@@ -23,7 +23,7 @@ describe('gameshipper CLI', () => {
   it('help --json returns the catalog', async () => {
     const r = await run(['help', '--json']);
     expect(r.code).toBe(0);
-    expect(r.json().data.commands.map((c: { name: string }) => c.name)).toEqual(['init', 'play', 'build', 'check', 'status', 'ci', 'mcp']);
+    expect(r.json().data.commands.map((c: { name: string }) => c.name)).toEqual(['init', 'play', 'build', 'check', 'publish', 'status', 'ci', 'mcp']);
   });
 
   it('help --json describes every gameshipper.json field', async () => {
@@ -34,7 +34,7 @@ describe('gameshipper CLI', () => {
 
   it('help --json says when logPath and fix are there, and that --seconds implies --smoke', async () => {
     const data = (await run(['help', '--json'])).json().data;
-    expect(data.resultShape).toContain('logPath (the run log) is present for build, play and check');
+    expect(data.resultShape).toContain('logPath (the run log) is present for build, play, check and publish');
     expect(data.resultShape).toContain('fix may be absent on warnings');
     const play = data.commands.find((c: { name: string }) => c.name === 'play');
     expect(play.flags.find((f: { name: string }) => f.name === 'seconds').description).toContain('Implies --smoke.');
@@ -253,7 +253,7 @@ describe('gameshipper CLI', () => {
   it('every project command reports a missing --dir without creating anything', async () => {
     const parent = makeTmpDir();
     const missing = path.join(parent, 'nope');
-    for (const command of ['init', 'play', 'build', 'check', 'status']) {
+    for (const command of ['init', 'play', 'build', 'check', 'publish', 'status']) {
       const r = await run([command, '--json', '--dir', missing]);
       expect([command, r.code, r.json().errors[0].code]).toEqual([command, 2, 'DIR_MISSING']);
       expect(r.json().errors[0].fix).toBe('Check the path, or run the command from your game folder.');

@@ -60,10 +60,9 @@ describe('MCP server', () => {
     expect(client.getInstructions()).toContain('relative to the game folder');
   });
 
-  it('mentions publish in the loop only once the tool exists', () => {
-    expect(instructions(mcpTools())).not.toContain('gameshipper_publish');
-    const publish = { name: 'publish', summary: 'Upload the builds.', usage: 'npx gameshipper publish', flags: [] };
-    expect(instructions(mcpTools([...COMMANDS, publish]))).toContain('gameshipper_publish');
+  it('mentions publish in the loop when the tool is there', () => {
+    expect(instructions(mcpTools())).toContain('; then gameshipper_publish');
+    expect(instructions(mcpTools(COMMANDS.filter((c) => c.name !== 'publish')))).not.toContain('gameshipper_publish');
   });
 
   it('runs the CLI command for the tool and returns its Result as structured content', async () => {

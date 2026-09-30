@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { COMMANDS, type CommandHelp } from '../../src/cli/help.js';
+import { COMMANDS } from '../../src/cli/help.js';
 import { camelCase, mcpTools } from '../../src/mcp/tools.js';
 
 const byName = (name: string) => {
@@ -8,34 +8,21 @@ const byName = (name: string) => {
   return tool;
 };
 
-/** Plan 4's catalog entry for publish, which isn't implemented yet. */
-const PUBLISH: CommandHelp = {
-  name: 'publish',
-  summary: 'Upload the builds in out/ to Steam, itch.io and GitHub Releases.',
-  usage: 'npx gameshipper publish [--to steam,itch,github] [--dry-run] [--branch <name>] [--live]',
-  flags: [
-    { name: 'to', value: '<list>', description: 'Where to upload: steam, itch, github (default: every one configured).' },
-    { name: 'dry-run', description: 'Check everything and preview the uploads; nothing is uploaded.' },
-    { name: 'steam-user', value: '<account>', description: 'Steam account that uploads builds (default: steam.user).' },
-    { name: 'live', description: 'GitHub: publish the release now instead of leaving a draft.' },
-  ],
-};
-
 describe('mcpTools', () => {
   it('has one tool per CLI command and action, except mcp itself', () => {
     const names = mcpTools().map((t) => t.name);
     const expected = COMMANDS.filter((c) => c.name !== 'mcp').flatMap((c) => (c.actions ?? ['']).map((a) => `gameshipper_${c.name}${a ? `_${a}` : ''}`));
     expect(names).toEqual(expected);
-    expect(names).toEqual(expect.arrayContaining(['gameshipper_init', 'gameshipper_play', 'gameshipper_build', 'gameshipper_check', 'gameshipper_status', 'gameshipper_ci_init']));
+    expect(names).toEqual(expect.arrayContaining(['gameshipper_init', 'gameshipper_play', 'gameshipper_build', 'gameshipper_check', 'gameshipper_publish', 'gameshipper_status', 'gameshipper_ci_init']));
     expect(names).not.toContain('gameshipper_mcp');
   });
 
-  it('turns a command added to the catalog later (publish) into a tool with no other change', () => {
-    const [tool] = mcpTools([PUBLISH]);
-    expect(tool.name).toBe('gameshipper_publish');
+  it('publish takes known destinations and tells agents what a login error means', () => {
+    const tool = byName('gameshipper_publish');
     expect(tool.description).toContain('STEAM_LOGIN_REQUIRED');
-    expect(tool.inputSchema.parse({ to: ['steam'], dryRun: true })).toEqual({ to: ['steam'], dryRun: true });
-    expect(tool.toArgs({ to: ['steam', 'itch'], dryRun: true, live: false })).toEqual(['publish', '--to=steam,itch', '--dry-run']);
+    expect(tool.inputSchema.parse({ to: ['steam'], dryRun: true, steamUser: 'builder' })).toEqual({ to: ['steam'], dryRun: true, steamUser: 'builder' });
+    expect(tool.inputSchema.safeParse({ to: ['xbox'] }).success).toBe(false);
+    expect(tool.toArgs({ to: ['steam', 'itch'], dryRun: true, live: false, branch: 'beta' })).toEqual(['publish', '--to=steam,itch', '--dry-run', '--branch=beta']);
   });
 
   it('types the inputs: numbers, target lists, screenshot times, booleans and text', () => {
@@ -71,8 +58,8 @@ describe('mcpTools', () => {
     expect(play.toArgs({ screenshot: [5, 10] })).toEqual(['play', '--screenshot=5,10']);
   });
 
-  it('describes tools and inputs without CLI syntax, for commands added to the catalog later too', () => {
-    for (const tool of [...mcpTools(), ...mcpTools([PUBLISH])]) {
+  it('describes tools and inputs without CLI syntax', () => {
+    for (const tool of mcpTools()) {
       expect(tool.description, tool.name).not.toMatch(/--[a-z]|comma-separated/i);
       for (const [key, schema] of Object.entries(tool.inputSchema.shape)) {
         expect(schema.description, `${tool.name}.${key}`).toBeTruthy();
@@ -103,7 +90,7 @@ describe('mcpTools', () => {
   });
 
   it('never has an input for a password, token or code', () => {
-    for (const tool of [...mcpTools(), ...mcpTools([PUBLISH])]) {
+    for (const tool of mcpTools()) {
       for (const key of Object.keys(tool.inputSchema.shape)) {
         expect(key, `${tool.name}.${key}`).not.toMatch(/pass|token|secret|otp|2fa|guard|credential/i);
       }

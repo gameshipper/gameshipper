@@ -22,6 +22,12 @@ describe('Mac signing in the CLI', () => {
       'GAMESHIPPER_NOTARY_KEY',
       'GAMESHIPPER_NOTARY_KEY_ID',
       'GAMESHIPPER_NOTARY_ISSUER',
+      'GITHUB_TOKEN',
+      'GH_TOKEN',
+      'BUTLER_API_KEY',
+      'GAMESHIPPER_GITHUB_API',
+      'GAMESHIPPER_STEAMCMD',
+      'GAMESHIPPER_BUTLER',
     ]);
     expect(helpData().environment.every((e) => e.description.length > 10)).toBe(true);
   });

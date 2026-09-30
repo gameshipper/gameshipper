@@ -43,6 +43,16 @@ const USAGE_CODES = new Set([
   // `ci init`: the workflow is already there (no --force), or there is no desktop target to build.
   'CI_WORKFLOW_EXISTS',
   'CI_NO_DESKTOP_TARGETS',
+  // publish: a build, a login, a token or a setting the human has to provide first.
+  'BUILD_MISSING',
+  'STEAM_TEST_APP',
+  'STEAM_DEFAULT_BRANCH',
+  'STEAM_LOGIN_REQUIRED',
+  'ITCH_LOGIN_REQUIRED',
+  'GITHUB_TOKEN_MISSING',
+  'GITHUB_AUTH_FAILED',
+  'GITHUB_REPO_NOT_FOUND',
+  'GITHUB_RELEASE_PUBLISHED',
 ]);
 
 export function exitCodeFor(result: Result<unknown>): number {

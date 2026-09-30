@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { COMMANDS, MAX_SECONDS, type CommandHelp, type FlagHelp } from '../cli/help.js';
 import { TARGETS } from '../core/config/schema.js';
 import { MAX_SCREENSHOT_SECONDS, MAX_SCREENSHOTS } from '../core/play.js';
+import { DESTINATIONS } from '../core/publish/types.js';
 
 /**
  * MCP tools come from the CLI's command catalog (src/cli/help.ts): one per command, or one per action (`ci init`).
@@ -45,6 +46,7 @@ const FLAG_TYPES: Record<string, z.ZodType> = {
   seconds: z.number().positive().max(MAX_SECONDS),
   target: z.array(z.enum(TARGETS)).min(1),
   screenshot: z.array(z.number().positive().max(MAX_SCREENSHOT_SECONDS)).min(1).max(MAX_SCREENSHOTS),
+  to: z.array(z.enum(DESTINATIONS)).min(1),
 };
 
 const STEAM_SDK = "Your Steamworks SDK zip or folder (instead of steam.sdk, GAMESHIPPER_STEAM_SDK or .sdk/): absolute, or relative to the server's folder.";
@@ -91,7 +93,12 @@ const NOTES: Record<string, ToolNotes> = {
     note: "Runs this computer's build (build it first) offline at Steam Deck size, then checks the builds and store images. Fix each failed check, build again, and check again; tell the human about warnings.",
   },
   publish: {
-    note: "Never asks for or accepts passwords. STEAM_LOGIN_REQUIRED or ITCH_LOGIN_REQUIRED means the human must run the command in the error's fix once in their own terminal; then call this tool again.",
+    note:
+      'Call it with dryRun: true first. It never asks for or accepts passwords: STEAM_LOGIN_REQUIRED or ITCH_LOGIN_REQUIRED means the human must run the command in the ' +
+      "error's fix once in their own terminal, then call this tool again. GITHUB_TOKEN_MISSING means the human must set GITHUB_TOKEN where this server runs.",
+    flags: {
+      to: 'Where to upload, e.g. ["steam", "itch"] (default: each destination gameshipper.json sets up: steam when steam.appId is not 480, itch with itch.project, github with github.repo).',
+    },
   },
   ci: { note: 'Tell the human to commit the workflow it writes.' },
 };
