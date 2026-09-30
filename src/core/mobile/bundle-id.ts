@@ -1,4 +1,4 @@
-import { BUNDLE_ID_PATTERN, type Config } from '../config/schema.js';
+import { BUNDLE_ID_PATTERN, DESKTOP_TARGETS, type Config } from '../config/schema.js';
 import { gsError, type GsError } from '../result.js';
 
 // Android turns the bundle ID into a Java package name, so no part may be a Java keyword.
@@ -20,10 +20,13 @@ export function bundleIdProblem(id: string): string | null {
 export function checkBundleId(config: Config): GsError | null {
   const id = config.mobile.bundleId;
   if (!id) {
+    // It stops the whole build: say how to build just the desktop targets meanwhile.
+    const desktop = config.targets.filter((t) => (DESKTOP_TARGETS as readonly string[]).includes(t));
+    const meanwhile = desktop.length ? ` To build only the desktop targets for now, run \`npx gameshipper build --target ${desktop.join(',')}\`.` : '';
     return gsError(
       'BUNDLE_ID_REQUIRED',
       'iOS and Android builds need a bundle ID: mobile.bundleId in gameshipper.json is not set.',
-      'Add "mobile": { "bundleId": "com.yourname.yourgame" } to gameshipper.json (it can never change once the game is published; `init --bundle-id` sets it in new projects), or remove "ios" and "android" from "targets".',
+      `Add "mobile": { "bundleId": "com.yourname.yourgame" } to gameshipper.json (it can never change once the game is published; \`init --bundle-id\` sets it in new projects), or remove "ios" and "android" from "targets".${meanwhile}`,
     );
   }
   const problem = bundleIdProblem(id);
@@ -56,7 +59,7 @@ export function checkMobileVersion(config: Config): GsError | null {
   return gsError(
     'VERSION_UNSUPPORTED',
     `version ${config.version} can't be an iOS and Android build number: ${why}.`,
-    `Set "version" in gameshipper.json to one like 1.2.3 (major below 2100, minor and patch below 1000): the build number is major × 1,000,000 + minor × 1,000 + patch, so 1.2.3 becomes 1002003. It must only ever go up once the game is in a store.`,
+    `Set "version" in gameshipper.json to one like 1.2.3, with the major 2100 or lower (2100.0.0 at most) and the minor and patch below 1000: the build number is major × 1,000,000 + minor × 1,000 + patch, so 1.2.3 becomes 1002003. It must only ever go up once the game is in a store.`,
   );
 }
 

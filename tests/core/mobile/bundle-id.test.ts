@@ -7,6 +7,11 @@ const cfg = (bundleId: string | null) => parseConfig({ name: 'x', version: '1.0.
 describe('bundle IDs', () => {
   it('BUNDLE_ID_REQUIRED when unset, BUNDLE_ID_INVALID for Java keywords', () => {
     expect(checkBundleId(cfg(null))).toMatchObject({ code: 'BUNDLE_ID_REQUIRED', fix: expect.stringContaining('--bundle-id') });
+    // It stops the whole build, so the fix says how to build only the desktop targets meanwhile.
+    const mixed = (targets: string[]) => parseConfig({ name: 'x', version: '1.0.0', targets }).data!;
+    expect(checkBundleId(mixed(['windows', 'mac', 'linux', 'ios', 'android']))!.fix).toContain('`npx gameshipper build --target windows,mac,linux`');
+    expect(checkBundleId(mixed(['linux', 'ios']))!.fix).toContain('`npx gameshipper build --target linux`');
+    expect(checkBundleId(mixed(['ios']))!.fix).not.toContain('--target');
     expect(checkBundleId(cfg('com.example.new'))).toMatchObject({ code: 'BUNDLE_ID_INVALID', message: expect.stringContaining('"new"') });
     expect(checkBundleId(cfg('com.example.New'))).toBeNull();
     expect(checkBundleId(cfg('com.jane.moongame'))).toBeNull();
@@ -34,6 +39,7 @@ describe('bundle IDs', () => {
     for (const bad of ['1.1000.0', '1.0.1000', '2100.0.1', '3000.0.0', '99999.0.0']) {
       const e = checkMobileVersion(version(bad));
       expect(e, bad).toMatchObject({ code: 'VERSION_UNSUPPORTED', message: expect.stringContaining(bad), fix: expect.stringContaining('1002003') });
+      expect(e!.fix).toContain('major 2100 or lower');
     }
   });
 });
