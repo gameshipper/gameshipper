@@ -259,6 +259,8 @@ This writes `.github/workflows/gameshipper.yml`. On every push to `main` and eve
 
 Builds start fullscreen when `window.fullscreen` is true, and always on Steam Deck. `npx gameshipper help --json` includes the full schema.
 
+Builds package the game folder (`game.dir`, or `game.outputDir` when there's a `buildCommand`) except `.env` files, `.git`, `.DS_Store`, `Thumbs.db`, `steam_appid.txt` and the Steamworks SDK anywhere in it, and every dot file and folder at its top; only when the game folder is the project folder itself are the project's own top-level files skipped too (`out/`, `node_modules/`, `gameshipper.json`, `gameshipper.lock`, `CLAUDE.md`, `AGENTS.md` and package-manager lockfiles), so a `dist/` folder keeps its own `node_modules/` or `out/`.
+
 ## Store images and screenshots
 
 Set `keyArt` (PNG or JPEG, 3840x2160 recommended, at least 1280x720) and `logo` (a PNG with a transparent background) in `gameshipper.json`, or put them at `art/key-art.png` and `art/logo.png` before `init`. Every `build` then writes all eight Steam images to `out/store/`:

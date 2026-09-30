@@ -80,10 +80,13 @@ export function isWithin(child: string, parent: string): boolean {
   return rel === '' || (rel !== '..' && !rel.startsWith(`..${path.sep}`) && !path.isAbsolute(rel));
 }
 
-/** A link to a folder loops when that folder contains one of the folders the link sits in. */
+/**
+ * A link to a folder loops when that folder contains one of the folders the link sits in. `target` is the link's
+ * real path from fs.realpathSync.native, as the folders' are.
+ */
 export function loopsBack(link: string, target: string, root: string): boolean {
   for (let dir = path.dirname(link); ; dir = path.dirname(dir)) {
-    if (isWithin(fs.realpathSync(dir), target)) return true;
+    if (isWithin(fs.realpathSync.native(dir), target)) return true;
     if (dir === root || dir === path.dirname(dir)) return false;
   }
 }
@@ -205,9 +208,10 @@ export async function stageGame(ctx: Ctx, config: Config, opts: StageOptions = {
     );
   }
   // The stage lives in .gameshipper. Staging a folder above the project (e.g. game.dir "..")
-  // or inside .gameshipper would copy the stage into itself.
-  const project = fs.realpathSync(ctx.projectDir);
-  const realSource = fs.realpathSync(source);
+  // or inside .gameshipper would copy the stage into itself. Real paths are compared as the OS spells
+  // them, so "../game" is the project folder "Game" on a disk that ignores letter case.
+  const project = realOrSelf(ctx.projectDir);
+  const realSource = realOrSelf(source);
   const workDir = path.join(project, '.gameshipper');
   if (realSource !== project && (isWithin(workDir, realSource) || isWithin(realSource, workDir))) {
     throw new GsFailure(
@@ -219,7 +223,7 @@ export async function stageGame(ctx: Ctx, config: Config, opts: StageOptions = {
   const stageDir = stageDirFor(ctx.projectDir);
   fs.rmSync(stageDir, { recursive: true, force: true });
   fs.mkdirSync(stageDir, { recursive: true });
-  const realStage = fs.realpathSync(stageDir);
+  const realStage = realOrSelf(stageDir);
   const warnings: GsError[] = [];
   const skipLink = (link: string, problem: string, fix: string): false => {
     warnings.push(gsError('BROKEN_SYMLINK', `${path.relative(ctx.projectDir, link)} ${problem}, so it wasn't staged.`, fix));
@@ -248,7 +252,7 @@ export async function stageGame(ctx: Ctx, config: Config, opts: StageOptions = {
     if (!fs.lstatSync(src).isSymbolicLink()) return true;
     let target: string;
     try {
-      target = fs.realpathSync(src);
+      target = fs.realpathSync.native(src);
     } catch {
       return skipLink(src, "is a link to something that doesn't exist", 'Remove the link or point it at a real file.');
     }

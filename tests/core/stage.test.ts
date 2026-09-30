@@ -53,6 +53,13 @@ const killIfAlive = (pid: number | null): void => {
   if (pid !== null && alive(pid)) process.kill(pid, 'SIGKILL');
 };
 
+/** Whether the temp folder's disk ignores letter case, as macOS and Windows disks do by default. */
+const CASE_INSENSITIVE = (() => {
+  const dir = makeTmpDir();
+  fs.writeFileSync(path.join(dir, 'case'), '');
+  return fs.existsSync(path.join(dir, 'CASE'));
+})();
+
 describe('stageGame', () => {
   it('copies the game and skips tool/project files', async () => {
     const dir = makeTmpDir();
@@ -304,6 +311,23 @@ describe('stageGame', () => {
         error: { code: 'GAME_DIR_INVALID', fix: expect.stringContaining('game.outputDir') },
       });
     }
+  });
+
+  describe.skipIf(!CASE_INSENSITIVE)('on a disk that ignores letter case', () => {
+    it("knows the game folder is the project folder, whatever case game.dir spells it in, and skips the project's files", async () => {
+      const root = makeTmpDir();
+      writeFiles(root, { 'Game/index.html': '', 'Game/out/old.exe': '', 'Game/node_modules/x/index.js': '', 'Game/gameshipper.json': '{}' });
+      const { stageDir } = await stageGame(testCtx(path.join(root, 'Game')), cfg({ game: { dir: '../game' } }));
+      expect(fs.existsSync(path.join(stageDir, 'index.html'))).toBe(true);
+      for (const skipped of ['out', 'node_modules', 'gameshipper.json']) expect(fs.existsSync(path.join(stageDir, skipped)), skipped).toBe(false);
+    });
+
+    it('GAME_DIR_INVALID when game.outputDir is .gameshipper in other letters', async () => {
+      const dir = makeTmpDir();
+      writeFiles(dir, { 'index.html': '', '.gameshipper/logs/x.log': '' });
+      const run = stageGame(testCtx(dir), cfg({ game: { buildCommand: 'true', outputDir: '.GameShipper' } }));
+      await expect(run).rejects.toMatchObject({ error: { code: 'GAME_DIR_INVALID' } });
+    });
   });
 
   it('replaces a previous stage completely', async () => {

@@ -222,7 +222,7 @@ function leftOutOfPlugin(parts: string[], abs: string): boolean {
  * loop fails the build instead.
  */
 function copyPluginFolder(p: LoadedPlugin, dest: string): void {
-  const root = fs.realpathSync(p.source);
+  const root = fs.realpathSync.native(p.source);
   const filter = (src: string): boolean => {
     const rel = path.relative(p.source, src);
     if (rel === '') return true;
@@ -230,7 +230,7 @@ function copyPluginFolder(p: LoadedPlugin, dest: string): void {
     if (!fs.lstatSync(src).isSymbolicLink()) return true;
     let target: string;
     try {
-      target = fs.realpathSync(src);
+      target = fs.realpathSync.native(src);
     } catch {
       throw loadFailed(p.spec, `${rel} links to something that doesn't exist. Remove the link or point it at a real file.`);
     }
