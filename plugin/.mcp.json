@@ -1,0 +1,6 @@
+{
+  "gameshipper": {
+    "command": "npx",
+    "args": ["-y", "gameshipper@0.1.0", "mcp"]
+  }
+}

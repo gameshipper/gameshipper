@@ -1,0 +1,10 @@
+{
+  "name": "gameshipper",
+  "description": "Turn a web game folder into Windows, Mac and Linux builds for Steam: MCP tools plus a skill that teaches the build-test-fix loop.",
+  "version": "0.1.0",
+  "author": { "name": "Gameshipper", "email": "dev@gameshipper.com" },
+  "homepage": "https://github.com/gameshipper/gameshipper",
+  "repository": "https://github.com/gameshipper/gameshipper",
+  "license": "MIT",
+  "keywords": ["gamedev", "steam", "electron", "web-games", "mcp"]
+}
