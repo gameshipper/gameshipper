@@ -38,6 +38,43 @@ describe('GithubClient', () => {
     await expect(c.checkRepo()).rejects.toMatchObject({ error: { code: 'GITHUB_API_FAILED', message: expect.stringContaining('ECONNREFUSED') } });
   });
 
+  it("keeps GitHub's reason short: its JSON message and first error, or the first line of anything else", async () => {
+    gh = await startFakeGithub(REPO);
+    const c = client('test-token');
+    gh.respondWith = { status: 422, body: JSON.stringify({ message: 'Validation Failed', errors: [{ resource: 'Release', code: 'custom', message: 'tag_name is not a valid tag' }] }) };
+    await expect(c.checkRepo()).rejects.toMatchObject({
+      error: { code: 'GITHUB_API_FAILED', message: `GitHub GET /repos/${REPO} failed (HTTP 422: Validation Failed: tag_name is not a valid tag).` },
+    });
+    gh.respondWith = { status: 502, body: '<html>\n<head><title>502 Bad Gateway</title></head>\n</html>', contentType: 'text/html' };
+    await expect(c.checkRepo()).rejects.toMatchObject({ error: { message: `GitHub GET /repos/${REPO} failed (HTTP 502: <html>).` } });
+    // A 2 MB page on one line.
+    gh.respondWith = { status: 500, body: `<html>${'x'.repeat(2 * 1024 * 1024)}</html>`, contentType: 'text/html' };
+    const error = await c.checkRepo().then(
+      () => null,
+      (e: { error: unknown }) => e.error,
+    );
+    expect(JSON.stringify(error).length).toBeLessThan(1000);
+    expect((error as { message: string }).message).toBe(`GitHub GET /repos/${REPO} failed (HTTP 500: <html>${'x'.repeat(293)}…).`);
+  });
+
+  it('never puts the token in a message, even when an error quotes it', async () => {
+    gh = await startFakeGithub(REPO, 'gs-marker-token');
+    gh.respondWith = { status: 500, body: (auth) => JSON.stringify({ message: `Server Error for ${auth}` }) };
+    const error = await client('gs-marker-token').checkRepo().then(
+      () => null,
+      (e: { error: unknown }) => e.error,
+    );
+    expect(JSON.stringify(error)).not.toContain('gs-marker-token');
+    expect((error as { message: string }).message).toContain('Server Error for Bearer ***');
+    // Node's fetch quotes a header it refuses, token and all.
+    const bad = await client('gs-marker\nrest').checkRepo().then(
+      () => null,
+      (e: { error: unknown }) => e.error,
+    );
+    expect(bad).toMatchObject({ code: 'GITHUB_API_FAILED' });
+    expect(JSON.stringify(bad)).not.toContain('gs-marker');
+  });
+
   it("finds draft releases, which GitHub's release-by-tag lookup never returns", async () => {
     gh = await startFakeGithub(REPO);
     await client('test-token').createDraft({ tag: 'v1.0.0', name: 'x', body: '' });

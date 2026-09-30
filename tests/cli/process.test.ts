@@ -6,6 +6,7 @@ import { describe, expect, it } from 'vitest';
 import { ok } from '../../src/core/result.js';
 import { saveLastRun } from '../../src/core/runs.js';
 import { FAKE_STEAMCMD, fakeProject } from '../helpers/fake-builds.js';
+import { startFakeGithub } from '../helpers/fake-github.js';
 import { canRunTs, noteIfTsTestsSkipped } from '../helpers/node-features.js';
 import { makeTmpDir, readText, writeFiles } from '../helpers/tmp.js';
 
@@ -387,6 +388,24 @@ describe.skipIf(process.platform === 'win32' || !canRunTs)('publish in the CLI p
     } finally {
       cli.child.kill('SIGKILL');
       for (const pid of Object.values(pids() ?? {})) if (alive(pid)) process.kill(pid, 'SIGKILL');
+    }
+  });
+
+  it('Ctrl+C during a GitHub upload leaves no release zips behind', async () => {
+    const gh = await startFakeGithub('moonstudio/moon-game');
+    gh.hangUploads = true;
+    const p = fakeProject({ github: { repo: 'moonstudio/moon-game' } });
+    const cli = startCli(['publish', '--json', '--dir', p.dir], 'none', { GITHUB_TOKEN: 'test-token', GAMESHIPPER_GITHUB_API: gh.base });
+    try {
+      expect(await waitFor(() => gh.requests.some((r) => r.startsWith('POST /uploads/')), 20_000)).toBe(true);
+      expect(fs.readdirSync(path.join(p.dir, '.gameshipper', 'release'))).not.toEqual([]);
+      cli.child.kill('SIGINT');
+      expect(await cli.closed).toEqual({ code: 130, signal: null });
+      expect(JSON.parse(cli.stdout())).toMatchObject({ ok: false, errors: [{ code: 'INTERRUPTED' }] });
+      expect(fs.existsSync(path.join(p.dir, '.gameshipper', 'release'))).toBe(false);
+    } finally {
+      cli.child.kill('SIGKILL');
+      await gh.close();
     }
   });
 });

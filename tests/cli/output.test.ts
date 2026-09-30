@@ -74,7 +74,11 @@ describe('help', () => {
     expect(COMMANDS.map((c) => c.name)).toEqual(['init', 'play', 'build', 'check', 'publish', 'status', 'ci', 'mcp']);
     const data = helpData();
     expect(data.globalFlags.map((f) => f.name)).toEqual(['json', 'verbose', 'yes', 'dir', 'help', 'version']);
-    expect(data.exitCodes).toEqual({ '0': 'success', '1': 'a target or check failed', '2': 'invalid config, usage or missing input' });
+    expect(data.exitCodes).toEqual({
+      '0': 'success',
+      '1': 'a target or check failed',
+      '2': 'invalid config, usage or missing input, or a login or token the human must provide',
+    });
     expect(helpText()).toContain('npx gameshipper play --smoke');
   });
 

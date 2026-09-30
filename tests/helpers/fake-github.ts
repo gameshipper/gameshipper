@@ -30,6 +30,13 @@ export interface FakeGithub {
   canPush: boolean;
   /** Uploads fail with a server error; tests may change it. */
   failUploads: boolean;
+  /** Uploads get no answer at all (recorded as they start); tests may change it. */
+  hangUploads: boolean;
+  /**
+   * Every request gets this answer instead, whatever its token; tests may set it. `body` may be made from the
+   * request's Authorization header, as a server that echoes it would.
+   */
+  respondWith: { status: number; body: string | ((authorization: string) => string); contentType?: string } | null;
   close(): Promise<void>;
 }
 
@@ -41,10 +48,15 @@ export interface FakeGithub {
  */
 export async function startFakeGithub(repo: string, token = 'test-token'): Promise<FakeGithub> {
   let nextId = 1;
-  const state: Omit<FakeGithub, 'base' | 'close'> = { releases: [], requests: [], uploads: {}, canPush: true, failUploads: false };
+  const state: Omit<FakeGithub, 'base' | 'close'> = { releases: [], requests: [], uploads: {}, canPush: true, failUploads: false, hangUploads: false, respondWith: null };
   let base = '';
 
   const server = http.createServer((req, res) => {
+    const uploading = new URL(req.url ?? '/', base).pathname.startsWith(`/uploads/repos/${repo}/releases/`);
+    if (uploading && state.hangUploads) {
+      state.requests.push(`${req.method} ${new URL(req.url ?? '/', base).pathname}`);
+      return;
+    }
     const chunks: Buffer[] = [];
     req.on('data', (c: Buffer) => chunks.push(c));
     req.on('end', () => {
@@ -55,6 +67,11 @@ export async function startFakeGithub(repo: string, token = 'test-token'): Promi
         res.writeHead(status, body === undefined ? {} : { 'content-type': 'application/json' });
         res.end(body === undefined ? undefined : JSON.stringify(body));
       };
+      if (state.respondWith) {
+        const { status, body, contentType } = state.respondWith;
+        res.writeHead(status, { 'content-type': contentType ?? 'application/json' });
+        return res.end(typeof body === 'string' ? body : body(req.headers.authorization ?? ''));
+      }
       if (req.headers.authorization !== `Bearer ${token}`) return send(401, { message: 'Bad credentials' });
       const raw = Buffer.concat(chunks);
       const json = () => JSON.parse(raw.toString('utf8') || '{}') as Record<string, unknown>;

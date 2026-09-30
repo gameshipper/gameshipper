@@ -3,6 +3,7 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { publishGithub, type GithubOptions } from '../../../src/core/publish/github/publish.js';
+import type { GsError } from '../../../src/core/result.js';
 import { handOff } from '../../../src/core/tools/run.js';
 import { testCtx } from '../../helpers/ctx.js';
 import { fakeProject } from '../../helpers/fake-builds.js';
@@ -99,6 +100,65 @@ describe('publishGithub', () => {
     expect(gh.requests).toEqual([`GET /repos/${REPO}`, `GET /repos/${REPO}/releases`]);
   });
 
+  it('tells the human to make a token for the repository and set it themselves, never to hand it over', async () => {
+    gh = await startFakeGithub(REPO);
+    const p = project();
+    const missing = (await publishGithub(testCtx(p.dir), p.config, p.builds, opts({}, {}))).errors[0];
+    // Thrown past publishGithub; publish makes it the destination's error.
+    const refused = await publishGithub(testCtx(p.dir), p.config, p.builds, opts({}, { GITHUB_TOKEN: 'wrong-token' })).then(
+      (r) => r.errors[0],
+      (e: { error: GsError }) => e.error,
+    );
+    expect([missing.code, refused.code]).toEqual(['GITHUB_TOKEN_MISSING', 'GITHUB_AUTH_FAILED']);
+    for (const fix of [missing.fix, refused.fix]) {
+      expect(fix).toContain(`The human creates a fine-grained token limited to ${REPO} (Contents: Read and write)`);
+      expect(fix).toContain('sets GITHUB_TOKEN to it themselves where Gameshipper runs');
+      expect(fix).toContain('never pasting it into a chat or a command line');
+      expect(fix).not.toMatch(/\bask\b[^.]*\btoken/i);
+    }
+  });
+
+  it('refuses a token with spaces or line breaks before using it, and never repeats it', async () => {
+    gh = await startFakeGithub(REPO);
+    const p = project();
+    for (const [name, value] of [
+      ['GITHUB_TOKEN', 'gs-marker\ndef'],
+      ['GH_TOKEN', 'gs-marker def'],
+      ['GITHUB_TOKEN', 'gs-marker\u0000def'],
+    ] as const) {
+      const r = await publishGithub(testCtx(p.dir), p.config, p.builds, opts({}, { [name]: value }));
+      expect(r.errors[0], name).toMatchObject({ code: 'GITHUB_AUTH_FAILED', message: `The token in ${name} has spaces or line breaks in it.` });
+      expect(JSON.stringify(r)).not.toContain('gs-marker');
+    }
+    expect(gh.requests).toEqual([]);
+    // Space or a line break around it is only trimmed.
+    expect((await publishGithub(testCtx(p.dir), p.config, p.builds, opts({}, { GITHUB_TOKEN: '  test-token\n' }))).status).toBe('uploaded');
+  });
+
+  it('GITHUB_API_FAILED naming GAMESHIPPER_GITHUB_API when it is not a web address', async () => {
+    const p = project();
+    for (const api of ['not a url', 'ftp://github.example.com']) {
+      const r = await publishGithub(testCtx(p.dir), p.config, p.builds, { ...opts(), env: { GITHUB_TOKEN: 'test-token', GAMESHIPPER_GITHUB_API: api } });
+      expect(r.errors[0], api).toMatchObject({ code: 'GITHUB_API_FAILED', fix: expect.stringContaining('GAMESHIPPER_GITHUB_API') });
+    }
+  });
+
+  it('an empty --repo falls back to github.repo', async () => {
+    gh = await startFakeGithub(REPO);
+    const p = project();
+    const r = await publishGithub(testCtx(p.dir), p.config, p.builds, opts({ repo: '' }));
+    expect([r.status, r.details?.repo]).toEqual(['uploaded', REPO]);
+  });
+
+  it(". and .. aren't repositories", async () => {
+    gh = await startFakeGithub(REPO);
+    const p = project();
+    for (const repo of ['moonstudio/.', 'moonstudio/..', './moon-game', '../moon-game']) {
+      expect((await publishGithub(testCtx(p.dir), p.config, p.builds, opts({ repo }))).errors[0].code, repo).toBe('USAGE');
+    }
+    expect(gh.requests).toEqual([]);
+  });
+
   it('takes the token from GITHUB_TOKEN or GH_TOKEN, and nowhere else', async () => {
     gh = await startFakeGithub(REPO);
     const p = project();
@@ -126,12 +186,16 @@ describe('publishGithub', () => {
     expect(gh.releases).toEqual([]);
   });
 
-  it('a failed upload leaves the draft, and the result says where it is', async () => {
+  it('a failed upload leaves the draft, and the result says where it is; the zips are cleared away all the same', async () => {
     gh = await startFakeGithub(REPO);
     gh.failUploads = true;
     const p = project();
+    const exitListeners = process.listenerCount('exit');
     const r = await publishGithub(testCtx(p.dir), p.config, p.builds, opts());
     expect([r.status, r.errors[0].code]).toEqual(['failed', 'GITHUB_API_FAILED']);
     expect(r.details).toMatchObject({ draft: true, url: `${gh.base}/${REPO}/releases/tag/untagged-1` });
+    expect(fs.existsSync(path.join(p.dir, '.gameshipper', 'release'))).toBe(false);
+    // Removing the zips as Gameshipper exits (Ctrl+C mid-upload) is only arranged while they exist.
+    expect(process.listenerCount('exit')).toBe(exitListeners);
   });
 });

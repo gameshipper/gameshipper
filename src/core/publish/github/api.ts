@@ -33,9 +33,33 @@ export interface GithubClientOptions {
 
 /** Every call but an upload gets this long. */
 const API_TIMEOUT_MS = 60_000;
+/** The most of GitHub's reason a message quotes: an error page can be megabytes. */
+const MAX_REASON_CHARS = 300;
 
-const TOKEN_FIX =
-  "Use a token that can write to the repository (a fine-grained token with Contents: Read and write on it, or a classic token with the repo scope) in GITHUB_TOKEN or GH_TOKEN. Gameshipper doesn't use the gh CLI's login.";
+/**
+ * What to do about a missing or refused token. Agents do what a fix says, so it says the human makes the token and
+ * sets it where Gameshipper runs: nobody pastes it into a chat, where an agent would see it.
+ */
+export function tokenFix(repo: string): string {
+  return `The human creates a fine-grained token limited to ${repo} (Contents: Read and write) and sets GITHUB_TOKEN to it themselves where Gameshipper runs (their shell, or the MCP server's environment), never pasting it into a chat or a command line. Gameshipper doesn't use the gh CLI's login.`;
+}
+
+/** What GitHub said, short: its JSON message (and its first error), or else the first line of the body. */
+function reasonFrom(text: string): string {
+  let reason: string | undefined;
+  try {
+    const body = JSON.parse(text) as { message?: unknown; errors?: unknown } | null;
+    if (typeof body?.message === 'string') {
+      const first = (Array.isArray(body.errors) ? body.errors[0] : undefined) as { message?: unknown; code?: unknown } | undefined;
+      const detail = typeof first?.message === 'string' ? first.message : typeof first?.code === 'string' ? first.code : undefined;
+      reason = detail ? `${body.message}: ${detail}` : body.message;
+    }
+  } catch {
+    // not JSON: an error page
+  }
+  reason ??= text.trim().split(/\r?\n/)[0] || 'no reason given';
+  return reason.length > MAX_REASON_CHARS ? `${reason.slice(0, MAX_REASON_CHARS - 1)}…` : reason;
+}
 
 interface CallOptions {
   json?: unknown;
@@ -51,6 +75,20 @@ export class GithubClient {
 
   constructor(opts: GithubClientOptions) {
     this.opts = opts;
+  }
+
+  /** `text` with the token taken out (as it is, and as JSON would quote it), in case an error quotes it. */
+  private redact(text: string): string {
+    const token = this.opts.token;
+    if (!token) return text;
+    let out = text;
+    for (const form of new Set([token, JSON.stringify(token).slice(1, -1)])) out = out.split(form).join('***');
+    return out;
+  }
+
+  /** A GsFailure whose message never holds the token. */
+  private failure(code: string, message: string, fix: string): GsFailure {
+    return new GsFailure(code, this.redact(message), fix);
   }
 
   private async call<T>(method: string, url: string, init: CallOptions = {}): Promise<T | null> {
@@ -82,32 +120,26 @@ export class GithubClient {
     } catch (e) {
       const cause = (e as { cause?: { code?: unknown } }).cause;
       const code = typeof cause?.code === 'string' ? ` (${cause.code})` : '';
-      throw new GsFailure('GITHUB_API_FAILED', `Couldn't reach GitHub (${method} ${where}): ${(e as Error).message}${code}.`, 'Check your internet connection, then publish again.');
+      throw this.failure('GITHUB_API_FAILED', `Couldn't reach GitHub (${method} ${where}): ${(e as Error).message}${code}.`, 'Check your internet connection, then publish again.');
     }
     this.opts.log(`github: ${method} ${where} → ${res.status}`);
     if (res.ok) return res.status === 204 ? null : ((await res.json()) as T);
     if (res.status === 404 && init.allow404) return null;
-    const text = await res.text();
-    let message = text;
-    try {
-      message = (JSON.parse(text) as { message?: string }).message ?? text;
-    } catch {
-      // not JSON
-    }
+    const message = reasonFrom(await res.text());
     const repo = this.opts.repo;
-    if (res.status === 401) throw new GsFailure('GITHUB_AUTH_FAILED', `GitHub refused the token (401: ${message}).`, TOKEN_FIX);
+    if (res.status === 401) throw this.failure('GITHUB_AUTH_FAILED', `GitHub refused the token (401: ${message}).`, tokenFix(repo));
     if ((res.status === 403 || res.status === 429) && (res.headers.get('x-ratelimit-remaining') === '0' || res.headers.get('retry-after'))) {
-      throw new GsFailure('GITHUB_API_FAILED', `GitHub's API rate limit is used up (${message}).`, 'Wait until it resets (an hour at most), then publish again.');
+      throw this.failure('GITHUB_API_FAILED', `GitHub's API rate limit is used up (${message}).`, 'Wait until it resets (an hour at most), then publish again.');
     }
-    if (res.status === 403) throw new GsFailure('GITHUB_AUTH_FAILED', `The token isn't allowed to do this on ${repo} (403: ${message}).`, TOKEN_FIX);
+    if (res.status === 403) throw this.failure('GITHUB_AUTH_FAILED', `The token isn't allowed to do this on ${repo} (403: ${message}).`, tokenFix(repo));
     if (res.status === 404) {
-      throw new GsFailure(
+      throw this.failure(
         'GITHUB_REPO_NOT_FOUND',
         `GitHub can't find ${repo}, or the token can't see it.`,
         'Check github.repo in gameshipper.json (or --repo): it must be the owner/name of a repository that exists and that the token can access.',
       );
     }
-    throw new GsFailure('GITHUB_API_FAILED', `GitHub ${method} ${where} failed (HTTP ${res.status}: ${message}).`, 'Publish again in a minute. If it keeps failing, check https://www.githubstatus.com.');
+    throw this.failure('GITHUB_API_FAILED', `GitHub ${method} ${where} failed (HTTP ${res.status}: ${message}).`, 'Publish again in a minute. If it keeps failing, check https://www.githubstatus.com.');
   }
 
   private api(path: string): string {
@@ -118,7 +150,7 @@ export class GithubClient {
   async checkRepo(): Promise<void> {
     const repo = await this.call<{ permissions?: { push?: boolean } }>('GET', this.api(''));
     if (repo?.permissions?.push === false) {
-      throw new GsFailure('GITHUB_AUTH_FAILED', `The token can read ${this.opts.repo} but can't write to it.`, TOKEN_FIX);
+      throw this.failure('GITHUB_AUTH_FAILED', `The token can read ${this.opts.repo} but can't write to it.`, tokenFix(this.opts.repo));
     }
   }
 

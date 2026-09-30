@@ -8,7 +8,7 @@ import { zipFolder } from '../../tools/zip.js';
 import { GAMESHIPPER_VERSION } from '../../version.js';
 import type { DesktopBuild } from '../builds.js';
 import { failedDestination, type DestinationResult, type PublishEnv } from '../types.js';
-import { GithubClient, type GithubRelease } from './api.js';
+import { GithubClient, tokenFix, type GithubRelease } from './api.js';
 
 export interface GithubDetails {
   repo: string;
@@ -28,33 +28,66 @@ export interface GithubOptions extends PublishEnv {
 }
 
 const OS_LABEL: Record<DesktopTarget, string> = { windows: 'Windows', mac: 'macOS', linux: 'Linux' };
+/** Every character a GitHub token can have: printable ASCII, no spaces. */
+const TOKEN_PATTERN = /^[\x21-\x7E]+$/;
+
+/** GAMESHIPPER_GITHUB_API as an http(s) address, or null when it isn't one. */
+function apiBase(value: string | undefined): string | null {
+  if (!value) return 'https://api.github.com';
+  try {
+    return ['http:', 'https:'].includes(new URL(value).protocol) ? value : null;
+  } catch {
+    return null;
+  }
+}
 
 /**
  * Zips each desktop build and attaches it to the release v<version>: a draft, published last and only with --live, so
  * a failed run never leaves a public release with files missing. Publishing again reuses the draft and replaces its
- * files; a published release is never changed. The token comes only from GITHUB_TOKEN or GH_TOKEN.
+ * files; a published release is never changed. The token comes only from GITHUB_TOKEN or GH_TOKEN. The zips are made in
+ * .gameshipper/release/ and removed when the step ends, however it ends.
  */
 export async function publishGithub(ctx: Ctx, config: Config, builds: DesktopBuild[], opts: GithubOptions): Promise<DestinationResult<GithubDetails>> {
-  const repo = opts.repo ?? config.github.repo;
+  // An empty --repo (`--repo=`) means none was given.
+  const repo = opts.repo || config.github.repo;
   if (!repo) {
     return failedDestination<GithubDetails>('github', gsError('INPUT_REQUIRED', 'GitHub Releases needs a repository.', 'Pass --repo owner/name or set github.repo in gameshipper.json.'));
   }
   if (!GITHUB_REPO_PATTERN.test(repo)) {
     return failedDestination<GithubDetails>('github', gsError('USAGE', `"${repo}" isn't a GitHub repository.`, 'Give it as owner/name, e.g. --repo moonstudio/moon-game.'));
   }
-  const token = opts.env.GITHUB_TOKEN || opts.env.GH_TOKEN;
+  const tokenVariable = opts.env.GITHUB_TOKEN?.trim() ? 'GITHUB_TOKEN' : 'GH_TOKEN';
+  const token = (opts.env[tokenVariable] ?? '').trim();
   if (!token) {
     return failedDestination<GithubDetails>(
       'github',
+      gsError('GITHUB_TOKEN_MISSING', 'GitHub Releases needs a token in the GITHUB_TOKEN (or GH_TOKEN) environment variable.', tokenFix(repo)),
+    );
+  }
+  // Never quoted: a token with a line break would otherwise reach an error message through fetch's own.
+  if (!TOKEN_PATTERN.test(token)) {
+    return failedDestination<GithubDetails>(
+      'github',
       gsError(
-        'GITHUB_TOKEN_MISSING',
-        'GitHub Releases needs a token in the GITHUB_TOKEN (or GH_TOKEN) environment variable.',
-        `Ask the human for a token that can write to ${repo} (a fine-grained token with Contents: Read and write on it, or a classic token with the repo scope) set as GITHUB_TOKEN where Gameshipper runs. Gameshipper doesn't use the gh CLI's login.`,
+        'GITHUB_AUTH_FAILED',
+        `The token in ${tokenVariable} has spaces or line breaks in it.`,
+        `The human sets ${tokenVariable} again themselves, to the token alone, where Gameshipper runs (their shell, or the MCP server's environment), never pasting it into a chat or a command line.`,
+      ),
+    );
+  }
+  const base = apiBase(opts.env.GAMESHIPPER_GITHUB_API);
+  if (!base) {
+    return failedDestination<GithubDetails>(
+      'github',
+      gsError(
+        'GITHUB_API_FAILED',
+        "GAMESHIPPER_GITHUB_API isn't an http:// or https:// address.",
+        'Set GAMESHIPPER_GITHUB_API to your GitHub Enterprise API address (like https://github.example.com/api/v3), or unset it to use https://api.github.com.',
       ),
     );
   }
   const api = new GithubClient({
-    apiBase: opts.env.GAMESHIPPER_GITHUB_API || 'https://api.github.com',
+    apiBase: base,
     token,
     repo,
     userAgent: `gameshipper/${GAMESHIPPER_VERSION}`,
@@ -86,6 +119,15 @@ export async function publishGithub(ctx: Ctx, config: Config, builds: DesktopBui
   if (opts.dryRun) return { to: 'github', status: 'previewed', details, errors: [], warnings: [] };
 
   const releaseDir = path.join(ctx.projectDir, '.gameshipper', 'release');
+  const removeZips = (): void => {
+    try {
+      fs.rmSync(releaseDir, { recursive: true, force: true });
+    } catch {
+      // On Windows, a zip still open for its upload; the next publish replaces it.
+    }
+  };
+  // Also as Gameshipper exits mid-step: the CLI exits on Ctrl+C, SIGTERM or an MCP cancel without unwinding this.
+  process.on('exit', removeZips);
   try {
     const zips: string[] = [];
     for (const p of planned) {
@@ -129,6 +171,7 @@ export async function publishGithub(ctx: Ctx, config: Config, builds: DesktopBui
     details.url = release.html_url;
     return { to: 'github', status: 'uploaded', details, errors: [], warnings: [] };
   } finally {
-    fs.rmSync(releaseDir, { recursive: true, force: true });
+    process.off('exit', removeZips);
+    removeZips();
   }
 }

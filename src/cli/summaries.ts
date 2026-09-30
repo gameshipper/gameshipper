@@ -173,6 +173,9 @@ export function publishSummary(r: Result<PublishData>): string[] {
     const name = d.to.padEnd(7);
     if (d.status === 'failed') {
       lines.push(`✗ ${name} failed (${d.errors.map((e) => e.code).join(', ')})`);
+      // A GitHub upload that failed partway left its draft: say where, to look at it or publish again.
+      const draft = d.to === 'github' ? (d.details as GithubDetails | undefined)?.url : null;
+      if (draft) lines.push(`  Draft release: ${draft}`);
       continue;
     }
     const mark = d.errors.length ? '✗' : '✓';

@@ -14,8 +14,8 @@ const relPath = z.string().min(1);
 
 /** steam.user: a Steam account name, the one you sign in with (3-64 letters, digits or underscores). */
 export const STEAM_USER_PATTERN = /^[A-Za-z0-9_]{3,64}$/;
-/** github.repo: owner/name. */
-export const GITHUB_REPO_PATTERN = /^[A-Za-z0-9-]+\/[A-Za-z0-9._-]+$/;
+/** github.repo: owner/name, where the name isn't . or .. (a path in the API's URLs, not a repository). */
+export const GITHUB_REPO_PATTERN = /^[A-Za-z0-9-]+\/(?!\.\.?$)[A-Za-z0-9._-]+$/;
 
 export const ConfigSchema = z.strictObject({
   $schema: z.string().optional(),

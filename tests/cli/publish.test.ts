@@ -109,12 +109,67 @@ describe('gameshipper publish', () => {
     }
   });
 
+  it('never lets the GitHub token into the Result, the run log or the last-run record', async () => {
+    await useFakes(true);
+    const p = fakeProject({ github: { repo: 'moonstudio/moon-game' } });
+    const everywhere = (r: { out: string; json: () => any }) => [r.out, fs.readFileSync(r.json().logPath, 'utf8'), fs.readFileSync(path.join(p.dir, '.gameshipper', 'last', 'publish.json'), 'utf8')].join('\n');
+    // A token with a line break: refused before it's used.
+    vi.stubEnv('GITHUB_TOKEN', 'gs-marker-abc\ndef');
+    const malformed = await run(['publish', '--json', '--dir', p.dir]);
+    expect(malformed.json().errors[0]).toMatchObject({ code: 'GITHUB_AUTH_FAILED' });
+    expect(everywhere(malformed)).not.toContain('gs-marker');
+    // A good token that an error quotes back.
+    vi.stubEnv('GITHUB_TOKEN', 'gs-marker-token');
+    gh!.respondWith = { status: 500, body: (auth) => JSON.stringify({ message: `Server Error for ${auth}` }) };
+    const quoted = await run(['publish', '--json', '--dir', p.dir]);
+    expect(quoted.json().errors[0]).toMatchObject({ code: 'GITHUB_API_FAILED', message: expect.stringContaining('Bearer ***') });
+    expect(everywhere(quoted)).not.toContain('gs-marker');
+  });
+
+  it("keeps the Result small when GitHub answers with a huge error page", async () => {
+    await useFakes(true);
+    const p = fakeProject({ github: { repo: 'moonstudio/moon-game' } });
+    gh!.respondWith = { status: 502, body: `<html>${'x'.repeat(2 * 1024 * 1024)}</html>`, contentType: 'text/html' };
+    const r = await run(['publish', '--json', '--dir', p.dir]);
+    expect(r.json().errors[0].code).toBe('GITHUB_API_FAILED');
+    expect(r.out.length).toBeLessThan(5000);
+  });
+
+  it('an empty --repo= falls back to github.repo', async () => {
+    await useFakes(true);
+    const p = fakeProject({ github: { repo: 'moonstudio/moon-game' } });
+    const r = await run(['publish', '--to', 'github', '--repo=', '--json', '--dir', p.dir]);
+    expect([r.code, r.json().data.destinations[0].details.repo]).toEqual([0, 'moonstudio/moon-game']);
+  });
+
   it('help --json tells agents where publish goes in the loop', () => {
     expect(helpData().agentLoop.some((step) => step.startsWith('npx gameshipper publish --dry-run --json'))).toBe(true);
   });
 });
 
 describe('publishSummary', () => {
+  it('after a failed GitHub upload, links the draft it left', () => {
+    const url = 'https://github.com/a/b/releases/tag/untagged-1';
+    const lines = publishSummary(
+      fail([gsError('GITHUB_API_FAILED', 'x')], [], {
+        version: '1.0.0',
+        dryRun: false,
+        destinations: [
+          {
+            to: 'github' as const,
+            status: 'failed' as const,
+            details: { repo: 'a/b', tag: 'v1.0.0', action: 'create' as const, draft: true, url, assets: [] },
+            errors: [gsError('GITHUB_API_FAILED', 'x')],
+            warnings: [],
+          },
+          { to: 'itch' as const, status: 'failed' as const, errors: [gsError('ITCH_PUSH_FAILED', 'x')], warnings: [] },
+        ],
+        mobile: [],
+      }),
+    );
+    expect(lines).toEqual(['✗ github  failed (GITHUB_API_FAILED)', `  Draft release: ${url}`, '✗ itch    failed (ITCH_PUSH_FAILED)']);
+  });
+
   it('lists failures by code, dry runs, and what to do about iOS and Android', () => {
     const lines = publishSummary(
       ok({

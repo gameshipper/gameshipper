@@ -134,7 +134,11 @@ export const COMMANDS: CommandHelp[] = [
   },
 ];
 
-export const EXIT_CODES = { '0': 'success', '1': 'a target or check failed', '2': 'invalid config, usage or missing input' };
+export const EXIT_CODES = {
+  '0': 'success',
+  '1': 'a target or check failed',
+  '2': 'invalid config, usage or missing input, or a login or token the human must provide',
+};
 
 /** Every environment variable Gameshipper reads. Secrets (Apple's, the GitHub token, butler's key) only ever come from here, never from gameshipper.json. */
 export const ENVIRONMENT: Array<{ name: string; description: string }> = [

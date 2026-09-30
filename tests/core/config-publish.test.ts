@@ -27,6 +27,15 @@ describe('publish settings in gameshipper.json', () => {
     ]);
   });
 
+  it(". and .. aren't a GitHub owner or repository name", () => {
+    for (const repo of ['./moon-game', '../moon-game', 'moonstudio/.', 'moonstudio/..']) {
+      expect(parseConfig({ ...base, github: { repo } }).ok, repo).toBe(false);
+    }
+    for (const repo of ['moonstudio/.github', 'moonstudio/moon..game', 'moonstudio/...']) {
+      expect(parseConfig({ ...base, github: { repo } }).ok, repo).toBe(true);
+    }
+  });
+
   it('init writes them, empty, so they are easy to find', () => {
     const dir = makeTmpDir();
     writeFiles(dir, { 'index.html': '<html></html>' });
