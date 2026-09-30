@@ -22,7 +22,7 @@ import {
   mainProcessErrorReason,
   writeSummary,
 } from './diagnostics.js';
-import { chromiumSwitches } from './flags.js';
+import { chromiumSwitches, softwareGl } from './flags.js';
 import { isFullscreenToggle, isScreenshotKey } from './keys.js';
 import { mimeType } from './mime.js';
 import { chooseOverlay, startRepaint } from './overlay.js';
@@ -185,7 +185,7 @@ if (smoke) {
 }
 
 // Everything below must happen before the app is ready.
-for (const [name, value] of chromiumSwitches(process.platform, { softwareGl: env.GAMESHIPPER_SOFTWARE_GL === '1' })) {
+for (const [name, value] of chromiumSwitches(process.platform, { softwareGl: softwareGl(env, app.isPackaged) })) {
   app.commandLine.appendSwitch(name, value);
 }
 // Electron names the save folder after the app name the first time something asks for it, so pin it

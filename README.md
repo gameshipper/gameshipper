@@ -181,7 +181,7 @@ A check that couldn't run here is `skip`, and its message says why.
 | `GAMESHIPPER_CACHE` | Gameshipper's download cache (CDN files, Steamworks SDK libraries, native Steam bridges). Default: the OS's user cache folder. |
 | `GAMESHIPPER_STEAM_SDK` | Your Steamworks SDK zip or folder (see [Steam](#steam)). |
 | `GAMESHIPPER_NPM_REGISTRY` | The npm registry that other OSes' native Steam bridges (`@koromix/koffi-*`) are downloaded from. Default: `npm_config_registry`, then https://registry.npmjs.org. Downloads are checked against pinned hashes. |
-| `GAMESHIPPER_SOFTWARE_GL` | Set to `1` on machines without a GPU, such as hosted CI runners, so games may render WebGL in software. The `ci init` workflow sets it. |
+| `GAMESHIPPER_SOFTWARE_GL` | Set to `1` on machines without a GPU, such as hosted CI runners, so games may render WebGL in software. Only `play`, smoke runs and `check` use it: a player's launch of a shipped game ignores it. The `ci init` workflow sets it. |
 | `GAMESHIPPER_MAC_IDENTITY` | The Developer ID Application identity Mac builds are signed with (see [Mac signing and notarization](#mac-signing-and-notarization)). Unset: ad-hoc signing. |
 | `GAMESHIPPER_NOTARY_PROFILE`, `GAMESHIPPER_NOTARY_KEYCHAIN` | The notarytool keychain profile (and, optionally, the keychain holding it) Mac builds are notarized with. |
 | `GAMESHIPPER_NOTARY_KEY`, `GAMESHIPPER_NOTARY_KEY_ID`, `GAMESHIPPER_NOTARY_ISSUER` | For CI instead of a profile: an App Store Connect API key (`.p8` path), its ID and its issuer ID. |

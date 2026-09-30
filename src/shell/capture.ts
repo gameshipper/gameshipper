@@ -82,13 +82,19 @@ export function captureSettings(env: NodeJS.ProcessEnv): CaptureSettings {
 }
 
 /**
- * The capture settings the shell honours. Only runs Gameshipper makes to look at the game use them: a smoke run
- * (`play --smoke`, `play --screenshot`, `check`) or the unpackaged app `play` runs. A player's launch of a shipped
+ * A run Gameshipper makes to look at the game: a smoke run (`play --smoke`, `play --screenshot`, `check`) or the
+ * unpackaged app `play` runs. Never a player's launch of a shipped game.
+ */
+export function isDiagnosticRun(env: NodeJS.ProcessEnv, isPackaged: boolean): boolean {
+  return Number(env.GAMESHIPPER_SMOKE_SECONDS ?? '0') > 0 || !isPackaged;
+}
+
+/**
+ * The capture settings the shell honours: only in diagnostic runs (isDiagnosticRun). A player's launch of a shipped
  * game ignores them, so nothing in a player's environment can make it save screenshots or cut it off the network.
  */
 export function shellCaptureSettings(env: NodeJS.ProcessEnv, isPackaged: boolean): CaptureSettings {
-  const smoke = Number(env.GAMESHIPPER_SMOKE_SECONDS ?? '0') > 0;
-  return smoke || !isPackaged ? captureSettings(env) : {};
+  return isDiagnosticRun(env, isPackaged) ? captureSettings(env) : {};
 }
 
 /**

@@ -130,7 +130,8 @@ export const ENVIRONMENT: Array<{ name: string; description: string }> = [
   },
   {
     name: 'GAMESHIPPER_SOFTWARE_GL',
-    description: 'Set to 1 on machines without a GPU (hosted CI runners) so games may render WebGL in software. The `ci init` workflow sets it.',
+    description:
+      "Set to 1 on machines without a GPU (hosted CI runners) so games may render WebGL in software in play, smoke runs and check; a player's launch of a shipped game ignores it. The `ci init` workflow sets it.",
   },
   ...Object.entries(APPLE_ENV).map(([name, description]) => ({ name, description })),
 ];
