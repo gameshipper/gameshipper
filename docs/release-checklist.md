@@ -68,7 +68,14 @@ The page shows whether Steam is running for the game, the player's Steam name, a
 - [ ] `check` passes `review.mac-signing`.
 - [ ] The overlay and achievement checks above pass with this signed and notarized build, launched through Steam.
 
-**After `publish` exists (Plan 4):** upload the build to a real App ID's branch, install it from the Steam library on each machine (not as a non-Steam game), and repeat the table above.
+**Publishing**, with the Gameshipper test accounts: a Steamworks app with Windows, Mac and Linux depots, a `beta` branch and a build account that has only Edit App Metadata and Publish App Changes To Steam; an itch.io page kept in Draft; a GitHub repository for tests and a fine-grained token limited to it, with Contents: Read and write (never a personal `gh` login). Set `steam.appId`, `steam.user`, `itch.project` and `github.repo` in the test game, build it (signed and notarized, as above), and in a terminal:
+
+- [ ] `npx gameshipper@X.Y.Z publish --dry-run`: SteamCMD asks for the build account's password and Steam Guard code in the terminal and butler opens the browser, the first time only; every destination previews, and nothing is uploaded.
+- [ ] `GITHUB_TOKEN=<token> npx gameshipper@X.Y.Z publish --branch beta --json`: no prompt, exit 0. Steamworks lists the build with the version as its description and every depot has files (no `steam_appid.txt` in its manifest); the itch.io page has the `windows`, `mac` and `linux` channels tagged with their OS and the version; the GitHub repository has a draft release `v<version>` with three zips.
+- [ ] Enter the launch options and Steam Cloud settings exactly as `publish` printed them, publish them in Steamworks, then install the game from the Steam library (beta branch) on each machine, not as a non-Steam game, and repeat the table above.
+- [ ] On a Mac, download the Mac zip from the GitHub draft and from itch.io, open it in Finder and start the app: no Gatekeeper warning.
+- [ ] Publishing again with `--to github --live` publishes the release; once more says `GITHUB_RELEASE_PUBLISHED`. With a read-only token: `GITHUB_AUTH_FAILED`; without `GITHUB_TOKEN`: `GITHUB_TOKEN_MISSING`.
+- [ ] From Claude Code (`gameshipper_publish`), with the logins in place, it publishes without a prompt; after deleting Gameshipper's SteamCMD login (`tools/steamcmd/home` in its cache), it returns `STEAM_LOGIN_REQUIRED`.
 
 **iOS and Android:** build `out/ios` and `out/android`, then run the game on an iPhone or iPad (from Xcode, or through TestFlight) and on an Android device or emulator (from Android Studio). It starts, shows the page and saves and loads.
 

@@ -8,6 +8,7 @@ npx gameshipper play           # plays it in the desktop shell (F12 saves a stor
 npx gameshipper play --smoke   # runs it for 5 s and reports problems
 npx gameshipper build          # out/windows, out/mac, out/linux and the store images in out/store
 npx gameshipper check          # launches the build and checks it's ready for Steam and Steam Deck
+npx gameshipper publish        # uploads the builds to Steam, itch.io and GitHub Releases
 npx gameshipper status         # what's configured, built, and what happened last
 npx gameshipper ci init        # a GitHub Actions workflow that builds and runs it on each OS
 npx gameshipper mcp            # every command as an MCP tool, for AI agents
@@ -29,7 +30,8 @@ Not verified yet:
 - Steam on Windows, desktop Linux and the Steam Deck: overlay, achievements, gamepads, the on-screen keyboard and clean exits (the manual checks in [docs/release-checklist.md](docs/release-checklist.md));
 - CI on real GitHub-hosted runners, including software WebGL (`GAMESHIPPER_SOFTWARE_GL`) on runners without a GPU, for this repository's workflows and the one `ci init` writes;
 - installing the Claude Code plugin from the marketplace (`/plugin marketplace add gameshipper/gameshipper`);
-- the iOS and Android projects on real devices, and the Android project in Android Studio.
+- the iOS and Android projects on real devices, and the Android project in Android Studio;
+- `publish` to real Steam, itch.io and GitHub accounts: it's tested with the real SteamCMD and butler (without logging in) and against stand-ins for the uploads.
 
 ## Commands
 
@@ -101,9 +103,22 @@ The network block stops the game's requests (each is listed in `offline.requests
 |---|---|
 | `--seconds <n>` | How long the game runs with the network blocked (default 15, at most 600). |
 
+### `publish`
+
+Uploads the builds in `out/` to Steam, itch.io and GitHub Releases: by default to each one `gameshipper.json` sets up (see [Publishing](#publishing)). Every desktop target must be built first. One destination failing never stops the others.
+
+| Flag | |
+|---|---|
+| `--to <list>` | Where to upload: `steam`, `itch` and `github`, or some of them. |
+| `--dry-run` | Check everything and preview the uploads, uploading nothing. Steam still needs its login for this. |
+| `--steam-user <account>` | The Steam account that uploads builds (default: `steam.user`). |
+| `--branch <name>` | Steam: also set the build live on this existing beta branch (never `default`). |
+| `--repo <owner/name>` | The GitHub repository to release to (default: `github.repo`). |
+| `--live` | GitHub: publish the release at once instead of leaving it a draft. |
+
 ### `status`
 
-Shows the config, what this computer can build, the Steamworks SDK builds will use, which `out/` folders exist, and the last result of `init`, `play`, `build`, `check` and `ci` with their log paths. It succeeds for any existing folder, so it's the command to run first.
+Shows the config, what this computer can build, the Steamworks SDK builds will use, which `out/` folders exist, and the last result of `init`, `play`, `build`, `check`, `publish` and `ci` with their log paths. It succeeds for any existing folder, so it's the command to run first.
 
 ### `ci init`
 
@@ -130,16 +145,17 @@ Serves every command as an MCP tool over stdio (see [MCP server and Claude Code 
 
 ## For AI agents
 
-- Add `--json` to any command: stdout is exactly one JSON object, `{ ok, data, errors[], warnings[], logPath }`. `logPath` is the run's log (for `play`, `build` and `check`). Without a valid `gameshipper.json` they write nothing into the folder, so a `CONFIG_MISSING` or `CONFIG_INVALID` result has no `logPath`.
+- Add `--json` to any command: stdout is exactly one JSON object, `{ ok, data, errors[], warnings[], logPath }`. `logPath` is the run's log (for `play`, `build`, `check` and `publish`). Without a valid `gameshipper.json` they write nothing into the folder, so a `CONFIG_MISSING` or `CONFIG_INVALID` result has no `logPath`.
 - Every error and warning has a stable `code` and a plain-English `message`. Errors always have a `fix`; warnings have one whenever there's something to do.
 - Nothing ever prompts when `--json` or `--yes` is set, or when stdin isn't a terminal. Missing input comes back as `INPUT_REQUIRED`, naming the flag to pass.
 - Exit codes: `0` success, `1` a target or check failed, `2` invalid config, usage or missing input. A signal ends the run with an `INTERRUPTED` result and exit code 128 + the signal number (130 for Ctrl+C). Ctrl+C during an interactive `play` just ends the session: an `ok` result with a `PLAY_STOPPED` warning, still exit 130.
 - `help --json` returns every command and flag.
 - `check --json` returns 18 checks, each with a stable `id`, a `status` (`pass`, `warn`, `fail`, `info` or `skip`) and, for `warn` and `fail`, a `code` and a `fix`. Every failed check is also an error in `errors`, and every warning in `warnings`, so exit code 1 means at least one check failed. Open `data.deckScreenshot` to see what the game showed at Steam Deck size.
 - `play --screenshot 5,10,15,20,25 --json` saves store screenshots without a person; `data.screenshots` lists them. They show whatever the game shows without input, so look at them before you upload them.
+- `publish --json` never prompts. Without a saved Steam or itch.io login it returns `STEAM_LOGIN_REQUIRED` or `ITCH_LOGIN_REQUIRED` (exit code 2): the human runs the command in the error's `fix` once in their own terminal, then you publish again.
 - `npx gameshipper mcp` serves the same commands as MCP tools, with the same results (see [MCP server and Claude Code plugin](#mcp-server-and-claude-code-plugin)).
 
-The loop: `status --json`, `init --yes --json`, then `play --smoke --json` until it comes back clean (`ok: true`, so no errors; warnings don't block), then `build --json`, then `check --json` until nothing fails that you can fix.
+The loop: `status --json`, `init --yes --json`, then `play --smoke --json` until it comes back clean (`ok: true`, so no errors; warnings don't block), then `build --json`, then `check --json` until nothing fails that you can fix. When the human wants it uploaded: `publish --dry-run --json`, then `publish --json`.
 
 ### What `play --smoke` reports
 
@@ -199,8 +215,12 @@ A check that couldn't run here is `skip`, and its message says why.
 | `GAMESHIPPER_MAC_IDENTITY` | The Developer ID Application identity Mac builds are signed with (see [Mac signing and notarization](#mac-signing-and-notarization)). Unset: ad-hoc signing. |
 | `GAMESHIPPER_NOTARY_PROFILE`, `GAMESHIPPER_NOTARY_KEYCHAIN` | The notarytool keychain profile (and, optionally, the keychain holding it) Mac builds are notarized with. |
 | `GAMESHIPPER_NOTARY_KEY`, `GAMESHIPPER_NOTARY_KEY_ID`, `GAMESHIPPER_NOTARY_ISSUER` | For CI instead of a profile: an App Store Connect API key (`.p8` path), its ID and its issuer ID. |
+| `GITHUB_TOKEN`, `GH_TOKEN` | `publish`: a token that can write to the GitHub repository (`GH_TOKEN` is read when `GITHUB_TOKEN` isn't set). The `gh` CLI's login is never used. |
+| `BUTLER_API_KEY` | `publish`: an itch.io API key for butler, for CI, instead of butler's own login. |
+| `GAMESHIPPER_GITHUB_API` | `publish`: the GitHub API to use, for GitHub Enterprise. Default: https://api.github.com. |
+| `GAMESHIPPER_STEAMCMD`, `GAMESHIPPER_BUTLER` | `publish`: a SteamCMD or butler to run instead of the ones Gameshipper downloads. |
 
-`help --json` lists them all under `environment`. Apple credentials are only ever read from these variables and your keychain, never from `gameshipper.json`.
+`help --json` lists them all under `environment`. Apple credentials and tokens are only ever read from these variables and your keychain, never from `gameshipper.json`.
 
 ### Files
 
@@ -214,12 +234,14 @@ A check that couldn't run here is `skip`, and its message says why.
 | `.gameshipper/logs/` | Run logs (the newest 50 of each command), plus the events logs and smoke summaries of `play` runs (the newest 20). |
 | `.gameshipper/last/` | The last result of each command, which `status` reads. |
 | `.gameshipper/check/` | The last `check`: `report.json` and the Deck-size `frame.png`. |
+| `.gameshipper/steam/` | The last `publish` to Steam: the SteamPipe build scripts, and SteamCMD's build logs in `output/`. |
 
 ## MCP server and Claude Code plugin
 
-`npx gameshipper mcp` serves every command as an MCP tool over stdio: `gameshipper_status`, `gameshipper_init`, `gameshipper_play`, `gameshipper_build`, `gameshipper_check` and `gameshipper_ci_init`. Inputs are the command's flags in camelCase (`appId`, `bundleId`, `target: ["mac"]`, `screenshot: [5, 10]`), and `dir` picks the game folder (by default, the folder the server started in, or its `--dir`). `dir` and `steamSdk` are relative to the server's folder; `init`'s `icon`, `keyArt`, `logo`, `entry` and `outputDir` to the game folder. Each tool runs the CLI with `--json` and returns its result as structured content: `{ ok, data, errors[], warnings[], logPath }`, marked as a tool error when `ok` is false. A smoke run's result leaves out its list of events (`data.smoke.summary.eventsLeftOut` counts them; `data.smoke.eventsLog` has them all), so it stays small. Long builds send progress notifications, a cancelled call stops its command and everything it started, and calls that change the same game folder run one at a time (a waiting call's progress says so).
+`npx gameshipper mcp` serves every command as an MCP tool over stdio: `gameshipper_status`, `gameshipper_init`, `gameshipper_play`, `gameshipper_build`, `gameshipper_check`, `gameshipper_publish` and `gameshipper_ci_init`. Inputs are the command's flags in camelCase (`appId`, `bundleId`, `target: ["mac"]`, `screenshot: [5, 10]`), and `dir` picks the game folder (by default, the folder the server started in, or its `--dir`). `dir` and `steamSdk` are relative to the server's folder; `init`'s `icon`, `keyArt`, `logo`, `entry` and `outputDir` to the game folder. Each tool runs the CLI with `--json` and returns its result as structured content: `{ ok, data, errors[], warnings[], logPath }`, marked as a tool error when `ok` is false. A smoke run's result leaves out its list of events (`data.smoke.summary.eventsLeftOut` counts them; `data.smoke.eventsLog` has them all), so it stays small. Long builds send progress notifications, a cancelled call stops its command and everything it started, and calls that change the same game folder run one at a time (a waiting call's progress says so).
 
 - `gameshipper_play` opens the game window for you and returns at once. With `smoke: true` it runs the game briefly and returns every problem it found.
+- `gameshipper_publish` never prompts: a missing Steam or itch.io login comes back as `STEAM_LOGIN_REQUIRED` or `ITCH_LOGIN_REQUIRED`, whose fix is the command the human runs once in their own terminal. `GITHUB_TOKEN` must be set where the server runs.
 - The server never asks for, accepts or stores passwords, tokens or 2FA codes.
 
 Claude Code:
@@ -234,7 +256,7 @@ Cursor and other MCP clients (`mcp.json`):
 { "mcpServers": { "gameshipper": { "command": "npx", "args": ["-y", "gameshipper", "mcp"] } } }
 ```
 
-The Claude Code plugin adds the MCP server and a `ship-web-game` skill that teaches Claude the loop: check the state, set up, smoke-test, fix, build and check.
+The Claude Code plugin adds the MCP server and a `ship-web-game` skill that teaches Claude the loop: check the state, set up, smoke-test, fix, build and check, and publish when you ask.
 
 ```
 /plugin marketplace add gameshipper/gameshipper
@@ -265,8 +287,10 @@ This writes `.github/workflows/gameshipper.yml`. On every push to `main` or `mas
   "logo": "art/logo.png",
   "targets": ["windows", "mac", "linux"],
   "window": { "width": 1280, "height": 720, "fullscreen": true, "resizable": true },
-  "steam": { "appId": 480, "sdk": null, "overlay": "auto" },
+  "steam": { "appId": 480, "user": null, "sdk": null, "overlay": "auto" },
   "mobile": { "bundleId": null, "orientation": "landscape" },
+  "itch": { "project": null },
+  "github": { "repo": null },
   "plugins": []
 }
 ```
@@ -426,9 +450,43 @@ npx gameshipper build --target ios,android
 
 A game whose page has no `<meta name="viewport">` gets one. A build with the mobile targets checks the bundle ID and version before it builds anything, and stops with exit code 2: `BUNDLE_ID_REQUIRED` without a bundle ID, `BUNDLE_ID_INVALID` for one the stores won't take (a Java keyword such as `new`, which Android can't use, or Apple's own `com.apple.` prefix), and `VERSION_UNSUPPORTED` for a version that can't be a build number (a minor or patch of 1000 or more, or past 2100.0.0, Google Play's limit).
 
+## Publishing
+
+```bash
+npx gameshipper publish --dry-run                 # check everything, upload nothing
+npx gameshipper publish                           # Steam, itch.io and GitHub Releases, whichever are set up
+npx gameshipper publish --to steam --branch beta  # also set the Steam build live on your beta branch
+npx gameshipper publish --to github --live        # publish the GitHub release instead of leaving a draft
+```
+
+Set these in `gameshipper.json`; they're names, not secrets:
+
+| Field | Example | For |
+|---|---|---|
+| `steam.appId` | `1234560` | Steam: your own App ID. 480 is Valve's test app, which can't take uploads, so Steam is left out until you set it |
+| `steam.user` | `moon_builder` | Steam: the account that uploads builds (or pass `--steam-user`) |
+| `steam.depots` | `{ "windows": 1234561 }` | Steam: depot IDs, when they aren't the App ID + 1, 2 and 3 |
+| `itch.project` | `moonstudio/moon-game` | itch.io |
+| `github.repo` | `moonstudio/moon-game` | GitHub Releases (or pass `--repo`) |
+
+**Steam.** Gameshipper downloads Valve's SteamCMD into its cache (checked against a pinned SHA-256) and uploads one build with a depot per OS, from `out/windows`, `out/mac` and `out/linux`, with your version as its description; `steam_appid.txt` is never uploaded. The first time, SteamCMD asks for the password and Steam Guard code in your terminal; Gameshipper never sees them. SteamCMD keeps its login in Gameshipper's cache, apart from your Steam client, which it never touches. The build is uploaded, not set live: `publish` prints the link to set it live, and the launch option and Steam Cloud settings to enter once in Steamworks. `--branch beta` also sets it live on an existing beta branch; Valve only lets the website set the default branch live. The account needs Steamworks' Edit App Metadata and Publish App Changes To Steam permissions, and Valve recommends an account just for builds. A dry run logs in too, because Steam checks the build on its servers.
+
+**itch.io.** Gameshipper downloads itch.io's butler and pushes each build to the channels `windows`, `mac` and `linux`, with your version. The first time, butler opens your browser to log in, and keeps the login itself; in CI, set `BUTLER_API_KEY`. Uploads are downloadable at once if the game's page is public: keep it in Draft to try a build first.
+
+**GitHub Releases.** Needs a token in `GITHUB_TOKEN` (or `GH_TOKEN`) that can write to the repository: a fine-grained token with Contents: Read and write on it, or a classic token with the `repo` scope. Gameshipper never uses the `gh` CLI's login. It zips each build (on a Mac with `ditto`, so the Mac app keeps its signature however it's unzipped) and attaches them to the release `v<version>`, as a draft unless you pass `--live`. Publishing again replaces the draft's files; a published release is never changed (`GITHUB_RELEASE_PUBLISHED`: raise the version).
+
+**iOS and Android** aren't uploaded: `publish` lists the steps in Xcode and Android Studio.
+
+| Code | |
+|---|---|
+| `STEAM_LOGIN_REQUIRED`, `ITCH_LOGIN_REQUIRED` | No saved login, and nobody at a terminal to log in (an agent, `--json` or `--yes`): run the command in the fix once in your own terminal. Exit code 2. |
+| `BUILD_MISSING`, `STEAM_TEST_APP`, `STEAM_DEFAULT_BRANCH`, `GITHUB_TOKEN_MISSING`, `GITHUB_AUTH_FAILED`, `GITHUB_REPO_NOT_FOUND`, `GITHUB_RELEASE_PUBLISHED` | Something to set or fix first; exit code 2. |
+| `STEAM_UPLOAD_FAILED`, `STEAM_SET_LIVE_FAILED`, `STEAM_LOGIN_FAILED`, `STEAMCMD_CANT_RUN`, `ITCH_PUSH_FAILED`, `ITCH_LOGIN_FAILED`, `GITHUB_API_FAILED`, `ZIP_FAILED`, `TOOL_DOWNLOAD_FAILED`, `TOOL_CHECKSUM_MISMATCH`, `TOOL_UNSUPPORTED_HOST` | The upload or a tool failed; the message says why and the run log has the tool's output. Exit code 1. |
+| `ITCH_UPLOADS_LIVE` | A warning: itch.io uploads are public at once if the page is. |
+
 ## Coming in later versions
 
-`publish`, and building, signing and uploading the iOS and Android apps themselves (Gameshipper makes the projects; Xcode and Android Studio do the rest).
+Building, signing and uploading the iOS and Android apps themselves (Gameshipper makes the projects; Xcode and Android Studio do the rest).
 
 ## Development
 
