@@ -1,0 +1,91 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  unit:
+    name: Unit tests (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npx vitest run
+
+  lint:
+    name: Lint the workflows and the ci init template
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - name: Write the ci init workflow for the fixture game
+        run: |
+          game="$RUNNER_TEMP/game"
+          cp -R fixtures/threejs-cdn "$game"
+          node bin/gameshipper.js init --yes --dir "$game"
+          node bin/gameshipper.js ci init --dir "$game"
+      # On Ubuntu runners actionlint also runs shellcheck on every run: script.
+      - name: actionlint
+        run: |
+          bash <(curl -sSfL https://raw.githubusercontent.com/rhysd/actionlint/v1.7.12/scripts/download-actionlint.bash) 1.7.12
+          ./actionlint -color .github/workflows/*.yml "$RUNNER_TEMP/game/.github/workflows/gameshipper.yml"
+
+  integration:
+    name: Integration (${{ matrix.os }})
+    needs: unit
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    # macOS is where these tests were written and run; Linux and Windows report, but can't fail CI until they've been green.
+    continue-on-error: ${{ matrix.os != 'macos-latest' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, ubuntu-latest, windows-latest]
+    defaults:
+      run:
+        shell: bash
+    env:
+      # Hosted runners have no GPU: let WebGL fall back to software rendering.
+      GAMESHIPPER_SOFTWARE_GL: '1'
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - name: Get a virtual display
+        if: runner.os == 'Linux'
+        run: command -v xvfb-run || (sudo apt-get update && sudo apt-get install -y xvfb)
+      - name: Integration tests
+        if: runner.os != 'Linux'
+        run: npm run test:integration
+      - name: Integration tests (virtual display)
+        if: runner.os == 'Linux'
+        run: xvfb-run --auto-servernum npm run test:integration

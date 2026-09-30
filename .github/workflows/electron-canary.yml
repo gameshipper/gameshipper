@@ -1,0 +1,34 @@
+# Weekly: build, run and check the fixture games with the newest stable Electron.
+# The pinned Electron version (package.json) is bumped only after this passes and the
+# manual checks in docs/release-checklist.md are done.
+name: Electron canary
+
+on:
+  schedule:
+    - cron: '17 6 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  canary:
+    name: Newest Electron (macOS)
+    runs-on: macos-latest
+    timeout-minutes: 60
+    env:
+      GAMESHIPPER_SOFTWARE_GL: '1'
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - name: Install the newest stable Electron
+        run: |
+          pinned="$(node -p "require('./package.json').dependencies.electron")"
+          latest="$(npm view electron@latest version)"
+          npm install --no-save "electron@$latest"
+          echo "Testing Electron $latest (pinned: $pinned)" >> "$GITHUB_STEP_SUMMARY"
+      - run: npm run test:integration
