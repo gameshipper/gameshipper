@@ -440,7 +440,7 @@ npm run test:integration  # builds Gameshipper, then packages and runs real apps
 
 Each test file deletes the temp folders it made when it's done. To look at what a failing test left behind, run it with `GAMESHIPPER_KEEP_TMP=1`: a file with a failure keeps its folders and lists them.
 
-`GAMESHIPPER_AGENT_E2E=1 npm run test:agent` has Claude Code (the `claude` CLI, logged in) ship the fixture game through the plugin, then checks what it did. It uses a little Claude usage: haiku by default (`AGENT_E2E_MODEL` to change), capped by `AGENT_E2E_BUDGET_USD` (default 1).
+`GAMESHIPPER_AGENT_E2E=1 npm run test:agent` has Claude Code (the `claude` CLI, logged in) ship the fixture game through the plugin, then checks what it did. It uses a little Claude usage: haiku by default (`AGENT_E2E_MODEL` to change), capped by `AGENT_E2E_BUDGET_USD` (default 1). The agent may only edit the game's copy, runs without your own Claude Code settings, and its folder and transcript are deleted afterwards unless `GAMESHIPPER_KEEP_TMP=1`.
 
 The release steps, including the manual Steam checks on a PC, a Mac and a Steam Deck, are in [docs/release-checklist.md](docs/release-checklist.md).
 
