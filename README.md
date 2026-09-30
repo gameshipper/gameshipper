@@ -9,6 +9,8 @@ npx gameshipper play --smoke   # runs it for 5 s and reports problems
 npx gameshipper build          # out/windows, out/mac, out/linux and the store images in out/store
 npx gameshipper check          # launches the build and checks it's ready for Steam and Steam Deck
 npx gameshipper status         # what's configured, built, and what happened last
+npx gameshipper ci init        # a GitHub Actions workflow that builds and runs it on each OS
+npx gameshipper mcp            # every command as an MCP tool, for AI agents
 ```
 
 Your game doesn't need a build step or npm. A folder with an `index.html` is enough. Files your game loads from CDNs (three.js from unpkg through an import map, a `<script>` or `<link>` tag, a CSS `@import`) are downloaded into the build, so it works offline. They're pinned in `gameshipper.lock`, so builds are reproducible from it; use `--frozen-lock` in CI to enforce that.
@@ -46,6 +48,8 @@ Runs the game in the same shell the builds use. The window stays a window even w
 | `--seconds <n>` | How long a smoke run lasts after the page loads (default 5, at most 600). Implies `--smoke`. |
 | `--screenshot <s,s,...>` | Save 1920x1080 store screenshots this many seconds after the page loads, then quit, e.g. `--screenshot 5,10,15,20,25` (up to 20 times, each at most 600). |
 | `--fullscreen` | Honour `window.fullscreen` from `gameshipper.json`. |
+| `--packaged` | Run this computer's build from `out/` (made by `build`) as it is, instead of preparing the game folder. `--packaged --smoke` tests the real build. With your own App ID, Steam relaunches it as it would any build started outside Steam. |
+| `--detach` | Start the game and return at once, leaving it running (its output goes to the run log). Not with `--smoke`, `--seconds` or `--screenshot`. |
 | `--frozen-lock` | Fail instead of accepting changed or new CDN files; for CI. |
 | `--steam-sdk <path>` | Your Steamworks SDK zip or folder (see [Steam](#steam)). |
 
@@ -85,7 +89,15 @@ The network block stops the game's requests (each is listed in `offline.requests
 
 ### `status`
 
-Shows the config, what this computer can build, the Steamworks SDK builds will use, which `out/` folders exist, and the last result of `init`, `play`, `build` and `check` with their log paths. It succeeds for any existing folder, so it's the command to run first.
+Shows the config, what this computer can build, the Steamworks SDK builds will use, which `out/` folders exist, and the last result of `init`, `play`, `build`, `check` and `ci` with their log paths. It succeeds for any existing folder, so it's the command to run first.
+
+### `ci init`
+
+Writes `.github/workflows/gameshipper.yml`, a GitHub Actions workflow (see [GitHub Actions](#github-actions)). `--force` replaces an existing one.
+
+### `mcp`
+
+Serves every command as an MCP tool over stdio (see [MCP server and Claude Code plugin](#mcp-server-and-claude-code-plugin)). `--dir` sets the game folder tools use by default.
 
 ### `help`
 
@@ -111,6 +123,7 @@ Shows the config, what this computer can build, the Steamworks SDK builds will u
 - `help --json` returns every command and flag.
 - `check --json` returns 18 checks, each with a stable `id`, a `status` (`pass`, `warn`, `fail`, `info` or `skip`) and, for `warn` and `fail`, a `code` and a `fix`. Every failed check is also an error in `errors`, and every warning in `warnings`, so exit code 1 means at least one check failed. Open `data.deckScreenshot` to see what the game showed at Steam Deck size.
 - `play --screenshot 5,10,15,20,25 --json` saves store screenshots without a person; `data.screenshots` lists them. They show whatever the game shows without input, so look at them before you upload them.
+- `npx gameshipper mcp` serves the same commands as MCP tools, with the same results (see [MCP server and Claude Code plugin](#mcp-server-and-claude-code-plugin)).
 
 The loop: `status --json`, `init --yes --json`, then `play --smoke --json` until it comes back clean (`ok: true`, so no errors; warnings don't block), then `build --json`, then `check --json` until nothing fails that you can fix.
 
@@ -168,6 +181,7 @@ A check that couldn't run here is `skip`, and its message says why.
 | `GAMESHIPPER_CACHE` | Gameshipper's download cache (CDN files, Steamworks SDK libraries, native Steam bridges). Default: the OS's user cache folder. |
 | `GAMESHIPPER_STEAM_SDK` | Your Steamworks SDK zip or folder (see [Steam](#steam)). |
 | `GAMESHIPPER_NPM_REGISTRY` | The npm registry that other OSes' native Steam bridges (`@koromix/koffi-*`) are downloaded from. Default: `npm_config_registry`, then https://registry.npmjs.org. Downloads are checked against pinned hashes. |
+| `GAMESHIPPER_SOFTWARE_GL` | Set to `1` on machines without a GPU, such as hosted CI runners, so games may render WebGL in software. The `ci init` workflow sets it. |
 | `GAMESHIPPER_MAC_IDENTITY` | The Developer ID Application identity Mac builds are signed with (see [Mac signing and notarization](#mac-signing-and-notarization)). Unset: ad-hoc signing. |
 | `GAMESHIPPER_NOTARY_PROFILE`, `GAMESHIPPER_NOTARY_KEYCHAIN` | The notarytool keychain profile (and, optionally, the keychain holding it) Mac builds are notarized with. |
 | `GAMESHIPPER_NOTARY_KEY`, `GAMESHIPPER_NOTARY_KEY_ID`, `GAMESHIPPER_NOTARY_ISSUER` | For CI instead of a profile: an App Store Connect API key (`.p8` path), its ID and its issuer ID. |
@@ -186,6 +200,42 @@ A check that couldn't run here is `skip`, and its message says why.
 | `.gameshipper/logs/` | Run logs (the newest 50 of each command), plus the events logs and smoke summaries of `play` runs (the newest 20). |
 | `.gameshipper/last/` | The last result of each command, which `status` reads. |
 | `.gameshipper/check/` | The last `check`: `report.json` and the Deck-size `frame.png`. |
+
+## MCP server and Claude Code plugin
+
+`npx gameshipper mcp` serves every command as an MCP tool over stdio: `gameshipper_status`, `gameshipper_init`, `gameshipper_play`, `gameshipper_build`, `gameshipper_check` and `gameshipper_ci_init`. Inputs are the command's flags in camelCase (`appId`, `bundleId`, `target: ["mac"]`, `screenshot: [5, 10]`), and `dir` picks the game folder (by default, the folder the server started in, or its `--dir`). Each tool runs the CLI with `--json` and returns its result as structured content: `{ ok, data, errors[], warnings[], logPath }`, marked as a tool error when `ok` is false. Long builds send progress notifications, a cancelled call stops its command, and calls that change the same game folder run one at a time.
+
+- `gameshipper_play` opens the game window for you and returns at once. With `smoke: true` it runs the game briefly and returns every problem it found.
+- The server never asks for, accepts or stores passwords, tokens or 2FA codes.
+
+Claude Code:
+
+```bash
+claude mcp add gameshipper -- npx -y gameshipper mcp
+```
+
+Cursor and other MCP clients (`mcp.json`):
+
+```json
+{ "mcpServers": { "gameshipper": { "command": "npx", "args": ["-y", "gameshipper", "mcp"] } } }
+```
+
+The Claude Code plugin adds the MCP server and a `ship-web-game` skill that teaches Claude the loop: check the state, set up, smoke-test, fix, build and check.
+
+```
+/plugin marketplace add gameshipper/gameshipper
+/plugin install gameshipper@gameshipper
+```
+
+Without the plugin, copy `plugin/skills/ship-web-game/SKILL.md` from this repository to `.claude/skills/ship-web-game/SKILL.md` in your game folder, and add the MCP server as shown above.
+
+## GitHub Actions
+
+```bash
+npx gameshipper ci init
+```
+
+This writes `.github/workflows/gameshipper.yml`. On every push to `main` and every pull request it builds each desktop target on its own OS (`windows-latest`, `macos-latest`, `ubuntu-latest`) with `--frozen-lock`, runs the build for a few seconds with `play --packaged --smoke` (under a virtual display on Linux), and uploads it as an artifact: `<game>-windows.tar.gz`, `-mac` and `-linux`, tarballs so file permissions and the Mac app survive. Commit `gameshipper.lock` with it if your game has one. Hosted runners have no GPU, so the workflow sets `GAMESHIPPER_SOFTWARE_GL=1`. The workflow pins the Gameshipper version that wrote it; its comments say how to add your Steamworks SDK and Mac signing.
 
 ## `gameshipper.json`
 
@@ -369,8 +419,12 @@ A game whose page has no `<meta name="viewport">` gets one. A build with the mob
 ```sh
 npm test                  # unit tests
 npm run typecheck
-npm run test:integration  # builds Gameshipper, then packages and runs real apps
+npm run test:integration  # builds Gameshipper, then packages and runs real apps (and drives the MCP server)
 ```
+
+Each test file deletes the temp folders it made when it's done. To look at what a failing test left behind, run it with `GAMESHIPPER_KEEP_TMP=1`: a file with a failure keeps its folders and lists them.
+
+The release steps, including the manual Steam checks on a PC, a Mac and a Steam Deck, are in [docs/release-checklist.md](docs/release-checklist.md).
 
 The Steam end-to-end test is opt-in. It needs macOS, a running, signed-in Steam client, network access and a Steamworks SDK zip, and on the signed-in account it unlocks then clears Spacewar's `ACH_WIN_ONE_GAME` (only when the account doesn't have it yet) and writes its `NumGames` stat back with its current value (leaving the account as it was):
 
