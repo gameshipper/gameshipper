@@ -3,6 +3,7 @@
 // Opt-in, because it uses a little Claude usage: GAMESHIPPER_AGENT_E2E=1 npm run test:agent
 // Needs a built checkout (`npm run test:agent` builds it) and a logged-in `claude` CLI.
 // AGENT_E2E_MODEL picks the model (default haiku); AGENT_E2E_BUDGET_USD caps the spend (default 1).
+// The game folder and the transcript are deleted afterwards unless GAMESHIPPER_KEEP_TMP=1.
 import { spawnSync } from 'node:child_process';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
@@ -45,8 +46,18 @@ const prompt = [
   'Do not open a game window for a human. Finish by replying with the path of the built executable and the checks that failed.',
 ].join(' ');
 
+const KEEP = process.env.GAMESHIPPER_KEEP_TMP === '1';
+/** Exits with `code`, deleting the work folder first unless GAMESHIPPER_KEEP_TMP=1. */
+function finish(code) {
+  if (KEEP) console.log(`Kept ${work} (GAMESHIPPER_KEEP_TMP=1).`);
+  else fs.rmSync(work, { recursive: true, force: true, maxRetries: 3 });
+  process.exit(code);
+}
+
 console.log(`Running Claude Code (${MODEL}, at most $${BUDGET}) in ${game} ...`);
 // Bash is off, so the agent must use the MCP tools: `npx gameshipper` would run whatever npm has under that name.
+// Edits stay inside the game folder, and only this project's settings apply: not the user's own permissions,
+// hooks or plugins.
 const run = spawnSync(
   'claude',
   [
@@ -60,8 +71,10 @@ const run = spawnSync(
     BUDGET,
     '--permission-mode',
     'dontAsk',
+    '--setting-sources',
+    'project,local',
     '--allowedTools',
-    [...tools, 'Read', 'Glob', 'Grep', 'Edit'].join(','),
+    [...tools, 'Read', 'Glob', 'Grep', 'Edit(./**)'].join(','),
     '--disallowedTools',
     'Bash',
     '--no-session-persistence',
@@ -71,6 +84,11 @@ const run = spawnSync(
   ],
   { cwd: game, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 256 * 1024 * 1024, timeout: 30 * 60 * 1000 },
 );
+if (run.stdout == null || (run.error && !run.stdout)) {
+  console.error(`✗ Claude Code didn't start or printed nothing: ${run.error?.message ?? `exit code ${run.status}`}`);
+  if (run.stderr) console.error(run.stderr.trim());
+  finish(2);
+}
 const events = run.stdout.split('\n').flatMap((line) => {
   try {
     return [JSON.parse(line)];
@@ -104,7 +122,8 @@ const checks = [
   ['agent finished', result?.subtype === 'success'],
 ];
 for (const [name, pass] of checks) console.log(`${pass ? '✓' : '✗'} ${name}`);
+if (run.error) console.log(`Claude Code: ${run.error.message}`);
 console.log(`Tool calls: ${names.join(', ')}`);
-console.log(`Cost: $${result?.total_cost_usd ?? '?'}  Transcript: ${path.join(work, 'transcript.jsonl')}`);
+console.log(`Cost: $${result?.total_cost_usd ?? '?'}  Transcript: ${KEEP ? path.join(work, 'transcript.jsonl') : '(deleted; set GAMESHIPPER_KEEP_TMP=1 to keep it)'}`);
 console.log(`Agent's answer: ${result?.result ?? '(none)'}`);
-process.exit(checks.every(([, pass]) => pass) ? 0 : 1);
+finish(checks.every(([, pass]) => pass) ? 0 : 1);
