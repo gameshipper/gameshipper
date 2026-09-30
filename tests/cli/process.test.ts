@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { ok } from '../../src/core/result.js';
 import { saveLastRun } from '../../src/core/runs.js';
+import { FAKE_STEAMCMD, fakeProject } from '../helpers/fake-builds.js';
 import { canRunTs, noteIfTsTestsSkipped } from '../helpers/node-features.js';
 import { makeTmpDir, readText, writeFiles } from '../helpers/tmp.js';
 
@@ -352,6 +353,36 @@ setInterval(() => {}, 1000);
       cli.child.kill('SIGKILL');
       const pid = readPid(saves);
       if (pid !== null && alive(pid)) process.kill(pid, 'SIGKILL');
+    }
+  });
+});
+
+describe.skipIf(process.platform === 'win32' || !canRunTs)('publish in the CLI process', () => {
+  it('Ctrl+C during an upload prints INTERRUPTED, stops SteamCMD and what it started, and records the run', async () => {
+    const p = fakeProject({ steam: { appId: 1234560, user: 'builder' } });
+    const state = makeTmpDir();
+    writeFiles(state, { 'login-builder': 'token' });
+    // The fake SteamCMD starts a child of its own, like steamcmd.sh, and never finishes the upload.
+    const cli = startCli(['publish', '--json', '--dir', p.dir], 'none', { GAMESHIPPER_STEAMCMD: FAKE_STEAMCMD, FAKE_STEAMCMD_STATE: state, FAKE_STEAMCMD_MODE: 'hang' });
+    const pids = (): { pid: number; child: number } | null => {
+      try {
+        return JSON.parse(readText(state, 'hang.json')) as { pid: number; child: number };
+      } catch {
+        return null;
+      }
+    };
+    try {
+      expect(await waitFor(() => pids() !== null, 20_000)).toBe(true);
+      cli.child.kill('SIGINT');
+      expect(await cli.closed).toEqual({ code: 130, signal: null });
+      const result = JSON.parse(cli.stdout());
+      expect(result).toMatchObject({ ok: false, errors: [{ code: 'INTERRUPTED' }] });
+      expect(result.logPath).toMatch(/publish-.+\.log$/);
+      expect(await waitFor(() => !alive(pids()!.pid) && !alive(pids()!.child))).toBe(true);
+      expect(JSON.parse(readText(p.dir, '.gameshipper/last/publish.json'))).toMatchObject({ ok: false, errors: [{ code: 'INTERRUPTED' }] });
+    } finally {
+      cli.child.kill('SIGKILL');
+      for (const pid of Object.values(pids() ?? {})) if (alive(pid)) process.kill(pid, 'SIGKILL');
     }
   });
 });
