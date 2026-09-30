@@ -75,6 +75,23 @@ describe('GithubClient', () => {
     expect(JSON.stringify(bad)).not.toContain('gs-marker');
   });
 
+  it('takes the token out before it cuts a long reason, so no part of it is left where the cut falls', async () => {
+    gh = await startFakeGithub(REPO, 'gs-marker-token');
+    // "Bearer gs-marker-token" starts at character 283: the 300-character cut falls inside the token.
+    for (const [contentType, body] of [
+      ['text/html', (auth: string) => `${'x'.repeat(282)} ${auth} and the rest of the page`],
+      ['application/json', (auth: string) => JSON.stringify({ message: `${'x'.repeat(282)} ${auth} and the rest of the message` })],
+    ] as const) {
+      gh.respondWith = { status: 500, body, contentType };
+      const error = await client('gs-marker-token').checkRepo().then(
+        () => null,
+        (e: { error: unknown }) => e.error,
+      );
+      expect(JSON.stringify(error), contentType).not.toMatch(/gs-m|marker/);
+      expect((error as { message: string }).message, contentType).toContain(`${'x'.repeat(282)} Bearer *** and`);
+    }
+  });
+
   it("finds draft releases, which GitHub's release-by-tag lookup never returns", async () => {
     gh = await startFakeGithub(REPO);
     await client('test-token').createDraft({ tag: 'v1.0.0', name: 'x', body: '' });

@@ -86,7 +86,7 @@ export class GithubClient {
     return out;
   }
 
-  /** A GsFailure whose message never holds the token. */
+  /** A GsFailure whose message never holds the token (a message quoting GitHub's reason already had it taken out). */
   private failure(code: string, message: string, fix: string): GsFailure {
     return new GsFailure(code, this.redact(message), fix);
   }
@@ -125,7 +125,8 @@ export class GithubClient {
     this.opts.log(`github: ${method} ${where} → ${res.status}`);
     if (res.ok) return res.status === 204 ? null : ((await res.json()) as T);
     if (res.status === 404 && init.allow404) return null;
-    const message = reasonFrom(await res.text());
+    // The token comes out of what GitHub sent before the reason is cut, so no part of it is left where the cut falls.
+    const message = reasonFrom(this.redact(await res.text()));
     const repo = this.opts.repo;
     if (res.status === 401) throw this.failure('GITHUB_AUTH_FAILED', `GitHub refused the token (401: ${message}).`, tokenFix(repo));
     if ((res.status === 403 || res.status === 429) && (res.headers.get('x-ratelimit-remaining') === '0' || res.headers.get('retry-after'))) {
