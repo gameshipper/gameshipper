@@ -424,6 +424,8 @@ npm run test:integration  # builds Gameshipper, then packages and runs real apps
 
 Each test file deletes the temp folders it made when it's done. To look at what a failing test left behind, run it with `GAMESHIPPER_KEEP_TMP=1`: a file with a failure keeps its folders and lists them.
 
+`GAMESHIPPER_AGENT_E2E=1 npm run test:agent` has Claude Code (the `claude` CLI, logged in) ship the fixture game through the plugin, then checks what it did. It uses a little Claude usage: haiku by default (`AGENT_E2E_MODEL` to change), capped by `AGENT_E2E_BUDGET_USD` (default 1).
+
 The release steps, including the manual Steam checks on a PC, a Mac and a Steam Deck, are in [docs/release-checklist.md](docs/release-checklist.md).
 
 The Steam end-to-end test is opt-in. It needs macOS, a running, signed-in Steam client, network access and a Steamworks SDK zip, and on the signed-in account it unlocks then clears Spacewar's `ACH_WIN_ONE_GAME` (only when the account doesn't have it yet) and writes its `NumGames` stat back with its current value (leaving the account as it was):

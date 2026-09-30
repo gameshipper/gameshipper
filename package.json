@@ -16,7 +16,8 @@
     "prepack": "npm run build",
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tests/types/tsconfig.json",
     "test": "vitest run",
-    "test:integration": "npm run build && vitest run --config vitest.int.config.ts"
+    "test:integration": "npm run build && vitest run --config vitest.int.config.ts",
+    "test:agent": "npm run build && node scripts/agent-e2e.mjs"
   },
   "dependencies": {
     "@capacitor/android": "8.5.2",
