@@ -11,6 +11,8 @@ export interface ZipEntry {
   offset: number;
   /** Password-protected (general purpose flag bit 0): its contents can't be read. */
   encrypted: boolean;
+  /** The file's Unix mode (type and permission bits) when a Unix tool made the zip, else null. */
+  unixMode: number | null;
 }
 
 const END_OF_DIRECTORY = 0x06054b50;
@@ -48,6 +50,8 @@ export function readZipEntries(zip: Buffer): ZipEntry[] {
       size: zip.readUInt32LE(p + 24),
       offset: zip.readUInt32LE(p + 42),
       encrypted: (flags & 1) !== 0,
+      // "Version made by" 3 is Unix, whose zips keep st_mode in the high half of the external attributes.
+      unixMode: zip.readUInt8(p + 5) === 3 ? zip.readUInt32LE(p + 38) >>> 16 : null,
     });
     p += 46 + nameLength + zip.readUInt16LE(p + 30) + zip.readUInt16LE(p + 32);
   }
