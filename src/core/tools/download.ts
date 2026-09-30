@@ -18,6 +18,33 @@ export interface ToolArchive {
 const RECORD = '.gameshipper-archive.json';
 /** A tool is 2-11 MB; this only stops a download that stalls. */
 export const TOOL_DOWNLOAD_TIMEOUT_MS = 10 * 60_000;
+/** Far more than any tool; a download past it isn't the tool (and would fill the memory it's read into). */
+export const TOOL_DOWNLOAD_MAX_BYTES = 200 * 1024 * 1024;
+/** Apple's tar by its full path on a Mac; elsewhere the system's own, which may be in /bin or /usr/bin. */
+const TAR = process.platform === 'darwin' ? '/usr/bin/tar' : 'tar';
+
+const size = (bytes: number) => (bytes >= 1 << 20 ? `${Math.round(bytes / (1 << 20))} MB` : `${bytes} bytes`);
+
+/** The whole body, or an Error once it's larger than maxBytes (as it says, or as it arrives). */
+async function readCapped(res: Response, maxBytes: number): Promise<Buffer> {
+  const tooLarge = () => new Error(`it's larger than ${size(maxBytes)}`);
+  if (Number(res.headers.get('content-length')) > maxBytes) {
+    await res.body?.cancel();
+    throw tooLarge();
+  }
+  const chunks: Buffer[] = [];
+  let total = 0;
+  if (!res.body) return Buffer.alloc(0);
+  for await (const chunk of res.body) {
+    total += chunk.byteLength;
+    if (total > maxBytes) {
+      // Leaving the loop early cancels the rest of the download.
+      throw tooLarge();
+    }
+    chunks.push(Buffer.from(chunk));
+  }
+  return Buffer.concat(chunks);
+}
 
 /** True when installDir holds exactly this archive and `executable` (relative to it) is still there. */
 export function isInstalled(installDir: string, archive: ToolArchive, executable: string): boolean {
@@ -38,18 +65,26 @@ function why(e: unknown): string {
 }
 
 /**
- * Downloads a pinned archive, checks its SHA-256 and unpacks it into installDir: zips with Gameshipper's own reader,
- * .tar.gz (macOS and Linux only) with the system tar, which keeps links and modes. It's unpacked beside installDir
+ * Downloads a pinned archive (at most TOOL_DOWNLOAD_MAX_BYTES, or `maxBytes`), checks its SHA-256 and unpacks it into
+ * installDir: zips with Gameshipper's own reader, .tar.gz (macOS and Linux only) with the system tar, which keeps links
+ * and modes and refuses entries that would land outside the folder. It's unpacked beside installDir
  * and then moved into place, so an interrupted install never looks complete. `executable` (relative to installDir)
  * must be in it. Throws GsFailure: TOOL_DOWNLOAD_FAILED or TOOL_CHECKSUM_MISMATCH.
  */
-export async function installArchive(ctx: Ctx, name: string, archive: ToolArchive, installDir: string, executable: string): Promise<void> {
+export async function installArchive(
+  ctx: Ctx,
+  name: string,
+  archive: ToolArchive,
+  installDir: string,
+  executable: string,
+  opts: { maxBytes?: number } = {},
+): Promise<void> {
   ctx.log(`downloading ${name} from ${archive.url}`);
   let body: Buffer;
   try {
     const res = await fetch(archive.url, { signal: AbortSignal.timeout(TOOL_DOWNLOAD_TIMEOUT_MS) });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    body = Buffer.from(await res.arrayBuffer());
+    body = await readCapped(res, opts.maxBytes ?? TOOL_DOWNLOAD_MAX_BYTES);
   } catch (e) {
     throw new GsFailure('TOOL_DOWNLOAD_FAILED', `Couldn't download ${name} from ${archive.url}: ${why(e)}.`, 'Check your internet connection, then run the command again.');
   }
@@ -72,7 +107,7 @@ export async function installArchive(ctx: Ctx, name: string, archive: ToolArchiv
       const file = `${tmp}.tar.gz`;
       fs.writeFileSync(file, body);
       try {
-        const r = spawnSync('tar', ['-xzf', file, '-C', tmp], { encoding: 'utf8' });
+        const r = spawnSync(TAR, ['-xzf', file, '-C', tmp], { encoding: 'utf8' });
         if (r.status !== 0) throw new Error((r.stderr || r.error?.message || 'tar failed').trim());
       } finally {
         fs.rmSync(file, { force: true });

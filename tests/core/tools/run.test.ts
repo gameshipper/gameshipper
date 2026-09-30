@@ -86,6 +86,47 @@ describe('runExternal', () => {
     expect(r.output.trimEnd().split('\n').at(-1)).toMatch(/^line 3999 /);
   });
 
+  it('handles a 50 MB line in bounded memory and linear time, and still finds a prompt at its end', async () => {
+    const file = script(
+      `const chunk = 'x'.repeat(1 << 20);
+       for (let i = 0; i < 50; i++) process.stdout.write(chunk);
+       process.stdout.write('\\nshort line\\n');
+       for (let i = 0; i < 50; i++) process.stdout.write(chunk);
+       process.stdout.write('password: ');
+       setInterval(() => {}, 1000);`,
+    );
+    const lines: string[] = [];
+    const started = Date.now();
+    const r = await runExternal(toolCommand(file, { ...process.env }), [], { timeoutMs: 60_000, stopOn: /password:/, onLine: (l) => lines.push(l) });
+    // Searching the whole line again on each write took about 10 s here.
+    expect(Date.now() - started).toBeLessThan(5_000);
+    expect(r.stoppedOn).toMatch(/password:$/);
+    expect(r.stoppedOn!.length).toBeLessThanOrEqual(OUTPUT_BUFFER_CHARS);
+    expect(r.output.length).toBeLessThanOrEqual(OUTPUT_BUFFER_CHARS);
+    expect(r.output.endsWith('xpassword: ')).toBe(true);
+    // The long lines reach the log cut short, saying how much was left out.
+    expect(lines).toHaveLength(3);
+    expect(lines[0]).toBe(`${'x'.repeat(OUTPUT_BUFFER_CHARS)}… (${50 * (1 << 20) - OUTPUT_BUFFER_CHARS} more characters)`);
+    expect(lines[1]).toBe('short line');
+    expect(lines[2]).toBe(`${'x'.repeat(OUTPUT_BUFFER_CHARS)}… (${50 * (1 << 20) + 'password: '.length - OUTPUT_BUFFER_CHARS} more characters)`);
+  });
+
+  it('finds a prompt split across writes, and hands on a line split across writes once', async () => {
+    const file = script(
+      `const wait = () => new Promise((r) => setTimeout(r, 50));
+       process.stdout.write('Logging in\\r\\nSteam Guard ');
+       await wait();
+       process.stdout.write('co');
+       await wait();
+       process.stdout.write('de:');
+       setInterval(() => {}, 1000);`,
+    );
+    const lines: string[] = [];
+    const r = await runExternal(toolCommand(file, { ...process.env }), [], { timeoutMs: 20_000, stopOn: /Steam Guard code:/, onLine: (l) => lines.push(l) });
+    expect(r.stoppedOn).toBe('Steam Guard code:');
+    expect(lines).toEqual(['Logging in', 'Steam Guard code:']);
+  });
+
   it('reports a tool that cannot start', async () => {
     const r = await runExternal(toolCommand('/nonexistent/steamcmd.sh', { ...process.env }), [], { timeoutMs: 5_000 });
     expect(r.exitCode).toBeNull();

@@ -50,6 +50,21 @@ describe('butler in the cache', () => {
     expect([tool.command, tool.args]).toEqual([process.execPath, ['/fakes/butler.mjs']]);
   });
 
+  it("gets its own API key, but never GitHub's token or the Apple signing variables", async () => {
+    const env = {
+      GAMESHIPPER_BUTLER: '/fakes/butler.mjs',
+      PATH: '/bin',
+      BUTLER_API_KEY: 'b',
+      GITHUB_TOKEN: 'g',
+      GH_TOKEN: 'h',
+      GAMESHIPPER_MAC_IDENTITY: 'Developer ID Application: Someone (ABCDE12345)',
+      GAMESHIPPER_NOTARY_KEY: '/keys/k.p8',
+      GAMESHIPPER_NOTARY_PROFILE: 'p',
+    };
+    const tool = await ensureButler(testCtx(makeTmpDir()), { env });
+    expect(tool.env).toEqual({ GAMESHIPPER_BUTLER: '/fakes/butler.mjs', PATH: '/bin', BUTLER_API_KEY: 'b' });
+  });
+
   it("TOOL_UNSUPPORTED_HOST where itch.io doesn't make butler", async () => {
     await expect(ensureButler(testCtx(makeTmpDir()), { env: {}, platform: 'win32', arch: 'arm64' })).rejects.toMatchObject({
       error: { code: 'TOOL_UNSUPPORTED_HOST' },

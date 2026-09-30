@@ -3,7 +3,7 @@ import * as path from 'node:path';
 import type { Ctx } from '../../context.js';
 import { GsFailure } from '../../result.js';
 import { installArchive, isInstalled, type ToolArchive } from '../../tools/download.js';
-import { toolCommand, type ToolCommand } from '../../tools/run.js';
+import { toolCommand, withoutSecrets, type ToolCommand } from '../../tools/run.js';
 
 /**
  * Valve's official SteamCMD bootstrap archives, re-checked 2026-09-29 (unchanged since 2020, 2018 and 2013). SteamCMD
@@ -38,8 +38,9 @@ export interface SteamCmdPaths {
   executable: string;
 }
 
+/** Absolute, even when the cache folder is given as a relative path: SteamCMD runs with its HOME from anywhere. */
 export function steamCmdPaths(cacheDir: string, platform: NodeJS.Platform): SteamCmdPaths {
-  const root = path.join(cacheDir, 'tools', 'steamcmd');
+  const root = path.resolve(cacheDir, 'tools', 'steamcmd');
   const installDir = path.join(root, 'app');
   const program = platform === 'win32' ? 'steamcmd.exe' : 'steamcmd.sh';
   return { installDir, homeDir: path.join(root, 'home'), program, executable: path.join(installDir, program) };
@@ -49,10 +50,18 @@ export function steamCmdPaths(cacheDir: string, platform: NodeJS.Platform): Stea
  * SteamCMD keeps its login, logs and caches under $HOME: in ~/Library/Application Support/Steam on macOS and ~/Steam
  * on Linux, the Steam client's own folders. On macOS it also rewrites the client's LaunchAgent,
  * ~/Library/LaunchAgents/com.valvesoftware.steamclean.plist. A HOME of its own keeps the player's Steam install
- * untouched. On Windows it keeps everything beside steamcmd.exe, in the cache.
+ * untouched; on Linux the XDG folders move into it too. On Windows it keeps everything beside steamcmd.exe, in the
+ * cache. It never gets the GitHub token, butler's key or the Apple signing variables.
  */
 export function steamCmdEnv(paths: SteamCmdPaths, platform: NodeJS.Platform, baseEnv: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
-  return platform === 'win32' ? { ...baseEnv } : { ...baseEnv, HOME: paths.homeDir };
+  const env = withoutSecrets(baseEnv);
+  if (platform === 'win32') return env;
+  const home = path.resolve(paths.homeDir);
+  const xdg =
+    platform === 'linux'
+      ? { XDG_CONFIG_HOME: path.join(home, '.config'), XDG_DATA_HOME: path.join(home, '.local', 'share'), XDG_CACHE_HOME: path.join(home, '.cache') }
+      : {};
+  return { ...env, HOME: home, ...xdg };
 }
 
 export interface EnsureSteamCmdOptions {
@@ -84,6 +93,9 @@ export async function ensureSteamCmd(ctx: Ctx, opts: EnsureSteamCmdOptions): Pro
     }
     if (!isInstalled(paths.installDir, archive, paths.program)) await installArchive(ctx, 'SteamCMD', archive, paths.installDir, paths.program);
   }
-  fs.mkdirSync(paths.homeDir, { recursive: true });
+  // Only you may read SteamCMD's saved login.
+  fs.mkdirSync(path.dirname(paths.homeDir), { recursive: true });
+  fs.mkdirSync(paths.homeDir, { recursive: true, mode: 0o700 });
+  if (process.platform !== 'win32') fs.chmodSync(paths.homeDir, 0o700);
   return override ? toolCommand(override, env) : toolCommand(paths.executable, env);
 }

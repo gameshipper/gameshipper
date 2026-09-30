@@ -3,10 +3,13 @@ import { createHash } from 'node:crypto';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { installArchive, isInstalled, type ToolArchive } from '../../../src/core/tools/download.js';
+import * as http from 'node:http';
+import type { AddressInfo } from 'node:net';
+import { installArchive, isInstalled, TOOL_DOWNLOAD_MAX_BYTES, type ToolArchive } from '../../../src/core/tools/download.js';
 import { writeZip } from '../../../src/core/tools/zip.js';
 import { testCtx } from '../../helpers/ctx.js';
 import { refusedUrl, startServer, type TestServer } from '../../helpers/server.js';
+import { makeTgz } from '../../helpers/tgz.js';
 import { makeTmpDir, writeFiles } from '../../helpers/tmp.js';
 
 const sha = (b: Buffer) => createHash('sha256').update(b).digest('hex');
@@ -67,6 +70,54 @@ describe('installArchive', () => {
     const installDir = path.join(makeTmpDir(), 'steamcmd', 'app');
     await installArchive(testCtx(makeTmpDir()), 'SteamCMD', { url: `${server.base}/s.tar.gz`, sha256: sha(body), format: 'tar.gz' }, installDir, 'steamcmd.sh');
     expect(fs.readlinkSync(path.join(installDir, 'Frameworks', 'B.framework', 'Versions', 'Current'))).toBe('A');
+  });
+
+  it.skipIf(process.platform === 'win32')('never unpacks a tar.gz entry outside the install folder', async () => {
+    const body = makeTgz({ 'steamcmd.sh': '#!/bin/sh\n', '../evil.txt': 'x', '../../evil.txt': 'x' });
+    server = await startServer({ '/s.tar.gz': { body } });
+    const root = makeTmpDir();
+    const installDir = path.join(root, 'tools', 'steamcmd', 'app');
+    const archive: ToolArchive = { url: `${server.base}/s.tar.gz`, sha256: sha(body), format: 'tar.gz' };
+    await expect(installArchive(testCtx(makeTmpDir()), 'SteamCMD', archive, installDir, 'steamcmd.sh')).rejects.toMatchObject({
+      error: { code: 'TOOL_DOWNLOAD_FAILED' },
+    });
+    const everything = fs.readdirSync(root, { recursive: true }).map(String);
+    expect(everything.filter((f) => f.includes('evil'))).toEqual([]);
+    expect(fs.existsSync(installDir)).toBe(false);
+  });
+
+  it(`gives up on a download larger than ${TOOL_DOWNLOAD_MAX_BYTES / (1 << 20)} MB, whether or not it says its size`, async () => {
+    expect(TOOL_DOWNLOAD_MAX_BYTES).toBe(200 * 1024 * 1024);
+    const body = Buffer.alloc(5000, 1);
+    server = await startServer({ '/big.zip': { body } });
+    const ctx = testCtx(makeTmpDir());
+    const dir = path.join(makeTmpDir(), 'thing');
+    const archive: ToolArchive = { url: `${server.base}/big.zip`, sha256: sha(body), format: 'zip' };
+    await expect(installArchive(ctx, 'Thing', archive, dir, 'run', { maxBytes: 4096 })).rejects.toMatchObject({
+      error: { code: 'TOOL_DOWNLOAD_FAILED', message: expect.stringContaining("it's larger than 4096 bytes") },
+    });
+    // No Content-Length: counted as it arrives, and cut off.
+    let sent = 0;
+    const endless = http.createServer((_req, res) => {
+      res.writeHead(200, { 'content-type': 'application/zip' });
+      const more = () => {
+        while (sent < 50 * 1024 * 1024 && res.write(Buffer.alloc(64 * 1024))) sent += 64 * 1024;
+      };
+      res.on('drain', more);
+      more();
+    });
+    await new Promise<void>((resolve) => endless.listen(0, '127.0.0.1', resolve));
+    try {
+      const url = `http://127.0.0.1:${(endless.address() as AddressInfo).port}/t.zip`;
+      await expect(installArchive(ctx, 'Thing', { url, sha256: 'x', format: 'zip' }, dir, 'run', { maxBytes: 1024 * 1024 })).rejects.toMatchObject({
+        error: { code: 'TOOL_DOWNLOAD_FAILED', message: expect.stringContaining("it's larger than 1 MB") },
+      });
+      expect(sent).toBeLessThan(50 * 1024 * 1024);
+    } finally {
+      endless.closeAllConnections();
+      await new Promise((resolve) => endless.close(resolve));
+    }
+    expect(fs.existsSync(dir)).toBe(false);
   });
 
   it('TOOL_CHECKSUM_MISMATCH when the download is not the pinned file', async () => {

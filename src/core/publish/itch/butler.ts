@@ -2,7 +2,7 @@ import * as path from 'node:path';
 import type { Ctx } from '../../context.js';
 import { GsFailure } from '../../result.js';
 import { installArchive, isInstalled, type ToolArchive } from '../../tools/download.js';
-import { toolCommand, type ToolCommand } from '../../tools/run.js';
+import { toolCommand, withoutSecrets, type ToolCommand } from '../../tools/run.js';
 
 /** The pinned butler release; itch.io's broth service keeps every version. Re-checked 2026-09-29 (still the latest). */
 export const BUTLER_VERSION = '15.31.0';
@@ -39,11 +39,13 @@ export interface EnsureButlerOptions {
 /**
  * How to run butler, downloading it into the cache on first use. butler keeps its login where it always does
  * (~/Library/Application Support/itch/butler_creds on macOS, ~/.config/itch/butler_creds elsewhere) or reads
- * BUTLER_API_KEY, so an existing `butler login` is reused. GAMESHIPPER_BUTLER=<path> runs that program instead.
+ * BUTLER_API_KEY, so an existing `butler login` is reused. It never gets the GitHub token or the Apple signing
+ * variables. GAMESHIPPER_BUTLER=<path> runs that program instead.
  */
 export async function ensureButler(ctx: Ctx, opts: EnsureButlerOptions): Promise<ToolCommand> {
+  const env = withoutSecrets(opts.env, ['BUTLER_API_KEY']);
   const override = opts.env.GAMESHIPPER_BUTLER;
-  if (override) return toolCommand(override, { ...opts.env });
+  if (override) return toolCommand(override, env);
   const platform = opts.platform ?? process.platform;
   const arch = opts.arch ?? process.arch;
   const archive = opts.archive ?? BUTLER_ARCHIVES[`${platform}-${arch}`];
@@ -52,7 +54,7 @@ export async function ensureButler(ctx: Ctx, opts: EnsureButlerOptions): Promise
   }
   const { installDir, program } = butlerPaths(ctx.cacheDir, platform, arch);
   if (!isInstalled(installDir, archive, program)) await installArchive(ctx, 'butler', archive, installDir, program);
-  return toolCommand(path.join(installDir, program), { ...opts.env });
+  return toolCommand(path.join(installDir, program), env);
 }
 
 /** One line of `butler --json` output. */

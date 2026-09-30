@@ -10,6 +10,20 @@ export interface ToolCommand {
   env: NodeJS.ProcessEnv;
 }
 
+/** Secrets Gameshipper holds for one destination or for signing; no tool gets another's. */
+const SECRETS = new Set(['GITHUB_TOKEN', 'GH_TOKEN', 'BUTLER_API_KEY']);
+const SECRET_PREFIXES = ['GAMESHIPPER_NOTARY_', 'GAMESHIPPER_MAC_'];
+
+/**
+ * `env` without the secrets Gameshipper holds for others: the GitHub token, butler's API key and the Apple signing
+ * variables. `keep` names those the tool itself needs. Names are compared ignoring case, as Windows does.
+ */
+export function withoutSecrets(env: NodeJS.ProcessEnv, keep: string[] = []): NodeJS.ProcessEnv {
+  const kept = new Set(keep.map((name) => name.toUpperCase()));
+  const secret = (name: string) => SECRETS.has(name) || SECRET_PREFIXES.some((prefix) => name.startsWith(prefix));
+  return Object.fromEntries(Object.entries(env).filter(([name]) => kept.has(name.toUpperCase()) || !secret(name.toUpperCase())));
+}
+
 /** An executable, or a .js/.mjs/.cjs script that this Node runs (how tests plug in their fakes). */
 export function toolCommand(file: string, env: NodeJS.ProcessEnv): ToolCommand {
   return /\.[cm]?js$/i.test(file) ? { command: process.execPath, args: [file], env } : { command: file, args: [], env };
@@ -17,7 +31,10 @@ export function toolCommand(file: string, env: NodeJS.ProcessEnv): ToolCommand {
 
 export interface ExternalRunOptions {
   timeoutMs: number;
-  /** Every line the tool prints, stdout and stderr, e.g. for the run log (which --verbose and MCP progress show). */
+  /**
+   * Every line the tool prints, stdout and stderr, e.g. for the run log (which --verbose and MCP progress show). A line
+   * longer than OUTPUT_BUFFER_CHARS is cut there.
+   */
   onLine?: (line: string) => void;
   /** Stop the tool as soon as its output matches, even mid-line: a prompt nobody is there to answer. */
   stopOn?: RegExp;
@@ -37,6 +54,47 @@ export interface ExternalRun {
 
 /** How long a tool that has exited may keep its output open (something it started still holds it) before it's released. */
 const CLOSE_GRACE_MS = 2000;
+/**
+ * How much of a line's earlier output `stopOn` sees again with each new write, so a prompt split across writes is
+ * still found: far longer than any prompt it looks for. Only new output is searched otherwise, so a tool that prints
+ * a huge line without a line break costs linear time.
+ */
+const STOP_ON_OVERLAP = 1024;
+
+/**
+ * Splits a tool's output into lines as it arrives. A line is kept up to OUTPUT_BUFFER_CHARS; the rest is only
+ * counted, and the line says how much was left out.
+ */
+class LineSplitter {
+  private head = '';
+  private dropped = 0;
+  /** The end of the line so far, for `stopOn`. */
+  tail = '';
+
+  /** Adds output that has no line break in it. */
+  add(text: string): void {
+    const room = OUTPUT_BUFFER_CHARS - this.head.length;
+    if (text.length <= room) this.head += text;
+    else {
+      this.head += text.slice(0, room);
+      this.dropped += text.length - room;
+    }
+    this.tail = (this.tail + text).slice(-STOP_ON_OVERLAP);
+  }
+
+  get empty(): boolean {
+    return !this.head;
+  }
+
+  /** The line, then starts the next one. */
+  take(): string {
+    const line = this.dropped ? `${this.head}… (${this.dropped} more characters)` : this.head;
+    this.head = '';
+    this.dropped = 0;
+    this.tail = '';
+    return line;
+  }
+}
 
 /**
  * Runs a tool with no stdin (so it can never wait for input) and captures its output. On macOS and Linux it leads its
@@ -47,7 +105,7 @@ const CLOSE_GRACE_MS = 2000;
 export function runExternal(tool: ToolCommand, args: string[], opts: ExternalRunOptions): Promise<ExternalRun> {
   return new Promise((resolve) => {
     let output = '';
-    let partial = '';
+    const line = new LineSplitter();
     let timedOut = false;
     let stoppedOn: string | null = null;
     let settled = false;
@@ -63,23 +121,28 @@ export function runExternal(tool: ToolCommand, args: string[], opts: ExternalRun
       timedOut = true;
       killTree(child);
     }, opts.timeoutMs);
-    const check = (text: string): void => {
-      if (opts.stopOn && stoppedOn === null && opts.stopOn.test(text)) {
-        stoppedOn = text.trim();
+    /** Looks for `stopOn` in the new part of the line, and the end of what came before it on that line. */
+    const check = (before: string, text: string): void => {
+      if (!opts.stopOn || stoppedOn !== null) return;
+      const seen = before + text;
+      if (opts.stopOn.test(seen)) {
+        stoppedOn = seen.trim().slice(-STOP_ON_OVERLAP);
         killTree(child);
       }
     };
     const onData = (text: string): void => {
       output = (output + text).slice(-OUTPUT_BUFFER_CHARS);
       // Progress lines redraw themselves with \r.
-      const lines = (partial + text).split(/\r?\n|\r/);
-      partial = lines.pop() ?? '';
-      for (const line of lines) {
-        opts.onLine?.(line);
-        check(line);
+      const parts = text.split(/\r?\n|\r/);
+      for (const [i, part] of parts.entries()) {
+        // A prompt has no line break after it, so the last part is checked too.
+        check(line.tail, part);
+        line.add(part);
+        if (i < parts.length - 1) {
+          const done = line.take();
+          opts.onLine?.(done);
+        }
       }
-      // A prompt has no newline after it.
-      if (partial) check(partial);
     };
     child.stdout.setEncoding('utf8').on('data', onData);
     child.stderr.setEncoding('utf8').on('data', onData);
@@ -89,7 +152,10 @@ export function runExternal(tool: ToolCommand, args: string[], opts: ExternalRun
       clearTimeout(timer);
       clearTimeout(graceTimer);
       detach();
-      if (partial) opts.onLine?.(partial);
+      if (!line.empty) {
+        const last = line.take();
+        opts.onLine?.(last);
+      }
       const stopped = timedOut || stoppedOn !== null;
       resolve({ exitCode: stopped ? null : exitCode, output, timedOut, stoppedOn, spawnError });
     };

@@ -1,10 +1,10 @@
 import { spawnSync } from 'node:child_process';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { signMacApp } from '../../../src/core/sign/sign.js';
 import { readZipEntries } from '../../../src/core/steam/zip.js';
-import { unzipTo, writeZip, zipFolder } from '../../../src/core/tools/zip.js';
+import { DITTO, unzipTo, writeZip, zipFolder } from '../../../src/core/tools/zip.js';
 import { testCtx } from '../../helpers/ctx.js';
 import { makeMiniApp } from '../../helpers/mac-bundle.js';
 import { makeTmpDir, writeFiles } from '../../helpers/tmp.js';
@@ -61,6 +61,62 @@ describe('writeZip', () => {
   });
 });
 
+const alive = (pid: number): boolean => {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+async function waitFor(check: () => boolean, ms = 10_000): Promise<boolean> {
+  for (const end = Date.now() + ms; Date.now() < end; await new Promise((r) => setTimeout(r, 50))) {
+    if (check()) return true;
+  }
+  return check();
+}
+
+describe.skipIf(!posix)('zipFolder with ditto, stopped with Gameshipper', () => {
+  it("runs Apple's own ditto, never one found on PATH", () => {
+    expect(DITTO).toBe('/usr/bin/ditto');
+  });
+
+  it('stops a slow ditto on Ctrl+C (or SIGTERM, or an MCP cancel), and leaves no half-written zip', async () => {
+    const tmp = makeTmpDir();
+    const pidFile = path.join(tmp, 'ditto.pid');
+    // A ditto that starts writing the zip (its last argument), then never finishes.
+    const fake = path.join(tmp, 'ditto.mjs');
+    fs.writeFileSync(
+      fake,
+      `import * as fs from 'node:fs';
+       fs.writeFileSync(process.argv.at(-1), 'PK');
+       fs.writeFileSync(${JSON.stringify(pidFile)}, String(process.pid));
+       setInterval(() => {}, 1000);`,
+    );
+    const zipFile = path.join(tmp, 'release', 'mac.zip');
+    const cli = vi.fn();
+    process.on('SIGINT', cli);
+    try {
+      const zipping = zipFolder(buildFolder(), zipFile, { platform: 'darwin', ditto: fake });
+      const settled = zipping.then(
+        () => 'resolved',
+        (e: Error) => e.message,
+      );
+      expect(await waitFor(() => fs.existsSync(pidFile))).toBe(true);
+      const pid = Number(fs.readFileSync(pidFile, 'utf8'));
+      // Delivers the event to the listeners without a real signal; `cli` stands in for the CLI's own handler.
+      process.emit('SIGINT', 'SIGINT');
+      expect(await settled).toBe('ditto failed: it was stopped');
+      expect(await waitFor(() => !alive(pid))).toBe(true);
+      expect(fs.existsSync(zipFile)).toBe(false);
+      expect(cli).toHaveBeenCalledTimes(1);
+    } finally {
+      process.off('SIGINT', cli);
+    }
+  });
+});
+
 describe.runIf(mac)('zipFolder on a Mac (ditto)', () => {
   it('leaves out extended attributes, so no ._ files appear when someone unzips it with unzip', async () => {
     const dir = buildFolder();
@@ -105,6 +161,16 @@ describe('unzipTo', () => {
     unzipTo(fs.readFileSync(path.join(tmp, 'b.zip')), path.join(tmp, 'out'));
     expect(fs.readFileSync(path.join(tmp, 'out', 'lib', '7z.so'), 'utf8')).toBe('so');
     if (posix) expect(fs.statSync(path.join(tmp, 'out', 'butler')).mode & 0o777).toBe(0o755);
+  });
+
+  it.skipIf(!posix)('refuses a symbolic link, which would otherwise be written as a file (or point anywhere)', () => {
+    const src = makeTmpDir();
+    writeFiles(src, { butler: '#!/bin/sh\n' });
+    fs.symlinkSync('/etc/passwd', path.join(src, 'link'));
+    const tmp = makeTmpDir();
+    writeZip(src, path.join(tmp, 'b.zip'));
+    expect(() => unzipTo(fs.readFileSync(path.join(tmp, 'b.zip')), path.join(tmp, 'out'))).toThrow('link is a symbolic link');
+    expect(fs.existsSync(path.join(tmp, 'out', 'link'))).toBe(false);
   });
 
   it('refuses entries that would land outside the folder, and files that are not zips', () => {

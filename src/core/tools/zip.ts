@@ -1,11 +1,9 @@
-import { execFile } from 'node:child_process';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { promisify } from 'node:util';
 import * as zlib from 'node:zlib';
+import { outputTail } from '../proc.js';
 import { readZipEntries, readZipEntry } from '../steam/zip.js';
-
-const execFileAsync = promisify(execFile);
+import { runExternal, toolCommand } from './run.js';
 
 const LOCAL_HEADER = 0x04034b50;
 const DIRECTORY_ENTRY = 0x02014b50;
@@ -22,6 +20,8 @@ const S_IFREG = 0o100000;
 const S_IFLNK = 0o120000;
 /** Zipping a large game can take a while; this only stops a ditto that hangs. */
 const ZIP_TIMEOUT_MS = 60 * 60 * 1000;
+/** Apple's ditto, by its full path: whatever else is called ditto on PATH isn't run. */
+export const DITTO = '/usr/bin/ditto';
 
 function dosDateTime(d: Date): { time: number; date: number } {
   const year = Math.min(Math.max(d.getFullYear(), 1980), 2107);
@@ -143,9 +143,10 @@ export function writeZip(srcDir: string, zipFile: string, opts: { platform?: Nod
  * a folder named after the zip. On a Mac, Apple's ditto, without extended attributes, resource forks or ACLs: plain
  * `ditto -c -k` stores those as ._ files next to every file, and a Mac app unzipped with `unzip` then fails its
  * signature check ("a sealed resource is missing or invalid"). A signed Mac app doesn't need them (its signature is
- * in the bundle). Elsewhere, writeZip. Throws an Error with the reason.
+ * in the bundle). ditto is stopped with Gameshipper (Ctrl+C, SIGTERM, an MCP cancel). Elsewhere, writeZip. Throws an
+ * Error with the reason. `ditto` replaces Apple's (tests).
  */
-export async function zipFolder(srcDir: string, zipFile: string, opts: { platform?: NodeJS.Platform } = {}): Promise<void> {
+export async function zipFolder(srcDir: string, zipFile: string, opts: { platform?: NodeJS.Platform; ditto?: string } = {}): Promise<void> {
   const platform = opts.platform ?? process.platform;
   fs.rmSync(zipFile, { force: true });
   fs.mkdirSync(path.dirname(zipFile), { recursive: true });
@@ -153,24 +154,26 @@ export async function zipFolder(srcDir: string, zipFile: string, opts: { platfor
     writeZip(srcDir, zipFile, { platform });
     return;
   }
-  try {
-    await execFileAsync('ditto', ['-c', '-k', '--norsrc', '--noextattr', '--noacl', srcDir, zipFile], { timeout: ZIP_TIMEOUT_MS });
-  } catch (e) {
-    fs.rmSync(zipFile, { force: true });
-    const err = e as Error & { stderr?: string };
-    throw new Error(`ditto failed: ${(err.stderr || err.message).trim()}`);
-  }
+  const args = ['-c', '-k', '--norsrc', '--noextattr', '--noacl', srcDir, zipFile];
+  const r = await runExternal(toolCommand(opts.ditto ?? DITTO, { ...process.env }), args, { timeoutMs: ZIP_TIMEOUT_MS });
+  if (r.exitCode === 0) return;
+  fs.rmSync(zipFile, { force: true });
+  const why =
+    r.spawnError ??
+    (r.timedOut ? `it didn't finish in ${ZIP_TIMEOUT_MS / 60_000} minutes` : outputTail(r.output) || (r.exitCode === null ? 'it was stopped' : `it exited with code ${r.exitCode}`));
+  throw new Error(`ditto failed: ${why}`);
 }
 
 /**
  * Unpacks a zip (butler's, SteamCMD's for Windows) into destDir, keeping file modes. Refuses entries that would land
- * outside destDir. Throws an Error with the reason.
+ * outside destDir, and symbolic links (neither tool has any). Throws an Error with the reason.
  */
 export function unzipTo(zip: Buffer, destDir: string): void {
   const root = path.resolve(destDir);
   for (const entry of readZipEntries(zip)) {
     const target = path.resolve(root, entry.name);
     if (target !== root && !target.startsWith(root + path.sep)) throw new Error(`${entry.name} would land outside the folder`);
+    if (entry.unixMode !== null && (entry.unixMode & 0o170000) === S_IFLNK) throw new Error(`${entry.name} is a symbolic link`);
     if (entry.name.endsWith('/')) {
       fs.mkdirSync(target, { recursive: true });
       continue;
