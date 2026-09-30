@@ -51,17 +51,20 @@ describe.skipIf(process.platform === 'win32')('stopWithGameshipper with quitGrac
   /**
    * A game that starts a helper in its process group, then on SIGTERM takes `quitMs` to save and exit
    * (or ignores SIGTERM when `quitMs` is null). Prints "ready" once its SIGTERM handler is in place.
+   * It exits by letting its event loop run out (the helper doesn't hold it), never with process.exit(): it inherits
+   * NODE_USE_SYSTEM_CA=1, and Node 24.7 can crash (SIGSEGV) exiting while it still reads the system certificates.
    */
   function game(quitMs: number | null) {
     const dir = makeTmpDir();
     const code = `
       const fs = require('fs');
       const helper = require('child_process').spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: 'ignore' });
+      helper.unref();
       fs.writeFileSync('helper.pid', String(helper.pid));
+      const running = setInterval(() => {}, 1000);
       process.on('SIGTERM', () => {
-        ${quitMs === null ? '' : `setTimeout(() => { fs.writeFileSync('saved.txt', 'yes'); process.exit(0); }, ${quitMs});`}
+        ${quitMs === null ? '' : `setTimeout(() => { fs.writeFileSync('saved.txt', 'yes'); clearInterval(running); }, ${quitMs});`}
       });
-      setInterval(() => {}, 1000);
       console.log('ready');
     `;
     const child = spawn(process.execPath, ['-e', code], { cwd: dir, detached: true, stdio: ['ignore', 'pipe', 'ignore'] });

@@ -72,7 +72,9 @@ noteIfTsTestsSkipped('the CLI process tests');
 
 /**
  * A stand-in for Electron (the runner uses it when GS_TEST_ELECTRON is set): it says when it's running,
- * and on SIGTERM takes a moment to save before it quits.
+ * and on SIGTERM takes a moment to save before it quits. It quits by letting its event loop run out, never with
+ * process.exit(): it inherits NODE_USE_SYSTEM_CA=1, and Node 24.7 can crash (SIGSEGV) exiting while it still reads
+ * the system certificates.
  */
 function fakeElectron(): string {
   const file = path.join(makeTmpDir(), 'electron');
@@ -83,9 +85,9 @@ const fs = require('fs');
 const path = require('path');
 const dir = process.env.GAMESHIPPER_USER_DATA;
 fs.mkdirSync(dir, { recursive: true });
-process.on('SIGTERM', () => setTimeout(() => { fs.writeFileSync(path.join(dir, 'saved.txt'), 'yes'); process.exit(0); }, 200));
+const running = setInterval(() => {}, 1000);
+process.on('SIGTERM', () => setTimeout(() => { fs.writeFileSync(path.join(dir, 'saved.txt'), 'yes'); clearInterval(running); }, 200));
 fs.writeFileSync(path.join(dir, 'running.txt'), '');
-setInterval(() => {}, 1000);
 `,
   );
   fs.chmodSync(file, 0o755);

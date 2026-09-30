@@ -448,14 +448,14 @@ describe('runBuildCommand', () => {
 
   it('BUILD_COMMAND_FAILED on a non-zero exit', async () => {
     const dir = makeTmpDir();
-    const run = runBuildCommand(testCtx(dir), cfg({ game: { buildCommand: 'node -e "process.exit(3)"', outputDir: 'dist' } }));
+    const run = runBuildCommand(testCtx(dir), cfg({ game: { buildCommand: 'node -e "process.exitCode = 3"', outputDir: 'dist' } }));
     await expect(run).rejects.toBeInstanceOf(GsFailure);
     await expect(run).rejects.toMatchObject({ error: { code: 'BUILD_COMMAND_FAILED' } });
   });
 
   it('BUILD_COMMAND_FAILED includes the last 20 lines of output', async () => {
     const dir = makeTmpDir();
-    const command = `node -e "for (let i = 1; i <= 30; i++) console.log('line ' + i); process.exit(3)"`;
+    const command = `node -e "for (let i = 1; i <= 30; i++) console.log('line ' + i); process.exitCode = 3"`;
     const error = await runBuildCommand(testCtx(dir), cfg({ game: { buildCommand: command, outputDir: 'dist' } })).catch((e) => e);
     expect(error).toBeInstanceOf(GsFailure);
     const { message } = (error as GsFailure).error;
@@ -466,7 +466,7 @@ describe('runBuildCommand', () => {
   it('BUILD_COMMAND_FAILED includes stderr output', async () => {
     const dir = makeTmpDir();
     // Built at runtime so the command text itself doesn't contain the expected output.
-    const command = `node -e "console.error(['Cannot', 'find', 'module', 'vite'].join(' ')); process.exit(1)"`;
+    const command = `node -e "console.error(['Cannot', 'find', 'module', 'vite'].join(' ')); process.exitCode = 1"`;
     await expect(runBuildCommand(testCtx(dir), cfg({ game: { buildCommand: command, outputDir: 'dist' } }))).rejects.toMatchObject({
       error: { code: 'BUILD_COMMAND_FAILED', message: expect.stringContaining('Cannot find module vite') },
     });
@@ -542,7 +542,7 @@ describe('runBuildCommand', () => {
       await pending;
       expect(counts()).toEqual(before);
       await run('node -e "0"');
-      await run('node -e "process.exit(2)"');
+      await run('node -e "process.exitCode = 2"');
       expect(counts()).toEqual(before);
     } finally {
       killIfAlive(readPid(path.join(dir, 'pid.txt')));

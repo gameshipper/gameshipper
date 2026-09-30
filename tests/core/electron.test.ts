@@ -20,7 +20,10 @@ async function waitFor(check: () => boolean, ms = 5000): Promise<boolean> {
   return check();
 }
 
-/** An electron package folder whose install.js runs `installer` (CommonJS) instead of downloading Electron. */
+/**
+ * An electron package folder whose install.js runs `installer` (CommonJS) instead of downloading Electron. Installers
+ * here fail with process.exitCode, never process.exit(): with NODE_USE_SYSTEM_CA=1 Node 24.7 can crash exiting early.
+ */
 function fakeElectronPackage(installer: string): string {
   const pkgDir = makeTmpDir();
   fs.writeFileSync(path.join(pkgDir, 'package.json'), JSON.stringify({ name: 'electron', version: '0.0.0-test' }));
@@ -52,12 +55,12 @@ describe('electronBinary', () => {
     // Signals and timers are handled during the download.
     expect(ticks).toBeGreaterThan(5);
     // Installed now: no second download.
-    fs.writeFileSync(path.join(pkgDir, 'install.js'), 'process.exit(1)');
+    fs.writeFileSync(path.join(pkgDir, 'install.js'), 'process.exitCode = 1;');
     expect(await electronBinary({ pkgDir })).toBe(path.join(pkgDir, 'dist', 'electron'));
   });
 
   it("ELECTRON_INSTALL_FAILED with the installer's last output when the download fails", async () => {
-    const pkgDir = fakeElectronPackage("console.error('RequestError: getaddrinfo ENOTFOUND github.com'); process.exit(1);");
+    const pkgDir = fakeElectronPackage("console.error('RequestError: getaddrinfo ENOTFOUND github.com'); process.exitCode = 1;");
     await expect(electronBinary({ pkgDir })).rejects.toMatchObject({
       error: { code: 'ELECTRON_INSTALL_FAILED', message: expect.stringContaining('ENOTFOUND github.com'), fix: expect.stringContaining('internet') },
     });

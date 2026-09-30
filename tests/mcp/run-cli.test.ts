@@ -23,11 +23,15 @@ function fakeCli(body: string): string {
   return file;
 }
 
-/** A CLI that runs until it's stopped, and on SIGTERM prints INTERRUPTED like the real one. */
+/**
+ * A CLI that runs until it's stopped, and on SIGTERM prints INTERRUPTED like the real one. It exits by letting its event
+ * loop run out, never with process.exit(): with NODE_USE_SYSTEM_CA=1 Node 24.7 can crash exiting while it still reads
+ * the system certificates, and the real CLI waits for that read (exitProcess).
+ */
 const SLOW = `
-  process.on('SIGTERM', () => { process.stdout.write(JSON.stringify(${JSON.stringify(INTERRUPTED)}, null, 2) + '\\n'); process.exit(143); });
+  const running = setInterval(() => {}, 1000);
+  process.on('SIGTERM', () => { process.stdout.write(JSON.stringify(${JSON.stringify(INTERRUPTED)}, null, 2) + '\\n'); process.exitCode = 143; clearInterval(running); });
   process.stderr.write('started\\n');
-  setInterval(() => {}, 1000);
 `;
 
 describe('runCli', () => {
@@ -102,7 +106,7 @@ describe('runCli', () => {
       // Like electron.ts's old spawnSync of Electron's installer: the CLI can't handle SIGTERM until the installer ends.
       const installer = `require('fs').writeFileSync(${JSON.stringify(pidFile)}, String(process.pid)); setInterval(() => {}, 1000);`;
       const bin = fakeCli(`
-        process.on('SIGTERM', () => process.exit(143));
+        process.on('SIGTERM', () => { process.exitCode = 143; });
         (await import('node:child_process')).spawnSync(process.execPath, ['-e', ${JSON.stringify(installer)}], { stdio: 'ignore' });
       `);
       const controller = new AbortController();
