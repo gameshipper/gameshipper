@@ -4,6 +4,7 @@ import { Client } from '@modelcontextprotocol/client';
 import { StdioClientTransport } from '@modelcontextprotocol/client/stdio';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { HOST_TARGET, readEvents, ROOT } from '../helpers/built-cli.js';
+import { FAKE_STEAMCMD, fakeProject } from '../helpers/fake-builds.js';
 import { makeSolidPng } from '../helpers/png.js';
 import { makeTmpDir, writeFiles } from '../helpers/tmp.js';
 
@@ -39,6 +40,8 @@ describe('gameshipper mcp, driven by a real MCP client', () => {
     writeFiles(dir, { 'icon.png': makeSolidPng(1024, 1024) });
     // The SDK passes a server only a few safe variables by default; the tests' GAMESHIPPER_* settings must reach it.
     const env = Object.fromEntries(Object.entries(process.env).filter((e): e is [string, string] => e[1] !== undefined));
+    // publish gets the fake SteamCMD, with no saved login.
+    Object.assign(env, { GAMESHIPPER_STEAMCMD: FAKE_STEAMCMD, FAKE_STEAMCMD_STATE: makeTmpDir('gs-mcp-steamcmd-') });
     transport = new StdioClientTransport({ command: process.execPath, args: [path.join(ROOT, 'bin', 'gameshipper.js'), 'mcp', '--dir', dir], env, stderr: 'inherit' });
     client = new Client({ name: 'gameshipper-integration-test', version: '1.0.0' });
     await client.connect(transport);
@@ -55,7 +58,7 @@ describe('gameshipper mcp, driven by a real MCP client', () => {
 
   it('lists one tool per command, check included, and tells agents never to ask for passwords', async () => {
     const names = (await client.listTools()).tools.map((t) => t.name);
-    expect(names).toEqual(['gameshipper_init', 'gameshipper_play', 'gameshipper_build', 'gameshipper_check', 'gameshipper_status', 'gameshipper_ci_init']);
+    expect(names).toEqual(['gameshipper_init', 'gameshipper_play', 'gameshipper_build', 'gameshipper_check', 'gameshipper_publish', 'gameshipper_status', 'gameshipper_ci_init']);
     expect(client.getInstructions()).toContain('Never ask the user for passwords');
   });
 
@@ -107,6 +110,13 @@ describe('gameshipper mcp, driven by a real MCP client', () => {
 
     const after = await call('gameshipper_status');
     expect(Object.keys(after.result.data.lastRuns).sort()).toEqual(['build', 'check', 'ci', 'init', 'play']);
+  });
+
+  it('publish never prompts: a missing Steam login is a tool error that says what the human runs', async () => {
+    const p = fakeProject({ steam: { appId: 1234560, user: 'builder' } });
+    const r = await call('gameshipper_publish', { dir: p.dir, dryRun: true });
+    expect(r.isError).toBe(true);
+    expect(r.result.errors[0]).toMatchObject({ code: 'STEAM_LOGIN_REQUIRED', fix: expect.stringContaining('npx gameshipper publish --to steam --dry-run --steam-user builder') });
   });
 
   it('returns failures as tool errors with their fix, and rejects inputs a command does not take', async () => {

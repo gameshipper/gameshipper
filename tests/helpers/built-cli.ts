@@ -1,4 +1,4 @@
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -29,6 +29,30 @@ export function cli(args: string[], cwd: string, env: NodeJS.ProcessEnv = {}): {
     throw new Error(`gameshipper ${args.join(' ')} printed non-JSON output in ${cwd}:\n${r.stdout}\n${r.stderr}`);
   }
   return { code: r.status, result };
+}
+
+/**
+ * Like `cli`, but without blocking this process: a fake server the test runs (a fake GitHub API) must keep answering
+ * while the CLI talks to it.
+ */
+export function cliAsync(args: string[], cwd: string, env: NodeJS.ProcessEnv = {}): Promise<{ code: number | null; result: any }> {
+  return new Promise((resolve, reject) => {
+    const child = spawn(process.execPath, [CLI, ...args, '--json'], { cwd, env: { ...process.env, ...env }, stdio: ['ignore', 'pipe', 'pipe'] });
+    let stdout = '';
+    let stderr = '';
+    child.stdout.setEncoding('utf8').on('data', (d: string) => (stdout += d));
+    child.stderr.setEncoding('utf8').on('data', (d: string) => (stderr += d));
+    const timer = setTimeout(() => child.kill('SIGKILL'), CLI_TIMEOUT_MS);
+    child.on('error', reject);
+    child.on('close', (code) => {
+      clearTimeout(timer);
+      try {
+        resolve({ code, result: JSON.parse(stdout) });
+      } catch {
+        reject(new Error(`gameshipper ${args.join(' ')} printed non-JSON output in ${cwd}:\n${stdout}\n${stderr}`));
+      }
+    });
+  });
 }
 
 export interface LoggedEvent {
