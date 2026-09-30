@@ -1,7 +1,8 @@
 import { spawn } from 'node:child_process';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { describe, expect, it } from 'vitest';
+import { setImmediate as nextTurn, setTimeout as sleep } from 'node:timers/promises';
+import { describe, expect, it, vi } from 'vitest';
 import { parseConfig } from '../../src/core/config/load.js';
 import { runBuildCommand, stageGame } from '../../src/core/prepare/stage.js';
 import { GsFailure } from '../../src/core/result.js';
@@ -35,8 +36,9 @@ const readPid = (file: string): number | null => {
   }
 };
 
+/** Polls with node:timers/promises, which keeps real time while a test fakes setTimeout. */
 async function waitFor(check: () => boolean, ms = 5000): Promise<boolean> {
-  for (const end = Date.now() + ms; Date.now() < end; await new Promise((r) => setTimeout(r, 50))) {
+  for (const end = Date.now() + ms; Date.now() < end; await sleep(50)) {
     if (check()) return true;
   }
   return check();
@@ -474,18 +476,35 @@ describe('runBuildCommand', () => {
 
   it('BUILD_COMMAND_TIMEOUT stops a command that never exits, including its child processes', async () => {
     const dir = makeTmpDir();
-    const started = Date.now();
+    const pidFile = path.join(dir, 'pid.txt');
+    // The test moves the build's clock, and only once the command's node process is running: under load it can take
+    // longer than the timeout to start, and then there'd be no child process to check.
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
     try {
       const run = runBuildCommand(testCtx(dir), cfg({ game: { buildCommand: NEVER_EXITS, outputDir: 'dist' } }), { timeoutMs: 1000 });
+      let settled = false;
+      void run.then(
+        () => (settled = true),
+        () => (settled = true),
+      );
+      expect(await waitFor(() => readPid(pidFile) !== null, 20_000)).toBe(true);
+      const pid = readPid(pidFile)!;
+      // Still running just before the timeout,
+      vi.advanceTimersByTime(999);
+      await nextTurn();
+      expect(settled).toBe(false);
+      expect(alive(pid)).toBe(true);
+      // and stopped at it: the command, and the node process it started.
+      const fired = Date.now();
+      vi.advanceTimersByTime(1);
       await expect(run).rejects.toMatchObject({
-        error: { code: 'BUILD_COMMAND_TIMEOUT', fix: expect.stringContaining('npm run dev') },
+        error: { code: 'BUILD_COMMAND_TIMEOUT', message: expect.stringContaining('was still running after 1 second,'), fix: expect.stringContaining('npm run dev') },
       });
-      expect(Date.now() - started).toBeLessThan(10_000);
-      const pid = readPid(path.join(dir, 'pid.txt'));
-      expect(pid).not.toBeNull();
-      expect(await waitFor(() => !alive(pid!))).toBe(true);
+      expect(Date.now() - fired).toBeLessThan(10_000);
+      expect(await waitFor(() => !alive(pid))).toBe(true);
     } finally {
-      killIfAlive(readPid(path.join(dir, 'pid.txt')));
+      vi.useRealTimers();
+      killIfAlive(readPid(pidFile));
     }
   });
 
@@ -535,16 +554,21 @@ describe('runBuildCommand', () => {
     const before = counts();
     const run = (buildCommand: string, timeoutMs?: number) =>
       runBuildCommand(testCtx(dir), cfg({ game: { buildCommand, outputDir: 'dist' } }), { timeoutMs }).catch(() => undefined);
+    // As above, the timeout fires only once the command is running.
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
     try {
       const pending = run(NEVER_EXITS, 3000);
-      expect(await waitFor(() => readPid(path.join(dir, 'pid.txt')) !== null)).toBe(true);
+      expect(await waitFor(() => readPid(path.join(dir, 'pid.txt')) !== null, 20_000)).toBe(true);
       expect(counts()).toEqual(before.map((n) => n + 1));
+      vi.advanceTimersByTime(3000);
+      vi.useRealTimers();
       await pending;
       expect(counts()).toEqual(before);
       await run('node -e "0"');
       await run('node -e "process.exitCode = 2"');
       expect(counts()).toEqual(before);
     } finally {
+      vi.useRealTimers();
       killIfAlive(readPid(path.join(dir, 'pid.txt')));
     }
   });
