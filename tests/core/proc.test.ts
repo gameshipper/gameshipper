@@ -2,7 +2,7 @@ import { spawn } from 'node:child_process';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
-import { childrenStopped, releaseAfterExit, stopWithGameshipper } from '../../src/core/proc.js';
+import { childrenStopped, releaseAfterExit, stopWithGameshipper, waitForSystemCaLoad } from '../../src/core/proc.js';
 import { makeTmpDir } from '../helpers/tmp.js';
 
 const alive = (pid: number): boolean => {
@@ -132,6 +132,34 @@ describe.skipIf(process.platform === 'win32')('stopWithGameshipper with quitGrac
     } finally {
       process.off('SIGINT', cli);
       g.child.kill('SIGKILL');
+    }
+  });
+});
+
+describe('waitForSystemCaLoad', () => {
+  it("reads the system certificate store (waiting for Node's own read of it) only when Node reads it at start-up", () => {
+    const getCACertificates = vi.fn(() => []);
+    const spy = vi.spyOn(process, 'getBuiltinModule').mockImplementation(((id: string) => (id === 'node:tls' ? { getCACertificates } : undefined)) as typeof process.getBuiltinModule);
+    const env = { NODE_USE_SYSTEM_CA: process.env.NODE_USE_SYSTEM_CA, NODE_OPTIONS: process.env.NODE_OPTIONS };
+    try {
+      for (const [ca, options, reads] of [
+        ['1', '', true],
+        ['', '--use-system-ca', true],
+        ['', '--max-old-space-size=4096', false],
+        ['0', '', false],
+      ] as const) {
+        getCACertificates.mockClear();
+        process.env.NODE_USE_SYSTEM_CA = ca;
+        process.env.NODE_OPTIONS = options;
+        waitForSystemCaLoad();
+        expect(getCACertificates.mock.calls, `${ca} ${options}`).toEqual(reads ? [['system']] : []);
+      }
+    } finally {
+      spy.mockRestore();
+      for (const [k, v] of Object.entries(env)) {
+        if (v === undefined) delete process.env[k];
+        else process.env[k] = v;
+      }
     }
   });
 });

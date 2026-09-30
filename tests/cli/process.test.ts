@@ -223,6 +223,32 @@ describe.skipIf(process.platform === 'win32' || !canRunTs)('the CLI process', ()
     }
   });
 
+  it('a signal as the CLI starts never crashes Node, even while Node reads the system certificate store', async () => {
+    // With NODE_USE_SYSTEM_CA=1, Node 24 reads the OS's certificates on a thread as it starts, and process.exit()
+    // during that read crashed it with SIGSEGV (about 1 run in 15 here), so a signal in the CLI's first moments
+    // ended without the INTERRUPTED Result or exit code: the "still loading" tests above failed now and then.
+    // Signalled from inside, before any await, the exit lands in that window every time.
+    const script = [
+      `import { start } from ${JSON.stringify(new URL('../../bin/start.js', import.meta.url).href)};`,
+      "process.exitCode = await start(['status', '--json'], async () => {",
+      '  setTimeout(() => {}, 5000);',
+      "  process.kill(process.pid, 'SIGINT');",
+      '  return new Promise(() => {});',
+      '});',
+    ].join('\n');
+    const once = () =>
+      new Promise<{ code: number | null; signal: NodeJS.Signals | null; stdout: string }>((resolve) => {
+        const child = spawn(process.execPath, ['--input-type=module', '-e', script], { stdio: ['ignore', 'pipe', 'ignore'], env: { ...process.env, NODE_USE_SYSTEM_CA: '1' } });
+        let stdout = '';
+        child.stdout.setEncoding('utf8').on('data', (d: string) => (stdout += d));
+        child.on('close', (code, signal) => resolve({ code, signal, stdout }));
+      });
+    const runs: Array<{ code: number | null; signal: NodeJS.Signals | null; stdout: string }> = [];
+    for (let batch = 0; batch < 8; batch++) runs.push(...(await Promise.all(Array.from({ length: 8 }, once))));
+    expect(runs.filter((r) => r.code !== 130).map((r) => r.signal ?? r.code)).toEqual([]);
+    for (const r of runs) expect(JSON.parse(r.stdout)).toMatchObject({ errors: [{ code: 'INTERRUPTED' }] });
+  });
+
   it('a signal that arrives while loading blocks the process is handed to the CLI, not dropped', async () => {
     const cli = startCli(['status', '--json', '--dir', makeTmpDir()], 'busy-load');
     try {

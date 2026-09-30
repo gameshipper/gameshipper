@@ -59,6 +59,28 @@ export function releaseAfterExit(child: ChildProcess, platform: NodeJS.Platform 
   child.stderr?.destroy();
 }
 
+/**
+ * With NODE_USE_SYSTEM_CA=1 (or --use-system-ca), Node reads the OS's certificate store on a thread while it starts,
+ * and a process.exit() during that read crashes Node 24 (SIGSEGV in OpenSSL's cleanup), so the exit code is lost.
+ * Asking for the store waits for that thread (about 30 ms). bin/start.js has its own copy: it runs before this loads.
+ */
+export function waitForSystemCaLoad(): void {
+  const flags = [...process.execArgv, ...(process.env.NODE_OPTIONS ?? '').split(/\s+/)];
+  if (process.env.NODE_USE_SYSTEM_CA !== '1' && !flags.includes('--use-system-ca')) return;
+  try {
+    // getCACertificates is missing before Node 22.15, which also doesn't read the store on a thread.
+    process.getBuiltinModule('node:tls').getCACertificates?.('system');
+  } catch {
+    // Exiting matters more than the certificates.
+  }
+}
+
+/** process.exit(), once it can't crash Node (see waitForSystemCaLoad). */
+export function exitProcess(code: number): never {
+  waitForSystemCaLoad();
+  return process.exit(code);
+}
+
 /** How long an interactive game gets to quit on Ctrl+C (finishing its saves) before it's killed. */
 export const QUIT_GRACE_MS = 3000;
 
@@ -93,7 +115,7 @@ export function stopWithGameshipper(child: ChildProcess, opts: StopOptions = {})
     try {
       process.kill(process.pid, signal);
     } catch {
-      process.exit(128 + (os.constants.signals[signal] ?? 0));
+      exitProcess(128 + (os.constants.signals[signal] ?? 0));
     }
   };
   /** Sends SIGTERM, then kills the tree when the child exits (its helpers) or the grace period ends. */

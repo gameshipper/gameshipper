@@ -5,6 +5,24 @@ import * as os from 'node:os';
 
 const SIGNALS = ['SIGINT', 'SIGTERM', 'SIGHUP'];
 
+/**
+ * process.exit(), once it can't crash Node. With NODE_USE_SYSTEM_CA=1 (or --use-system-ca), Node reads the OS's
+ * certificate store on a thread while it starts, and exiting during that read crashes Node 24 (SIGSEGV), losing the
+ * exit code: exactly when a signal stops the CLI as it loads. Asking for the store waits for that thread (~30 ms).
+ * A copy of src/core/proc.ts exitProcess, which can't be imported before the CLI has loaded.
+ */
+function exitProcess(code) {
+  const flags = [...process.execArgv, ...(process.env.NODE_OPTIONS ?? '').split(/\s+/)];
+  if (process.env.NODE_USE_SYSTEM_CA === '1' || flags.includes('--use-system-ca')) {
+    try {
+      process.getBuiltinModule('node:tls').getCACertificates?.('system');
+    } catch {
+      // Exiting matters more than the certificates.
+    }
+  }
+  process.exit(code);
+}
+
 /** As the CLI decides it: --json, or --json=<anything but false>. */
 const wantsJson = (argv) => argv.some((a) => a === '--json' || (a.startsWith('--json=') && a.toLowerCase() !== '--json=false'));
 
@@ -17,7 +35,7 @@ export async function start(argv, loadMain) {
   const onSignal = (signal) => {
     const code = 128 + (os.constants.signals[signal] ?? 0);
     // A second signal while the first is being reported: stop now.
-    if (stopping) process.exit(code);
+    if (stopping) exitProcess(code);
     stopping = true;
     const message = `Stopped by ${signal} before finishing.`;
     const fix = "Run the command again when you're ready.";
@@ -25,11 +43,11 @@ export async function start(argv, loadMain) {
       ? `${JSON.stringify({ ok: false, errors: [{ code: 'INTERRUPTED', message, fix }], warnings: [] }, null, 2)}\n`
       : `✗ INTERRUPTED: ${message} ${fix}\n`;
     process.exitCode = code;
-    setTimeout(() => process.exit(code), 2000);
+    setTimeout(() => exitProcess(code), 2000);
     try {
-      process.stdout.write(text, () => process.exit(code));
+      process.stdout.write(text, () => exitProcess(code));
     } catch {
-      process.exit(code);
+      exitProcess(code);
     }
   };
   for (const signal of SIGNALS) process.on(signal, onSignal);

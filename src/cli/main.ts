@@ -13,7 +13,7 @@ import { createCtx, type Ctx } from '../core/context.js';
 import { checkProjectDir } from '../core/fsutil.js';
 import { bundleIdProblem } from '../core/mobile/bundle-id.js';
 import { parseScreenshotTimes, runPlay, screenshotRunSeconds, type PlayData } from '../core/play.js';
-import { childrenStopped, QUIT_GRACE_MS } from '../core/proc.js';
+import { childrenStopped, exitProcess, QUIT_GRACE_MS } from '../core/proc.js';
 import { capture, errorDetails, fail, gsError, internalError, ok, type GsError, type Result } from '../core/result.js';
 import { saveLastRun } from '../core/runs.js';
 import { getStatus } from '../core/status.js';
@@ -472,12 +472,12 @@ function crash(e: unknown, io: CliIO, run: RunState): number {
  */
 function exitAfterWriting(text: string, code: number): void {
   process.exitCode = code;
-  const backstop = setTimeout(() => process.exit(code), 2000 + QUIT_GRACE_MS);
+  const backstop = setTimeout(() => exitProcess(code), 2000 + QUIT_GRACE_MS);
   // Runs after the signal's other listeners (like the one asking the game to quit), so it waits for them.
   const exit = (): void => {
     void childrenStopped().then(() => {
       clearTimeout(backstop);
-      process.exit(code);
+      exitProcess(code);
     });
   };
   try {
@@ -499,7 +499,7 @@ function watchProcess(run: RunState): () => void {
   const onSignal = (signal: NodeJS.Signals): void => {
     const code = 128 + (os.constants.signals[signal] ?? 0);
     // A second signal while the result is being written: stop now.
-    if (run.done) process.exit(run.exitCode ?? code);
+    if (run.done) exitProcess(run.exitCode ?? code);
     run.done = true;
     run.exitCode = code;
     // Ctrl+C is one of the ways a person ends an interactive play session, not a failed play. Before the
