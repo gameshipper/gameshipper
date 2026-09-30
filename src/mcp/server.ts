@@ -4,8 +4,9 @@ import type { Readable, Writable } from 'node:stream';
 import { McpServer } from '@modelcontextprotocol/server';
 import { serveStdio, StdioServerTransport } from '@modelcontextprotocol/server/stdio';
 import { z } from 'zod';
+import { realOrSelf } from '../core/prepare/stage.js';
 import { exitProcess } from '../core/proc.js';
-import { errorDetails } from '../core/result.js';
+import { errorDetails, type Result } from '../core/result.js';
 import { GAMESHIPPER_VERSION } from '../core/version.js';
 import { createProgress } from './progress.js';
 import { runCli, stopAllRuns, type RunCli } from './run-cli.js';
@@ -51,19 +52,37 @@ export function toolArgs(tool: McpTool, input: ToolInput, dir: string, verbose: 
 
 /**
  * Runs one call at a time per game folder. Agents call tools in parallel, and two commands on one folder (play and
- * build, say) would overwrite each other's files in .gameshipper/ and out/.
+ * build, say) would overwrite each other's files in .gameshipper/ and out/. A folder is known by its real path, so
+ * a link to it or another spelling of it (/var and /private/var, other letter case on macOS) shares its lock.
+ * `onWait` is called at once when the call has to wait for another.
  */
-export function createFolderLock(): <T>(dir: string, fn: () => Promise<T>) => Promise<T> {
+export function createFolderLock(): <T>(dir: string, fn: () => Promise<T>, onWait?: () => void) => Promise<T> {
   const tails = new Map<string, Promise<unknown>>();
-  return (dir, fn) => {
-    const call = (tails.get(dir) ?? Promise.resolve()).then(fn, fn);
+  return (dir, fn, onWait) => {
+    const key = realOrSelf(dir);
+    const previous = tails.get(key);
+    if (previous) onWait?.();
+    const call = (previous ?? Promise.resolve()).then(fn, fn);
     const tail = call.catch(() => undefined);
-    tails.set(dir, tail);
+    tails.set(key, tail);
     void tail.then(() => {
-      if (tails.get(dir) === tail) tails.delete(dir);
+      if (tails.get(key) === tail) tails.delete(key);
     });
     return call;
   };
+}
+
+/**
+ * The Result as a tool returns it. A smoke run's summary leaves out its list of events (`eventsLeftOut` counts
+ * them): every problem in it is already in errors and warnings, and data.smoke.eventsLog has them all, so a noisy
+ * game's result stays well under what an agent's tool output can hold.
+ */
+export function resultForAgent(result: Result<unknown>): Result<unknown> {
+  const data = result.data as { smoke?: { summary?: { events?: unknown } } } | undefined;
+  const summary = data?.smoke?.summary;
+  if (!summary || !Array.isArray(summary.events)) return result;
+  const { events, ...rest } = summary;
+  return { ...result, data: { ...data, smoke: { ...data.smoke, summary: { eventsLeftOut: events.length, ...rest } } } };
 }
 
 export function createMcpServer(opts: McpOptions): McpServer {
@@ -89,9 +108,12 @@ export function createMcpServer(opts: McpOptions): McpServer {
             : createProgress((update) => ctx.mcpReq.notify({ method: 'notifications/progress', params: { progressToken: token, ...update } }));
         const dir = typeof input.dir === 'string' ? path.resolve(opts.projectDir, input.dir) : opts.projectDir;
         const args = toolArgs(tool, input, dir, progress !== undefined);
-        const exec = () => run(args, { cwd: opts.projectDir, onLine: progress?.line, signal: ctx.mcpReq.signal });
+        const exec = () => {
+          progress?.running();
+          return run(args, { cwd: opts.projectDir, onLine: progress?.line, signal: ctx.mcpReq.signal });
+        };
         try {
-          const result = tool.readOnly ? await exec() : await lock(dir, exec);
+          const result = resultForAgent(tool.readOnly ? await exec() : await lock(dir, exec, progress?.waiting));
           return {
             content: [{ type: 'text' as const, text: JSON.stringify(result) }],
             structuredContent: result as unknown as Record<string, unknown>,
@@ -151,20 +173,32 @@ function exitWithRuns(log: (line: string) => void): () => void {
 }
 
 /**
- * Serves the tools over stdio until the client closes its end (stdin), then stops any command still running and
- * resolves with exit code 0. Only MCP messages are written to `output`.
+ * Serves the tools over stdio until the client closes its end (stdin) or the transport closes itself (a message past
+ * its 10 MiB limit, say), then stops any command still running and resolves with exit code 0. Only MCP messages are
+ * written to `output`.
  */
 export async function serveMcp(opts: ServeOptions): Promise<number> {
   const log = opts.log ?? ((line: string) => void process.stderr.write(`gameshipper mcp: ${line}\n`));
+  let transportClosed!: () => void;
   const disconnected = new Promise<void>((resolve) => {
+    transportClosed = resolve;
     opts.input.once('end', resolve);
     opts.input.once('close', resolve);
   });
+  /** The SDK's transport, telling serveMcp when it closes: it stops reading stdin then, so stdin may never end. */
+  class Transport extends StdioServerTransport {
+    override async close(): Promise<void> {
+      await super.close();
+      transportClosed();
+    }
+  }
   const unwatch = opts.handleSignals ? exitWithRuns(log) : undefined;
   try {
-    const transport = new StdioServerTransport(opts.input, opts.output);
+    const transport = new Transport(opts.input, opts.output);
     const connection = serveStdio(() => createMcpServer(opts), { transport, onerror: (e) => log(e.message) });
     await disconnected;
+    // A transport that closed itself left stdin open, and reading it would keep the process running.
+    opts.input.destroy();
     // Calls still in flight are cancelled, which stops their commands.
     await connection.close();
     await stopAllRuns();

@@ -14,9 +14,15 @@ export interface ProgressOptions {
 export interface Progress {
   /** A line of the command's log. */
   line(text: string): void;
+  /** The call waits for another command on the same game folder: says so now, and in each update until `running`. */
+  waiting(): void;
+  /** The call's command has started. */
+  running(): void;
   /** Ends the updates; call it when the command is done. */
   stop(): void;
 }
+
+const WAITING = 'Waiting for another Gameshipper command on this folder';
 
 const MAX_MESSAGE = 300;
 
@@ -38,10 +44,12 @@ export function createProgress(send: (update: ProgressUpdate) => Promise<void>, 
       // The client may have gone; progress is best effort.
     });
   };
+  let queued = false;
   const heartbeat = setInterval(() => {
     if (now() - lastSent < heartbeatMs) return;
     count++;
-    emit(`Still running (${Math.round((now() - started) / 1000)} s)…`);
+    const seconds = Math.round((now() - started) / 1000);
+    emit(queued ? `${WAITING} (${seconds} s)…` : `Still running (${seconds} s)…`);
   }, heartbeatMs / 3);
   heartbeat.unref();
   let sentLine = false;
@@ -51,6 +59,14 @@ export function createProgress(send: (update: ProgressUpdate) => Promise<void>, 
       if (sentLine && now() - lastSent < minIntervalMs) return;
       sentLine = true;
       emit(text.length > MAX_MESSAGE ? `${text.slice(0, MAX_MESSAGE)}…` : text);
+    },
+    waiting() {
+      queued = true;
+      count++;
+      emit(`${WAITING} to finish…`);
+    },
+    running() {
+      queued = false;
     },
     stop() {
       clearInterval(heartbeat);

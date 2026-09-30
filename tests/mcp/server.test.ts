@@ -1,3 +1,4 @@
+import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { PassThrough } from 'node:stream';
 import { Client } from '@modelcontextprotocol/client';
@@ -5,9 +6,12 @@ import { InMemoryTransport } from '@modelcontextprotocol/server';
 import { describe, expect, it } from 'vitest';
 import { COMMANDS } from '../../src/cli/help.js';
 import { fail, gsError, ok, type Result } from '../../src/core/result.js';
+import { summaryToIssues, truncateSummary } from '../../src/core/smoke.js';
 import type { RunCli, RunOptions } from '../../src/mcp/run-cli.js';
 import { createFolderLock, createMcpServer, instructions, serveMcp } from '../../src/mcp/server.js';
 import { mcpTools } from '../../src/mcp/tools.js';
+import type { DiagEvent } from '../../src/shell/diagnostics.js';
+import { makeTmpDir } from '../helpers/tmp.js';
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -107,6 +111,48 @@ describe('MCP server', () => {
     expect(calls[1].args).not.toContain('--verbose');
   });
 
+  it("tells a call that it's waiting for another command on the same folder", async () => {
+    let release!: () => void;
+    const released = new Promise<void>((resolve) => (release = resolve));
+    let started!: () => void;
+    const firstStarted = new Promise<void>((resolve) => (started = resolve));
+    const run: RunCli = async () => {
+      started();
+      await released;
+      return ok({});
+    };
+    const client = await connect(run);
+    const progress: Array<{ progress: number; message?: string }> = [];
+    const first = client.callTool({ name: 'gameshipper_build', arguments: {} });
+    await firstStarted;
+    const second = client.callTool({ name: 'gameshipper_play', arguments: { smoke: true } }, { onprogress: (p) => void progress.push(p) });
+    await sleep(50);
+    release();
+    await Promise.all([first, second]);
+    expect(progress[0]).toEqual({ progress: 1, message: 'Waiting for another Gameshipper command on this folder to finish…' });
+  });
+
+  it("leaves a smoke run's event list out of the result, so a noisy game's result stays small", async () => {
+    const events: DiagEvent[] = Array.from({ length: 300 }, (_, i) => ({
+      kind: 'console',
+      level: 'error',
+      message: `TypeError: Cannot read properties of undefined (reading 'sprite${i}') ${'at update (main.js) '.repeat(12)}`,
+      source: 'app://game/main.js',
+      line: i + 1,
+    }));
+    const summary = truncateSummary({ events, droppedInfo: 5000 });
+    const eventsLog = '/games/moon/.gameshipper/logs/play-events.jsonl';
+    const { errors, warnings } = summaryToIssues(summary, { seconds: 5, eventsLog });
+    const result = { ok: false, data: { appDir: '/games/moon/.gameshipper/app', smoke: { summary, eventsLog, exitCode: 0 }, screenshots: [] }, errors, warnings };
+    expect(JSON.stringify(result).length).toBeGreaterThan(40_000);
+    const client = await connect(fakeRun(result).run);
+    const r = await client.callTool({ name: 'gameshipper_play', arguments: { smoke: true } });
+    expect(JSON.stringify(r).length).toBeLessThan(20_000);
+    const smoke = (r.structuredContent as any).data.smoke;
+    expect(smoke).toEqual({ summary: { eventsLeftOut: 100, droppedInfo: 5000, truncatedEvents: 200 }, eventsLog, exitCode: 0 });
+    expect((r.structuredContent as any).errors).toEqual(errors);
+  });
+
   it('never runs two commands on the same game folder at once; status never waits', async () => {
     let running = 0;
     let most = 0;
@@ -149,6 +195,35 @@ describe('createFolderLock', () => {
     expect(results).toEqual(['a1', 'a2', 'b1']);
     expect(events.indexOf('a2 start')).toBeGreaterThan(events.indexOf('a1 end'));
     expect(events.indexOf('b1 start')).toBeLessThan(events.indexOf('a1 end'));
+  });
+
+  it('uses one lock for one folder however it is spelled: through a link, or in other letter case', async () => {
+    const root = makeTmpDir();
+    const real = path.join(root, 'Game');
+    fs.mkdirSync(real);
+    const link = path.join(root, 'link');
+    fs.symlinkSync(real, link, 'junction');
+    const spellings = [real, link];
+    // On a disk that ignores letter case (macOS, Windows), "game" is the same folder.
+    if (fs.existsSync(path.join(root, 'game'))) spellings.push(path.join(root, 'game'));
+    const lock = createFolderLock();
+    const events: string[] = [];
+    const waited: string[] = [];
+    await Promise.all(
+      spellings.map((dir, i) =>
+        lock(
+          dir,
+          async () => {
+            events.push(`${i} start`);
+            await sleep(20);
+            events.push(`${i} end`);
+          },
+          () => waited.push(dir),
+        ),
+      ),
+    );
+    expect(events).toEqual(spellings.flatMap((_, i) => [`${i} start`, `${i} end`]));
+    expect(waited).toEqual(spellings.slice(1));
   });
 
   it('keeps going after a call throws', async () => {
@@ -209,5 +284,18 @@ describe('serveMcp', () => {
     expect(await serving).toBe(0);
     expect(aborted).toBe(true);
     expect(io.messages.every((m) => m.jsonrpc === '2.0')).toBe(true);
+  });
+
+  it('also returns once the transport closes itself, as it does past its 10 MiB message limit', async () => {
+    const io = pipes();
+    const logged: string[] = [];
+    const serving = serveMcp({ projectDir: '/games/moon', run: fakeRun(ok({})).run, input: io.input, output: io.output, log: (l) => logged.push(l) });
+    io.send({ id: 1, method: 'initialize', params: { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 't', version: '1' } } });
+    await io.reply(1);
+    // A message with no end: the transport gives up on it and closes, while stdin stays open.
+    io.input.write('x'.repeat(10 * 1024 * 1024 + 1));
+    const outcome = await Promise.race([serving, sleep(5000).then(() => 'still serving')]);
+    expect(outcome).toBe(0);
+    expect(logged.join('\n')).toContain('maximum size');
   });
 });

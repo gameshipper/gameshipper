@@ -33,6 +33,23 @@ describe('createProgress', () => {
     expect(sent[0].message).toHaveLength(301);
   });
 
+  it('says the call is waiting for another command on the same folder, until its command starts', () => {
+    vi.useFakeTimers();
+    const sent: ProgressUpdate[] = [];
+    const p = createProgress(async (u) => void sent.push(u), { heartbeatMs: 3000 });
+    p.waiting();
+    vi.advanceTimersByTime(3100);
+    p.running();
+    vi.advanceTimersByTime(3000);
+    p.stop();
+    expect(sent.map((u) => u.message)).toEqual([
+      'Waiting for another Gameshipper command on this folder to finish…',
+      'Waiting for another Gameshipper command on this folder (3 s)…',
+      'Still running (6 s)…',
+    ]);
+    expect(sent.map((u) => u.progress)).toEqual([1, 2, 3]);
+  });
+
   it('keeps sending while nothing is logged, so a long download does not time the call out', () => {
     vi.useFakeTimers();
     const sent: ProgressUpdate[] = [];

@@ -76,6 +76,19 @@ describe.skipIf(process.platform === 'win32' || !canRunTs)('the mcp process', ()
     }
   });
 
+  it('exits 0 when the transport gives up on a message past its 10 MiB limit, though stdin is still open', async () => {
+    const server = startServer();
+    try {
+      await server.initialize();
+      // Without a newline, the message never ends. Stdin stays open: only the transport closes.
+      server.child.stdin.write('x'.repeat(10 * 1024 * 1024 + 1));
+      expect(await server.closed).toEqual({ code: 0, signal: null });
+      expect(server.stderr()).toContain('maximum size');
+    } finally {
+      server.child.kill('SIGKILL');
+    }
+  });
+
   it.each([
     ['SIGINT', 130],
     ['SIGTERM', 143],
