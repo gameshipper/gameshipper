@@ -9,6 +9,15 @@ import { makeTmpDir, writeFiles } from '../helpers/tmp.js';
 
 const config = parseConfig({ name: 'Moon Game', version: '1.0.0' }).data!;
 
+const alive = (pid: number): boolean => {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+};
+
 async function waitFor(check: () => boolean, ms = 10_000): Promise<boolean> {
   for (const end = Date.now() + ms; Date.now() < end; await new Promise((r) => setTimeout(r, 50))) {
     if (check()) return true;
@@ -57,20 +66,38 @@ describe('play --detach', () => {
     const dir = makeTmpDir();
     const shellDir = makeTmpDir();
     const marker = path.join(dir, 'game-ran.txt');
+    const go = path.join(dir, 'go.txt');
     writeFiles(dir, { 'index.html': '<html></html>' });
+    // The game waits for go.txt, so it's still running when runPlay returns however slow the machine is. Then it writes
+    // its marker under another name and renames it, so the marker never exists without its contents.
     writeFiles(shellDir, {
-      'main.js': `console.log('detached game says hi'); setTimeout(() => require('fs').writeFileSync(${JSON.stringify(marker)}, process.env.GAMESHIPPER_WINDOWED), 1000);`,
+      'main.js': [
+        "const fs = require('fs');",
+        "console.log('detached game says hi');",
+        'const waiting = setInterval(() => {',
+        `  if (!fs.existsSync(${JSON.stringify(go)})) return;`,
+        '  clearInterval(waiting);',
+        `  fs.writeFileSync(${JSON.stringify(`${marker}.tmp`)}, process.env.GAMESHIPPER_WINDOWED);`,
+        `  fs.renameSync(${JSON.stringify(`${marker}.tmp`)}, ${JSON.stringify(marker)});`,
+        '}, 20);',
+      ].join('\n'),
     });
     const ctx = testCtx(dir);
     const r = await runPlay(ctx, config, { shellDir, detach: true, electronPath: process.execPath });
-    expect(r.errors).toEqual([]);
-    expect(typeof r.data!.pid).toBe('number');
-    expect(r.data!.eventsLog!.startsWith(path.join(dir, '.gameshipper', 'logs'))).toBe(true);
-    expect(fs.existsSync(marker)).toBe(false);
-    expect(await waitFor(() => fs.existsSync(marker))).toBe(true);
-    expect(fs.readFileSync(marker, 'utf8')).toBe('1');
-    // The game's output goes to the run log.
-    expect(await waitFor(() => fs.readFileSync(ctx.logPath, 'utf8').includes('detached game says hi'))).toBe(true);
+    try {
+      expect(r.errors).toEqual([]);
+      expect(typeof r.data!.pid).toBe('number');
+      expect(r.data!.eventsLog!.startsWith(path.join(dir, '.gameshipper', 'logs'))).toBe(true);
+      expect(alive(r.data!.pid!)).toBe(true);
+      fs.writeFileSync(go, '');
+      expect(await waitFor(() => fs.existsSync(marker))).toBe(true);
+      expect(fs.readFileSync(marker, 'utf8')).toBe('1');
+      // The game's output goes to the run log.
+      expect(await waitFor(() => fs.readFileSync(ctx.logPath, 'utf8').includes('detached game says hi'))).toBe(true);
+    } finally {
+      // A game still waiting for go.txt would wait forever.
+      if (r.data?.pid && !fs.existsSync(marker) && alive(r.data.pid)) process.kill(r.data.pid, 'SIGKILL');
+    }
   });
 
   it('USAGE, before anything runs, when combined with a timed run', async () => {
