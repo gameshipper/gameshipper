@@ -1,6 +1,7 @@
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { Writable } from 'node:stream';
 import { parseArgs, type ParseArgsOptionsConfig } from 'node:util';
 import { runBuild } from '../core/build.js';
 import { initCi } from '../core/ci/init.js';
@@ -19,6 +20,7 @@ import { capture, errorDetails, fail, gsError, internalError, ok, type GsError, 
 import { saveLastRun } from '../core/runs.js';
 import { getStatus } from '../core/status.js';
 import { GAMESHIPPER_VERSION } from '../core/version.js';
+import { serveMcp } from '../mcp/server.js';
 import { COMMANDS, commandHelpText, GLOBAL_FLAGS, helpData, helpText, type CommandHelp } from './help.js';
 import { exitCodeFor, renderHuman, renderJson } from './output.js';
 import { createPrompter, type Prompter } from './prompt.js';
@@ -83,6 +85,8 @@ interface RunState {
    * ends such a session with Ctrl+C as often as by closing the window.
    */
   playing?: { data: PlayData; warnings: GsError[] };
+  /** Set while main owns the process (the real CLI): removes its signal and error handlers, for `mcp`, which has its own. */
+  unwatch?: () => void;
 }
 
 const str = (v: string | boolean | undefined) => (typeof v === 'string' ? v : undefined);
@@ -381,6 +385,30 @@ function ciCommand(projectDir: string, values: Values): Outcome {
   return { result, human: ciSummary(result, projectDir) };
 }
 
+/**
+ * `mcp`: serves every command as an MCP tool until the client disconnects. From here on stdout carries only MCP
+ * messages, written through io.write; anything else that writes to stdout still goes to stderr. When main owns the
+ * process, the server takes over its signals: it stops the commands it's running and exits without printing a Result.
+ */
+async function mcpCommand(projectDir: string, io: CliIO, run: RunState): Promise<number> {
+  const handleSignals = run.unwatch !== undefined;
+  run.unwatch?.();
+  run.unwatch = undefined;
+  const output = new Writable({
+    write(chunk: Buffer, _encoding, done) {
+      io.write(chunk.toString('utf8'));
+      done();
+    },
+  });
+  try {
+    return await serveMcp({ projectDir, input: process.stdin, output, handleSignals });
+  } catch (e) {
+    // Never a Result on stdout: the client would read it as a broken message.
+    process.stderr.write(`gameshipper mcp: ${errorDetails(e)}\n`);
+    return 1;
+  }
+}
+
 async function dispatch(argv: string[], io: CliIO, run: RunState): Promise<number> {
   let values: Values;
   let positionals: string[];
@@ -449,6 +477,8 @@ async function dispatch(argv: string[], io: CliIO, run: RunState): Promise<numbe
       return emit(io, run, await checkCommand(projectDir, values, io, run));
     case 'ci':
       return emit(io, run, ciCommand(projectDir, values));
+    case 'mcp':
+      return mcpCommand(projectDir, io, run);
     default: {
       const result = getStatus(projectDir);
       return emit(io, run, { result, human: statusSummary(result) });
@@ -563,14 +593,14 @@ export async function main(argv: string[], io: CliIO = defaultIO): Promise<numbe
   const run: RunState = { json: jsonInArgv(argv), verbose: argv.includes('--verbose'), done: false };
   const ownProcess = io === defaultIO;
   const restoreStdout = ownProcess ? divertStdout() : undefined;
-  const unwatch = ownProcess ? watchProcess(run) : undefined;
+  run.unwatch = ownProcess ? watchProcess(run) : undefined;
   try {
     const code = await dispatch(argv, io, run);
     return run.exitCode ?? code;
   } catch (e) {
     return crash(e, io, run);
   } finally {
-    unwatch?.();
+    run.unwatch?.();
     restoreStdout?.();
   }
 }

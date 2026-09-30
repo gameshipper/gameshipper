@@ -26,6 +26,9 @@ function exitProcess(code) {
 /** As the CLI decides it: --json, or --json=<anything but false>. */
 const wantsJson = (argv) => argv.some((a) => a === '--json' || (a.startsWith('--json=') && a.toLowerCase() !== '--json=false'));
 
+/** The command: the first word that isn't a flag or the value of --dir. */
+const commandIn = (argv) => argv.find((a, i) => !a.startsWith('-') && argv[i - 1] !== '--dir');
+
 /**
  * Runs `main(argv)` from the module `loadMain` loads, with signals covered while it loads. Returns main's
  * exit code; never resolves if a signal arrived first (the process is exiting).
@@ -44,8 +47,10 @@ export async function start(argv, loadMain) {
       : `✗ INTERRUPTED: ${message} ${fix}\n`;
     process.exitCode = code;
     setTimeout(() => exitProcess(code), 2000);
+    // mcp's stdout carries only MCP messages.
+    const out = commandIn(argv) === 'mcp' ? process.stderr : process.stdout;
     try {
-      process.stdout.write(text, () => exitProcess(code));
+      out.write(text, () => exitProcess(code));
     } catch {
       exitProcess(code);
     }

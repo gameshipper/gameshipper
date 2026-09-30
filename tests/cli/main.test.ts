@@ -23,7 +23,7 @@ describe('gameshipper CLI', () => {
   it('help --json returns the catalog', async () => {
     const r = await run(['help', '--json']);
     expect(r.code).toBe(0);
-    expect(r.json().data.commands.map((c: { name: string }) => c.name)).toEqual(['init', 'play', 'build', 'check', 'status', 'ci']);
+    expect(r.json().data.commands.map((c: { name: string }) => c.name)).toEqual(['init', 'play', 'build', 'check', 'status', 'ci', 'mcp']);
   });
 
   it('help --json describes every gameshipper.json field', async () => {

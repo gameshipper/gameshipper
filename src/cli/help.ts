@@ -110,6 +110,12 @@ export const COMMANDS: CommandHelp[] = [
     usage: 'npx gameshipper ci init [--force]',
     flags: [{ name: 'force', description: 'Replace an existing .github/workflows/gameshipper.yml.' }],
   },
+  {
+    name: 'mcp',
+    summary: 'Serve every command as an MCP tool over stdio, for AI agents (Claude Code, Cursor, ...). --dir sets the default game folder.',
+    usage: 'npx gameshipper mcp [--dir <path>]',
+    flags: [],
+  },
 ];
 
 export const EXIT_CODES = { '0': 'success', '1': 'a target or check failed', '2': 'invalid config, usage or missing input' };
@@ -181,6 +187,7 @@ export function helpText(): string {
     '  npx gameshipper check',
     '',
     'AI agents: add --json to any command; nothing prompts when --json or --yes is set.',
+    'MCP clients (Claude Code, Cursor, ...): `npx gameshipper mcp` serves every command as a tool.',
     'Run `npx gameshipper <command> --help` for its flags, or `npx gameshipper help --json` for',
     'this catalog as JSON, including every gameshipper.json field.',
   ].join('\n');
