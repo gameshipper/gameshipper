@@ -4,6 +4,7 @@
 //   FAKE_STEAMCMD_STATE  folder for runs.jsonl, builds.jsonl and login-<user> files (required)
 //   FAKE_STEAMCMD_MODE   ok | access-denied | set-live-fails | no-connection | refuse-login | prompt | bad-cpu | hang
 // "hang" starts a child of its own at +run_app_build (writing both PIDs to hang.json), then never finishes.
+// Each run records its HOME, and the launchctl a shell would find on its PATH (the real SteamCMD calls it on macOS).
 // It never calls process.exit(): with NODE_USE_SYSTEM_CA=1, Node 24.7 on macOS can crash there.
 import { spawn } from 'node:child_process';
 import * as fs from 'node:fs';
@@ -33,6 +34,20 @@ function listFiles(root, exclusions) {
   };
   walk(root, '');
   return out.sort();
+}
+
+/** The first executable `name` on PATH, as a shell finds it; only looked up, never run. */
+function onPath(name) {
+  for (const dir of (process.env.PATH ?? '').split(path.delimiter)) {
+    const file = path.join(dir, name);
+    try {
+      fs.accessSync(file, fs.constants.X_OK);
+      if (fs.statSync(file).isFile()) return file;
+    } catch {
+      // not there, or not executable
+    }
+  }
+  return null;
 }
 
 function login(user, noPrompt) {
@@ -127,7 +142,7 @@ function main() {
     return 99;
   }
   fs.mkdirSync(state, { recursive: true });
-  fs.appendFileSync(path.join(state, 'runs.jsonl'), `${JSON.stringify({ args, home: process.env.HOME ?? null })}\n`);
+  fs.appendFileSync(path.join(state, 'runs.jsonl'), `${JSON.stringify({ args, home: process.env.HOME ?? null, launchctl: onPath('launchctl') })}\n`);
   if (mode === 'bad-cpu') {
     say(`./steamcmd.sh: line 37: ${process.argv[1]}: Bad CPU type in executable`);
     return 126;

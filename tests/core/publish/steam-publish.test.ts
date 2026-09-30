@@ -72,6 +72,8 @@ describe('publishSteam', () => {
     const [run] = jsonl(path.join(s.state, 'runs.jsonl'));
     expect(run.args.slice(0, 7)).toEqual(['+@ShutdownOnFailedCommand', '1', '+@NoPromptForPassword', '1', '+login', 'builder', '+run_app_build']);
     if (process.platform !== 'win32') expect(run.home).toBe(steamCmdPaths(ctx.cacheDir, process.platform).homeDir);
+    // On a Mac it finds Gameshipper's stand-in launchctl, never the real one.
+    if (process.platform === 'darwin') expect(run.launchctl).toBe(path.join(steamCmdPaths(ctx.cacheDir, 'darwin').shimDir, 'launchctl'));
     expect(fs.readFileSync(ctx.logPath, 'utf8')).toContain('steamcmd: [2026-09-29 10:00:00]: Successfully finished AppID 1234560 build (BuildID 12345678).');
   });
 
@@ -88,10 +90,17 @@ describe('publishSteam', () => {
   it('hands the terminal to SteamCMD to log in, then uploads', async () => {
     const p = steamProject();
     const s = setup({ interactive: true }, 'ok', false);
-    const r = await publishSteam(testCtx(p.dir), p.config, p.builds, s.opts);
+    const ctx = testCtx(p.dir);
+    const r = await publishSteam(ctx, p.config, p.builds, s.opts);
     expect(s.handOffs).toEqual([['+@ShutdownOnFailedCommand', '1', '+login', 'builder', '+quit']]);
     expect(s.notices).toEqual([expect.stringContaining('Gameshipper never sees them')]);
     expect([r.status, r.details?.buildId]).toEqual(['uploaded', 12345678]);
+    // The login in the terminal gets the stand-in launchctl too, like every other run.
+    const runs = jsonl(path.join(s.state, 'runs.jsonl'));
+    expect(runs).toHaveLength(3);
+    if (process.platform === 'darwin') {
+      for (const run of runs) expect(run.launchctl).toBe(path.join(steamCmdPaths(ctx.cacheDir, 'darwin').shimDir, 'launchctl'));
+    }
   });
 
   it('STEAM_LOGIN_FAILED when the login in the terminal is refused', async () => {

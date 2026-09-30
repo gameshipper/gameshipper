@@ -33,6 +33,8 @@ export interface SteamCmdPaths {
   installDir: string;
   /** The HOME SteamCMD runs with on macOS and Linux; its saved login lives under it. */
   homeDir: string;
+  /** macOS: the folder first on SteamCMD's PATH, holding the stand-in `launchctl` (see steamCmdEnv). */
+  shimDir: string;
   /** steamcmd.sh, or steamcmd.exe on Windows. */
   program: string;
   executable: string;
@@ -43,25 +45,66 @@ export function steamCmdPaths(cacheDir: string, platform: NodeJS.Platform): Stea
   const root = path.resolve(cacheDir, 'tools', 'steamcmd');
   const installDir = path.join(root, 'app');
   const program = platform === 'win32' ? 'steamcmd.exe' : 'steamcmd.sh';
-  return { installDir, homeDir: path.join(root, 'home'), program, executable: path.join(installDir, program) };
+  return { installDir, homeDir: path.join(root, 'home'), shimDir: path.join(root, 'shim'), program, executable: path.join(installDir, program) };
 }
+
+/** What a shell searches when there's no PATH: an empty PATH would mean the current folder instead. */
+const DEFAULT_PATH = '/usr/bin:/bin:/usr/sbin:/sbin';
+/** Where the stand-in launchctl notes each call, in SteamCMD's HOME. */
+export const LAUNCHCTL_CALLS_LOG = 'launchctl-calls.log';
 
 /**
  * SteamCMD keeps its login, logs and caches under $HOME: in ~/Library/Application Support/Steam on macOS and ~/Steam
- * on Linux, the Steam client's own folders. On macOS it also rewrites the client's LaunchAgent,
- * ~/Library/LaunchAgents/com.valvesoftware.steamclean.plist. A HOME of its own keeps the player's Steam install
- * untouched; on Linux the XDG folders move into it too. On Windows it keeps everything beside steamcmd.exe, in the
- * cache. It never gets the GitHub token, butler's key or the Apple signing variables.
+ * on Linux, the Steam client's own folders. A HOME of its own keeps the player's Steam install untouched; on Linux the
+ * XDG folders move into it too. On Windows it keeps everything beside steamcmd.exe, in the cache.
+ *
+ * On macOS SteamCMD also writes a com.valvesoftware.steamclean LaunchAgent into $HOME and runs `launchctl remove` and
+ * `launchctl load` on it through the shell, which would replace the Steam client's loaded job with one pointing into
+ * the cache. So a stand-in `launchctl` (writeLaunchctlShim) comes first on its PATH: the client's background jobs
+ * never change. It never gets the GitHub token, butler's key or the Apple signing variables.
  */
 export function steamCmdEnv(paths: SteamCmdPaths, platform: NodeJS.Platform, baseEnv: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
   const env = withoutSecrets(baseEnv);
   if (platform === 'win32') return env;
   const home = path.resolve(paths.homeDir);
+  if (platform === 'darwin') return { ...env, HOME: home, PATH: `${path.resolve(paths.shimDir)}:${env.PATH || DEFAULT_PATH}` };
   const xdg =
     platform === 'linux'
       ? { XDG_CONFIG_HOME: path.join(home, '.config'), XDG_DATA_HOME: path.join(home, '.local', 'share'), XDG_CACHE_HOME: path.join(home, '.cache') }
       : {};
   return { ...env, HOME: home, ...xdg };
+}
+
+/** `text` as one shell word, whatever it holds. */
+const shellQuote = (text: string) => `'${text.replace(/'/g, `'\\''`)}'`;
+
+/**
+ * Writes the stand-in `launchctl` SteamCMD finds first on macOS (steamCmdEnv): a script that changes nothing, prints
+ * nothing and succeeds, noting each call's arguments in LAUNCHCTL_CALLS_LOG in SteamCMD's HOME. It's written again
+ * before every run, in case it was removed or changed, and moved into place whole, so a SteamCMD running meanwhile
+ * never finds half a script. Throws if it can't be written: SteamCMD must not run without it.
+ */
+export function writeLaunchctlShim(paths: SteamCmdPaths): void {
+  const script = [
+    '#!/bin/sh',
+    "# Gameshipper's stand-in for launchctl, first on SteamCMD's PATH: SteamCMD would load its own copy of the Steam",
+    "# client's com.valvesoftware.steamclean job in place of the client's. This changes nothing; it notes the call.",
+    `{ printf '%s\\n' "$*" >> ${shellQuote(path.join(path.resolve(paths.homeDir), LAUNCHCTL_CALLS_LOG))}; } 2>/dev/null`,
+    'exit 0',
+    '',
+  ].join('\n');
+  const dir = path.resolve(paths.shimDir);
+  fs.mkdirSync(dir, { recursive: true, mode: 0o755 });
+  fs.chmodSync(dir, 0o755);
+  const file = path.join(dir, 'launchctl');
+  const tmp = `${file}.${process.pid}.tmp`;
+  try {
+    fs.writeFileSync(tmp, script, { mode: 0o755 });
+    fs.chmodSync(tmp, 0o755);
+    fs.renameSync(tmp, file);
+  } finally {
+    fs.rmSync(tmp, { force: true });
+  }
 }
 
 export interface EnsureSteamCmdOptions {
@@ -82,6 +125,15 @@ export async function ensureSteamCmd(ctx: Ctx, opts: EnsureSteamCmdOptions): Pro
   const paths = steamCmdPaths(ctx.cacheDir, platform);
   const env = steamCmdEnv(paths, platform, opts.env);
   const override = opts.env.GAMESHIPPER_STEAMCMD;
+  // PATH can't hold a folder with a colon: SteamCMD would find the real launchctl. (Only tests run the macOS setup
+  // on Windows, where every path has a drive letter's colon.)
+  if (platform === 'darwin' && process.platform !== 'win32' && paths.shimDir.includes(':')) {
+    throw new GsFailure(
+      'STEAM_PATH_UNSUPPORTED',
+      `SteamCMD can't run from Gameshipper's cache folder ${ctx.cacheDir}: its path has a colon.`,
+      'Set GAMESHIPPER_CACHE to a folder whose path has no colon, then publish again.',
+    );
+  }
   if (!override) {
     const archive = opts.archive ?? STEAMCMD_ARCHIVES[platform];
     if (!archive || (platform === 'linux' && arch !== 'x64')) {
@@ -97,5 +149,6 @@ export async function ensureSteamCmd(ctx: Ctx, opts: EnsureSteamCmdOptions): Pro
   fs.mkdirSync(path.dirname(paths.homeDir), { recursive: true });
   fs.mkdirSync(paths.homeDir, { recursive: true, mode: 0o700 });
   if (process.platform !== 'win32') fs.chmodSync(paths.homeDir, 0o700);
+  if (platform === 'darwin') writeLaunchctlShim(paths);
   return override ? toolCommand(override, env) : toolCommand(paths.executable, env);
 }

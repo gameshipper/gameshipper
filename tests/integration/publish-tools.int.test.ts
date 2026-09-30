@@ -1,3 +1,4 @@
+import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
@@ -9,7 +10,7 @@ import { createCtx } from '../../src/core/context.js';
 import { butlerResult, ensureButler, parseButlerJson } from '../../src/core/publish/itch/butler.js';
 import { checkButlerLogin } from '../../src/core/publish/itch/publish.js';
 import { judgeSteamRun } from '../../src/core/publish/steam/judge.js';
-import { ensureSteamCmd, STEAMCMD_ARCHIVES, steamCmdPaths } from '../../src/core/publish/steam/steamcmd.js';
+import { ensureSteamCmd, LAUNCHCTL_CALLS_LOG, STEAMCMD_ARCHIVES, steamCmdPaths } from '../../src/core/publish/steam/steamcmd.js';
 import { writeSteamScripts } from '../../src/core/publish/steam/vdf.js';
 import { isInstalled } from '../../src/core/tools/download.js';
 import { runExternal } from '../../src/core/tools/run.js';
@@ -22,7 +23,9 @@ import { makeTmpDir, writeFiles } from '../helpers/tmp.js';
  * The real SteamCMD and butler, downloaded from Valve and itch.io into the integration cache (GAMESHIPPER_CACHE in
  * vitest.int.config.ts), which is kept between runs, so SteamCMD's ~80 MB first-run update happens once. Nothing here
  * logs in to an account: SteamCMD only logs in anonymously, or stops at "no saved login"; butler runs only commands
- * that need no login, with a HOME of its own so it never sees the owner's itch.io login.
+ * that need no login, with a HOME of its own so it never sees the owner's itch.io login. On macOS every SteamCMD run
+ * checks that launchd's com.valvesoftware.steamclean job (the Steam client's) is as it was, and that SteamCMD's
+ * launchctl calls reached Gameshipper's stand-in instead.
  */
 const CACHE = cacheRoot();
 const ctx = () => createCtx(makeTmpDir('gs-int-'), 'int', { cacheDir: CACHE });
@@ -33,6 +36,49 @@ const USER_STEAM = [
   path.join(os.homedir(), 'Library', 'Application Support', 'Steam', 'config', 'config.vdf'),
 ];
 const fingerprint = (file: string) => (fs.existsSync(file) ? createHash('sha256').update(fs.readFileSync(file)).digest('hex') : null);
+const STEAMCLEAN = 'com.valvesoftware.steamclean';
+
+/**
+ * The plist launchd loaded the Steam client's com.valvesoftware.steamclean job from, or null when there's no such job.
+ * Only asks (`launchctl print`): nothing here loads or removes a job.
+ */
+function steamcleanJob(): string | null {
+  const r = spawnSync('/bin/launchctl', ['print', `gui/${process.getuid!()}/${STEAMCLEAN}`], { encoding: 'utf8' });
+  // 113: no such job.
+  if (r.status === 113) return null;
+  if (r.status !== 0) throw new Error(`launchctl print failed (${r.status ?? r.signal}): ${r.stderr}`);
+  const job = /^\tpath = (.+)$/m.exec(r.stdout)?.[1];
+  if (!job) throw new Error(`launchctl print shows no path:\n${r.stdout}`);
+  return job;
+}
+
+/**
+ * Runs `run`, which runs the real SteamCMD, and checks that on macOS launchd still has the Steam client's job as it
+ * was (or still has none). Returns what SteamCMD asked the stand-in launchctl meanwhile, from its calls log.
+ */
+async function leavingLaunchdAlone<T>(run: () => T | Promise<T>): Promise<{ value: T; launchctlCalls: string[] }> {
+  if (process.platform !== 'darwin') return { value: await run(), launchctlCalls: [] };
+  const log = path.join(steamCmdPaths(CACHE, 'darwin').homeDir, LAUNCHCTL_CALLS_LOG);
+  const size = () => (fs.existsSync(log) ? fs.statSync(log).size : 0);
+  const job = steamcleanJob();
+  const from = size();
+  const value = await run();
+  expect(steamcleanJob()).toBe(job);
+  const launchctlCalls = size() > from ? fs.readFileSync(log).subarray(from).toString('utf8').split('\n').filter(Boolean) : [];
+  return { value, launchctlCalls };
+}
+
+/**
+ * SteamCMD (1788292693, macOS) runs `launchctl remove` and `launchctl load` on its steamclean LaunchAgent on every run:
+ * only the stand-in heard them.
+ */
+function expectLaunchctlIntercepted(calls: string[]): void {
+  if (process.platform !== 'darwin') return;
+  expect(calls, 'launchctl calls').toEqual(
+    expect.arrayContaining([`remove ${STEAMCLEAN}`, expect.stringMatching(/^load .*\/Library\/LaunchAgents\/com\.valvesoftware\.steamclean\.plist$/)]),
+  );
+}
+
 /** An environment for butler with no login: a HOME of its own and no API key. */
 function butlerEnv(): NodeJS.ProcessEnv {
   const home = makeTmpDir('gs-butler-home-');
@@ -44,7 +90,10 @@ describe.skipIf(!steamHost)('the real SteamCMD', () => {
     const before = USER_STEAM.map(fingerprint);
     const c = ctx();
     const tool = await ensureSteamCmd(c, { env: process.env });
-    const r = await runExternal(tool, ['+@ShutdownOnFailedCommand', '1', '+login', 'anonymous', '+quit'], { timeoutMs: 15 * 60_000, onLine: c.log });
+    const { value: r, launchctlCalls } = await leavingLaunchdAlone(() =>
+      runExternal(tool, ['+@ShutdownOnFailedCommand', '1', '+login', 'anonymous', '+quit'], { timeoutMs: 15 * 60_000, onLine: c.log }),
+    );
+    expectLaunchctlIntercepted(launchctlCalls);
     expect(r.output).toContain('Connecting anonymously to Steam Public...OK');
     expect(r.output).toContain('Waiting for user info...OK');
     expect(r.exitCode).toBe(0);
@@ -68,7 +117,8 @@ describe.skipIf(!steamHost)('the real SteamCMD', () => {
     writeFiles(dir, { probe: 'x', 'steam_appid.txt': '480', 'resources/deep/steam_appid.txt': '480' });
     const scripts = writeSteamScripts(c.projectDir, config, [{ target: 'linux', dir, executable: path.join(dir, 'probe') }], { preview: true, setLive: null });
     const args = ['+@ShutdownOnFailedCommand', '1', '+@NoPromptForPassword', '1', '+login', 'anonymous', '+run_app_build', scripts.appBuild, '+quit'];
-    const r = await runExternal(tool, args, { timeoutMs: 10 * 60_000, onLine: c.log });
+    const { value: r, launchctlCalls } = await leavingLaunchdAlone(() => runExternal(tool, args, { timeoutMs: 10 * 60_000, onLine: c.log }));
+    expectLaunchctlIntercepted(launchctlCalls);
     const log = path.join(scripts.outputDir, 'app_build_480.log');
     const output = `${r.output}\n${fs.existsSync(log) ? fs.readFileSync(log, 'utf8') : ''}`;
     const outcome = judgeSteamRun({ appId: 480, preview: true, exitCode: r.exitCode, timedOut: r.timedOut, spawnError: r.spawnError, output });
@@ -77,9 +127,12 @@ describe.skipIf(!steamHost)('the real SteamCMD', () => {
     expect(fs.readFileSync(path.join(scripts.outputDir, 'depot_build_483.log'), 'utf8')).toContain('Found 3 files (0 MB) for depot 483');
   });
 
-  it('`publish` without a saved login is STEAM_LOGIN_REQUIRED, and asks Steam nothing about the account', () => {
+  it('`publish` without a saved login is STEAM_LOGIN_REQUIRED, and asks Steam nothing about the account', async () => {
     const p = fakeProject({ steam: { appId: 1234560 } });
-    const r = cli(['publish', '--to', 'steam', '--dry-run', '--steam-user', 'gameshipper_probe_nobody'], p.dir, { GAMESHIPPER_STEAMCMD: '' });
+    const { value: r, launchctlCalls } = await leavingLaunchdAlone(() =>
+      cli(['publish', '--to', 'steam', '--dry-run', '--steam-user', 'gameshipper_probe_nobody'], p.dir, { GAMESHIPPER_STEAMCMD: '' }),
+    );
+    expectLaunchctlIntercepted(launchctlCalls);
     expect(r.code).toBe(2);
     expect(r.result.errors[0]).toMatchObject({ code: 'STEAM_LOGIN_REQUIRED', message: expect.stringContaining('Cached credentials not found') });
     expect(fs.readFileSync(r.result.logPath, 'utf8')).toContain('steamcmd: FAILED (No cached credentials and @NoPromptForPassword is set)');

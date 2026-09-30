@@ -158,7 +158,7 @@ export const ENVIRONMENT: Array<{ name: string; description: string }> = [
   { name: 'GH_TOKEN', description: 'publish: read when GITHUB_TOKEN is not set.' },
   { name: 'BUTLER_API_KEY', description: "publish: an itch.io API key for butler (for CI), instead of butler's own login." },
   { name: 'GAMESHIPPER_GITHUB_API', description: 'publish: the GitHub API to use, for GitHub Enterprise (default https://api.github.com).' },
-  { name: 'GAMESHIPPER_STEAMCMD', description: 'publish: a SteamCMD to run instead of the one Gameshipper downloads. It still gets a HOME of its own in the cache.' },
+  { name: 'GAMESHIPPER_STEAMCMD', description: 'publish: a SteamCMD to run instead of the one Gameshipper downloads. It still gets a HOME of its own in the cache, and on macOS the stand-in launchctl.' },
   { name: 'GAMESHIPPER_BUTLER', description: 'publish: a butler to run instead of the one Gameshipper downloads.' },
 ];
 
