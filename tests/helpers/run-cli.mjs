@@ -24,7 +24,7 @@ registerHooks({
   // src/shell compiles to CommonJS (its package.json says so), but its sources are ES modules.
   load(url, context, nextLoad) {
     if (process.env.GS_TEST_ELECTRON && url.endsWith('/src/core/electron.ts')) {
-      const source = `export const ELECTRON_VERSION = 'test'; export const electronBinary = () => process.env.GS_TEST_ELECTRON;`;
+      const source = `export const ELECTRON_VERSION = 'test'; export const electronBinary = async () => process.env.GS_TEST_ELECTRON;`;
       return { format: 'module', source, shortCircuit: true };
     }
     if (url.includes('/src/shell/') && url.endsWith('.ts')) {

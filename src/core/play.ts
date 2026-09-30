@@ -135,7 +135,7 @@ export async function runPlay(ctx: Ctx, config: Config, opts: PlayOptions): Prom
 
   try {
     const game: Game = prepared
-      ? { command: opts.electronPath ?? electronBinary(), args: [prepared.appDir], appDir: prepared.appDir }
+      ? { command: opts.electronPath ?? (await electronBinary()), args: [prepared.appDir], appDir: prepared.appDir }
       : packagedGame(ctx.projectDir, config, opts.host ?? process.platform);
     if (smokeSeconds) {
       const storeArt = storeArtNames(config);

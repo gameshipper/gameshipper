@@ -4,9 +4,9 @@ import { detectHostTools, planDesktopJobs } from '../../src/core/desktop/targets
 import { ELECTRON_VERSION, electronBinary } from '../../src/core/electron.js';
 
 describe('electron', () => {
-  it('pins the Electron version from the installed package', () => {
+  it('pins the Electron version from the installed package', async () => {
     expect(ELECTRON_VERSION).toBe('44.4.5');
-    expect(fs.existsSync(electronBinary())).toBe(true);
+    expect(fs.existsSync(await electronBinary())).toBe(true);
   });
 });
 
