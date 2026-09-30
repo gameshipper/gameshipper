@@ -11,8 +11,11 @@ import { makeTmpDir, writeFiles } from '../helpers/tmp.js';
 
 const cfg = (extra: object = {}) => parseConfig({ name: 'x', version: '1.0.0', ...extra }).data!;
 
-/** Never exits. `&& echo` keeps the shell alive, so the node process is a grandchild of the spawned one. */
-const NEVER_EXITS = `node -e "require('fs').writeFileSync('pid.txt', String(process.pid)); setInterval(() => {}, 1000)" && echo done`;
+/**
+ * Never exits. `&& echo` keeps the shell alive, so the node process is a grandchild of the spawned one. It writes its
+ * PID under another name and renames it, so pid.txt never exists without the PID in it.
+ */
+const NEVER_EXITS = `node -e "const fs = require('fs'); fs.writeFileSync('pid.tmp', String(process.pid)); fs.renameSync('pid.tmp', 'pid.txt'); setInterval(() => {}, 1000)" && echo done`;
 
 const alive = (pid: number): boolean => {
   try {
@@ -549,7 +552,7 @@ describe('runBuildCommand', () => {
 
 /** Runs runBuildCommand in its own Node process (type stripping plus a .js -> .ts resolve hook). */
 const RUNNER = `
-import { existsSync } from 'node:fs';
+import { existsSync, writeFileSync } from 'node:fs';
 import { registerHooks } from 'node:module';
 registerHooks({
   resolve(specifier, context, nextResolve) {
@@ -563,9 +566,16 @@ registerHooks({
 });
 const [stageUrl, dir, command, mode] = process.argv.slice(2);
 const { runBuildCommand } = await import(stageUrl);
-if (mode === 'exit') setInterval(() => existsSync(dir + '/pid.txt') && process.exit(0), 50);
+// Exits as the CLI does: exitProcess waits for Node's read of the system certificates (NODE_USE_SYSTEM_CA=1) before it
+// calls process.exit(), which during that read can crash Node 24.7 (SIGSEGV).
+const { exitProcess } = await import(new URL('../proc.ts', stageUrl).href);
+if (mode === 'exit') setInterval(() => existsSync(dir + '/pid.txt') && exitProcess(0), 50);
 const ctx = { projectDir: dir, cacheDir: dir, logPath: dir + '/build.log', log() {} };
-await runBuildCommand(ctx, { game: { buildCommand: command } });
+const running = runBuildCommand(ctx, { game: { buildCommand: command } });
+// runBuildCommand adds its signal handlers as it starts the build, before its first await. Until then a SIGTERM
+// kills this process outright and leaves the build running, so ready.txt tells the test the handlers are in place.
+if (process.listenerCount('SIGTERM') > 0) writeFileSync(dir + '/ready.txt', '');
+await running;
 `;
 
 noteIfTsTestsSkipped('the runBuildCommand subprocess tests');
@@ -580,12 +590,15 @@ describe.skipIf(process.platform === 'win32' || !canRunTs)('runBuildCommand when
     fs.writeFileSync(runner, RUNNER);
     const stageUrl = new URL('../../src/core/prepare/stage.ts', import.meta.url).href;
     const pidFile = path.join(dir, 'pid.txt');
+    const readyFile = path.join(dir, 'ready.txt');
     const gs = spawn(process.execPath, [runner, stageUrl, dir, NEVER_EXITS, mode], { stdio: 'ignore' });
     const exited = new Promise<{ code: number | null; signal: NodeJS.Signals | null }>((resolve) =>
       gs.on('exit', (code, signal) => resolve({ code, signal })),
     );
     try {
-      expect(await waitFor(() => readPid(pidFile) !== null, 10_000)).toBe(true);
+      // The build's PID alone isn't enough: under load the runner can still be between starting the build and adding
+      // its handlers when the build writes it.
+      expect(await waitFor(() => readPid(pidFile) !== null && fs.existsSync(readyFile), 10_000)).toBe(true);
       const pid = readPid(pidFile)!;
       if (mode === 'signal') gs.kill('SIGTERM');
       expect(await exited).toEqual(mode === 'signal' ? { code: null, signal: 'SIGTERM' } : { code: 0, signal: null });
