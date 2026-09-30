@@ -251,7 +251,10 @@ describe.skipIf(process.platform === 'win32' || !canRunTs)('the CLI process', ()
   });
 
   it("bin/start.js waits for Node's read of the system certificate store only when Node reads it", async () => {
-    // A stand-in for node:tls records the read, so this doesn't depend on the crash's timing.
+    // A stand-in for node:tls records the read, so this doesn't depend on the crash's timing. start.js looks at
+    // NODE_USE_SYSTEM_CA, NODE_OPTIONS and the command line only as it exits, so each case sets them inside the child,
+    // and Node itself never reads the store. Given to Node as it starts, it would: the stand-in doesn't wait for that
+    // read, and exiting during it crashes Node 24.7 now and then (the crash the test above is about).
     const script = (setup: string) =>
       [
         "import { writeSync } from 'node:fs';",
@@ -264,21 +267,22 @@ describe.skipIf(process.platform === 'win32' || !canRunTs)('the CLI process', ()
         '  return new Promise(() => {});',
         '});',
       ].join('\n');
-    const once = (ca: string, setup: string) =>
-      new Promise<{ code: number | null; stderr: string }>((resolve) => {
-        const env = { ...process.env, NODE_USE_SYSTEM_CA: ca, NODE_OPTIONS: '' };
+    const once = (setup: string) =>
+      new Promise<{ code: number | null; signal: NodeJS.Signals | null; stderr: string }>((resolve) => {
+        const env: NodeJS.ProcessEnv = { ...process.env, NODE_OPTIONS: '' };
+        delete env.NODE_USE_SYSTEM_CA;
         const child = spawn(process.execPath, ['--input-type=module', '-e', script(setup)], { stdio: ['ignore', 'ignore', 'pipe'], env });
         let stderr = '';
         child.stderr.setEncoding('utf8').on('data', (d: string) => (stderr += d));
-        child.on('close', (code) => resolve({ code, stderr }));
+        child.on('close', (code, signal) => resolve({ code, signal, stderr }));
       });
-    const cases: Array<[string, string, string, string]> = [
-      ['NODE_USE_SYSTEM_CA=1', '1', '', 'read system\n'],
-      ['--use-system-ca in NODE_OPTIONS', '', "process.env.NODE_OPTIONS = '--max-old-space-size=512 --use-system-ca';", 'read system\n'],
-      ['--use-system-ca on the command line', '', "process.execArgv.push('--use-system-ca');", 'read system\n'],
-      ['neither', '0', "process.env.NODE_OPTIONS = '--max-old-space-size=512';", ''],
+    const cases: Array<[string, string, string]> = [
+      ['NODE_USE_SYSTEM_CA=1', "process.env.NODE_USE_SYSTEM_CA = '1';", 'read system\n'],
+      ['--use-system-ca in NODE_OPTIONS', "process.env.NODE_OPTIONS = '--max-old-space-size=512 --use-system-ca';", 'read system\n'],
+      ['--use-system-ca on the command line', "process.execArgv.push('--use-system-ca');", 'read system\n'],
+      ['neither', "process.env.NODE_USE_SYSTEM_CA = '0'; process.env.NODE_OPTIONS = '--max-old-space-size=512';", ''],
     ];
-    for (const [name, ca, setup, stderr] of cases) expect(await once(ca, setup), name).toEqual({ code: 130, stderr });
+    for (const [name, setup, stderr] of cases) expect(await once(setup), name).toEqual({ code: 130, signal: null, stderr });
   });
 
   it('a signal that arrives while loading blocks the process is handed to the CLI, not dropped', async () => {
