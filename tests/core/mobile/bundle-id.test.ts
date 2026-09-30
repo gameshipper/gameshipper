@@ -39,7 +39,7 @@ describe('bundle IDs', () => {
     for (const bad of ['1.1000.0', '1.0.1000', '2100.0.1', '3000.0.0', '99999.0.0']) {
       const e = checkMobileVersion(version(bad));
       expect(e, bad).toMatchObject({ code: 'VERSION_UNSUPPORTED', message: expect.stringContaining(bad), fix: expect.stringContaining('1002003') });
-      expect(e!.fix).toContain('major 2100 or lower');
+      expect(e!.fix).toContain('with a major of 2100 or lower (2100.0.0 at most)');
     }
   });
 });

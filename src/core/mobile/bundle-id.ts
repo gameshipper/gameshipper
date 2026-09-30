@@ -44,8 +44,8 @@ export const MAX_VERSION_CODE = 2_100_000_000;
 
 /**
  * VERSION_UNSUPPORTED when buildNumber can't represent the version: a minor or patch of 1000 or more would give two
- * versions the same build number (1.1000.0 and 2.0.0), and a major of 2100 or more (past 2100.0.0) goes past
- * Google Play's limit. null when it fits.
+ * versions the same build number (1.1000.0 and 2.0.0), and a version past 2100.0.0 goes past Google Play's limit
+ * (2100.0.0 at most). null when it fits.
  */
 export function checkMobileVersion(config: Config): GsError | null {
   const [major, minor, patch] = config.version.split('.').map(Number);
@@ -59,7 +59,7 @@ export function checkMobileVersion(config: Config): GsError | null {
   return gsError(
     'VERSION_UNSUPPORTED',
     `version ${config.version} can't be an iOS and Android build number: ${why}.`,
-    `Set "version" in gameshipper.json to one like 1.2.3, with the major 2100 or lower (2100.0.0 at most) and the minor and patch below 1000: the build number is major × 1,000,000 + minor × 1,000 + patch, so 1.2.3 becomes 1002003. It must only ever go up once the game is in a store.`,
+    `Set "version" in gameshipper.json to one like 1.2.3, with a major of 2100 or lower (2100.0.0 at most) and the minor and patch below 1000: the build number is major × 1,000,000 + minor × 1,000 + patch, so 1.2.3 becomes 1002003. It must only ever go up once the game is in a store.`,
   );
 }
 
