@@ -152,8 +152,17 @@ describe('gameshipper publish', () => {
     expect([r.code, r.json().data.destinations[0].details.repo]).toEqual([0, 'moonstudio/moon-game']);
   });
 
-  it('help --json tells agents where publish goes in the loop', () => {
-    expect(helpData().agentLoop.some((step) => step.startsWith('npx gameshipper publish --dry-run --json'))).toBe(true);
+  it('help --json tells agents that publish is a separate step, only when the human asks', () => {
+    const loop = helpData().agentLoop;
+    const publish = loop.filter((step) => step.includes('gameshipper publish'));
+    expect(publish.map((step) => step.split('   ')[0])).toEqual(['npx gameshipper publish --dry-run --json', 'npx gameshipper publish --json']);
+    // Publishing comes last, after the loop, and each step says it's only for when the human asks.
+    expect(loop.slice(-2)).toEqual(publish);
+    for (const step of publish) expect(step).toContain('only when the human asks');
+    expect(publish[0]).toContain('a separate step');
+    expect(publish[0]).toContain('itch.io makes them public at once');
+    expect(publish[0]).toContain("butler's saved itch.io login");
+    expect(publish[0]).toContain('STEAM_LOGIN_REQUIRED, ITCH_LOGIN_REQUIRED');
   });
 });
 

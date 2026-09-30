@@ -23,14 +23,22 @@ export const ResultSchema = z.looseObject({
   logPath: z.string().optional(),
 });
 
-/** What the server tells agents when they connect: the loop, how to read results, and the rule about secrets. */
+/**
+ * What the server tells agents when they connect: the loop, that publishing is a separate step for when the human asks,
+ * how to read results, and the rule about secrets.
+ */
 export function instructions(tools: readonly McpTool[]): string {
   const publish = tools.some((t) => t.name === 'gameshipper_publish');
   return [
     'Gameshipper turns a web game folder into Windows, Mac and Linux apps for Steam, and iOS and Android projects.',
     'Loop: gameshipper_status first; gameshipper_init when there is no gameshipper.json;',
     "gameshipper_play with smoke: true, fixing each error in the game's own files until ok is true; gameshipper_build;",
-    `then gameshipper_check, fixing what fails and building again${publish ? '; then gameshipper_publish' : ''}.`,
+    'then gameshipper_check, fixing what fails and building again.',
+    ...(publish
+      ? [
+          "Publishing is a separate step: call gameshipper_publish only when the human asks you to, with dryRun: true first. It uploads to the human's store accounts: itch.io makes them public at once if the game's page is public, and butler's saved itch.io login on this computer is used without asking.",
+        ]
+      : []),
     'Every tool returns { ok, data, errors[], warnings[], logPath }; each error has a code, a message and a fix: do what the fix says.',
     'gameshipper_play without smoke opens the game for the human and returns at once.',
     'Fixes are written for the CLI: `npx gameshipper build --target mac` in a fix means the tool gameshipper_build with target: ["mac"] (each --flag-name is the input flagName, and `ci init` is gameshipper_ci_init);',
