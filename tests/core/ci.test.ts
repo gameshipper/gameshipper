@@ -54,6 +54,15 @@ describe('githubWorkflow', () => {
     expect(upload?.with?.path).toBe('moon-game-${{ matrix.target }}.tar.gz');
   });
 
+  it("never hands the repository's token or secrets to the build: pull requests run the game's code", () => {
+    expect(steps.find((s) => s.uses?.startsWith('actions/checkout@'))?.with).toEqual({ 'persist-credentials': false });
+    expect(yaml).not.toContain('secrets.');
+    expect(yaml).not.toContain('pull_request_target');
+    // Signing is for the human to add: the comments say to keep those secrets away from pull requests.
+    expect(yaml).toContain("github.event_name == 'push'");
+    expect(yaml).toContain('protected environment');
+  });
+
   it('keeps the run logs of a failed run', () => {
     const logs = steps.find((s) => s.with?.path === '.gameshipper/logs/');
     expect(logs).toMatchObject({ if: 'failure()', uses: 'actions/upload-artifact@v7', with: { 'include-hidden-files': true } });
