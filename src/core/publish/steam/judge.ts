@@ -11,6 +11,8 @@
  *   ERROR! Failed to commit build ...   (SetLive refused; the build itself is uploaded)
  */
 
+import { boundedReasons } from '../reasons.js';
+
 export type SteamOutcome =
   | { kind: 'uploaded'; buildId: number; setLiveFailed: boolean }
   | { kind: 'previewed' }
@@ -32,14 +34,9 @@ export interface SteamRun {
 export const STEAM_LOGIN_PROMPT = /password:|Steam Guard code:|Two-factor code:|confirm the login in the Steam Mobile app/i;
 /** Refusals that logging in again wouldn't fix. */
 const NOT_A_LOGIN_PROBLEM = /No Connection|Rate Limit Exceeded|Throttle|Service Unavailable|Timeout/i;
-const MAX_REASONS = 10;
-const MAX_REASON_CHARS = 300;
-
 function refusal(line: string): string | null {
   return /(?:FAILED|ERROR) \(([^)]+)\)/.exec(line)?.[1] ?? null;
 }
-
-const short = (text: string) => (text.length > MAX_REASON_CHARS ? `${text.slice(0, MAX_REASON_CHARS)}…` : text);
 
 export function judgeSteamRun(run: SteamRun): SteamOutcome {
   if (run.spawnError) return { kind: 'cant-run', reason: run.spawnError };
@@ -76,6 +73,5 @@ export function judgeSteamRun(run: SteamRun): SteamOutcome {
     else if (run.exitCode === 0) reasons.push("SteamCMD finished, but its output doesn't say the build succeeded.");
     else reasons.push(`SteamCMD exited with code ${run.exitCode} without saying why.`);
   }
-  const shown = reasons.slice(0, MAX_REASONS).map(short);
-  return { kind: 'failed', reasons: reasons.length > MAX_REASONS ? [...shown, `…and ${reasons.length - MAX_REASONS} more`] : shown };
+  return { kind: 'failed', reasons: boundedReasons(reasons) };
 }

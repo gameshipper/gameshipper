@@ -190,6 +190,35 @@ describe('MCP server', () => {
     expect((upload.structuredContent as any).errors[0].message).toHaveLength(300);
   });
 
+  it("also cuts the messages of issues inside data, such as each publish destination's errors and warnings", async () => {
+    const long = (what: string) => `${what}: ${'reason; '.repeat(200)}(the end)`;
+    const pushFailed = gsError('ITCH_PUSH_FAILED', long('Pushing windows failed'), 'Check itch.project.');
+    const live = gsError('ITCH_UPLOADS_LIVE', long('Public at once'));
+    const note = { kind: 'note', message: long('Not an issue: it has no code') };
+    const result = fail([pushFailed], [live], {
+      version: '1.0.0',
+      destinations: [{ to: 'itch', status: 'failed', errors: [pushFailed], warnings: [live] }],
+      elsewhere: { deeper: [[{ code: 'SOME_CODE', message: long('Deep down'), extra: 1 }]] },
+      note,
+      short: gsError('SHORT', 'fine'),
+    });
+    const r = await (await connect(fakeRun(result).run)).callTool({ name: 'gameshipper_publish', arguments: {} });
+    const data = (r.structuredContent as any).data;
+    const [destination] = data.destinations;
+    for (const issue of [destination.errors[0], destination.warnings[0], data.elsewhere.deeper[0][0]]) {
+      expect(issue.message).toHaveLength(300);
+      expect(issue.message).toContain('… (see the log) …');
+      expect(issue.message.endsWith('(the end)')).toBe(true);
+    }
+    expect(destination.errors[0]).toEqual({ ...(r.structuredContent as any).errors[0] });
+    expect(destination.errors[0].fix).toBe('Check itch.project.');
+    expect(data.elsewhere.deeper[0][0].extra).toBe(1);
+    // Anything else is passed on as it is.
+    expect([data.version, destination.to, data.note, data.short]).toEqual(['1.0.0', 'itch', note, gsError('SHORT', 'fine')]);
+    // The CLI's own Result is left alone.
+    expect(result.data.destinations[0].errors[0].message).toBe(long('Pushing windows failed'));
+  });
+
   it('never runs two commands on the same game folder at once; status never waits', async () => {
     let running = 0;
     let most = 0;

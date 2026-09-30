@@ -3,6 +3,7 @@ import type { Ctx } from '../../context.js';
 import { gsError, type GsError } from '../../result.js';
 import { runExternal, type ToolCommand } from '../../tools/run.js';
 import type { DesktopBuild } from '../builds.js';
+import { boundedReasons, MAX_REASONS } from '../reasons.js';
 import { failedDestination, type DestinationResult, type PublishEnv } from '../types.js';
 import { butlerErrors, butlerResult, butlerUnreachable, ensureButler, parseButlerJson } from './butler.js';
 
@@ -22,7 +23,7 @@ const UNREACHABLE_FIX = 'Check your internet connection (and proxy, if you use o
 
 export interface ButlerLogin {
   ok: boolean;
-  /** Why not: the first line of butler's error. */
+  /** Why not: butler's errors, bounded (boundedReasons) and joined. */
   reason: string;
   /** itch.io couldn't be reached, or failed itself: nothing a login would fix. */
   unreachable: boolean;
@@ -33,8 +34,10 @@ export async function checkButlerLogin(ctx: Ctx, tool: ToolCommand): Promise<But
   const r = await runExternal(tool, ['--json', 'login'], { timeoutMs: LOGIN_CHECK_TIMEOUT_MS, onLine: (l) => ctx.log(`butler: ${l}`) });
   const messages = parseButlerJson(r.output);
   if (r.exitCode === 0 && butlerResult(messages)?.status === 'success') return { ok: true, reason: '', unreachable: false };
-  const reason = butlerErrors(messages)[0] ?? r.spawnError ?? (r.timedOut ? "it didn't answer in time" : `butler exited with code ${r.exitCode}`);
-  return { ok: false, reason, unreachable: r.timedOut || butlerUnreachable(reason) };
+  const errors = butlerErrors(messages);
+  const reason = errors.length ? boundedReasons(errors).join('; ') : (r.spawnError ?? (r.timedOut ? "it didn't answer in time" : `butler exited with code ${r.exitCode}`));
+  // Judged on butler's first error as it printed it: cutting it could cut off what says itch.io is unreachable.
+  return { ok: false, reason, unreachable: r.timedOut || butlerUnreachable(errors[0] ?? reason) };
 }
 
 /** Pushes out/windows, out/mac and out/linux to the itch.io channels windows, mac and linux, versioned. */
@@ -105,6 +108,8 @@ export async function publishItch(ctx: Ctx, config: Config, builds: DesktopBuild
   }
 
   const errors: GsError[] = [];
+  // The failed pushes quote MAX_REASONS of butler's reasons in all, as a failed Steam upload does (each quotes its first).
+  let quotable = MAX_REASONS;
   for (const [i, build] of builds.entries()) {
     const channel = details.channels[i];
     const args = ['--json', 'push', ...(opts.dryRun ? ['--dry-run'] : []), build.dir, `${project}:${channel.channel}`, '--userversion', config.version];
@@ -115,12 +120,15 @@ export async function publishItch(ctx: Ctx, config: Config, builds: DesktopBuild
       channel.buildId = typeof pushed.buildId === 'number' && pushed.buildId > 0 ? pushed.buildId : null;
       continue;
     }
-    const reason = butlerErrors(messages).join('; ') || r.spawnError || (r.timedOut ? "it didn't finish in time" : `butler exited with code ${r.exitCode}`);
+    const printed = butlerErrors(messages);
+    const quoted = Math.max(1, quotable);
+    quotable -= Math.min(printed.length, quoted);
+    const reason = printed.length ? boundedReasons(printed, quoted).join('; ') : r.spawnError || (r.timedOut ? "it didn't finish in time" : `butler exited with code ${r.exitCode}`);
     errors.push(
       gsError(
         'ITCH_PUSH_FAILED',
         `Pushing ${build.target} to ${project}:${channel.channel} failed: ${reason}`,
-        butlerUnreachable(reason)
+        butlerUnreachable(printed.join('\n') || reason)
           ? UNREACHABLE_FIX
           : `Check that itch.project (${project}) is a game your itch.io account owns: create its page on itch.io first. butler's full output is in ${ctx.logPath}.`,
       ),

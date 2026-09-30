@@ -135,6 +135,16 @@ describe('gameshipper publish', () => {
     expect(r.out.length).toBeLessThan(5000);
   });
 
+  it('keeps the Result small when butler prints 60 errors of 1,000 characters for every push', async () => {
+    await useFakes(true);
+    vi.stubEnv('FAKE_BUTLER_MODE', 'noisy-push');
+    const p = fakeProject({ itch: { project: 'moonstudio/moon-game' } });
+    const r = await run(['publish', '--json', '--dir', p.dir]);
+    expect(r.json().errors.map((e: { code: string }) => e.code)).toEqual(['ITCH_PUSH_FAILED', 'ITCH_PUSH_FAILED', 'ITCH_PUSH_FAILED']);
+    expect(r.json().errors[0].message).toContain('; …and 50 more');
+    expect(r.out.length).toBeLessThan(20_000);
+  });
+
   it('an empty --repo= falls back to github.repo', async () => {
     await useFakes(true);
     const p = fakeProject({ github: { repo: 'moonstudio/moon-game' } });

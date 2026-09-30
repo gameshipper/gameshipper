@@ -89,19 +89,34 @@ function shortIssue(issue: GsError): GsError {
   return { ...issue, message: `${start}${CUT}${message.slice(-KEPT_END_CHARS)}` };
 }
 
+/** An error or a warning: an object with a string code and a string message. */
+function isIssue(value: object): value is GsError {
+  const { code, message } = value as { code?: unknown; message?: unknown };
+  return typeof code === 'string' && typeof message === 'string';
+}
+
+/** `value` (JSON) with every issue in it, however deep, cut by shortIssue. Copies what it changes; `value` is untouched. */
+function shortIssuesIn(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(shortIssuesIn);
+  if (value === null || typeof value !== 'object') return value;
+  const copy = Object.fromEntries(Object.entries(value).map(([key, v]) => [key, shortIssuesIn(v)]));
+  return isIssue(copy) ? shortIssue(copy) : copy;
+}
+
 /**
  * The Result as a tool returns it, well under what an agent's tool output can hold even for a noisy game. Each
- * error's and warning's message is cut to MAX_AGENT_MESSAGE_CHARS. A smoke run's summary leaves out its list of
- * events (`eventsLeftOut` counts them): every problem in it is already in errors and warnings, and
- * data.smoke.eventsLog has them all.
+ * error's and warning's message is cut to MAX_AGENT_MESSAGE_CHARS, and so is every issue's in data (each publish
+ * destination's errors and warnings, say). A smoke run's summary leaves out its list of events (`eventsLeftOut` counts
+ * them): every problem in it is already in errors and warnings, and data.smoke.eventsLog has them all.
  */
 export function resultForAgent(result: Result<unknown>): Result<unknown> {
   const short = { ...result, errors: result.errors.map(shortIssue), warnings: result.warnings.map(shortIssue) };
   const data = result.data as { smoke?: { summary?: { events?: unknown } } } | undefined;
-  const summary = data?.smoke?.summary;
-  if (!summary || !Array.isArray(summary.events)) return short;
+  if (data === undefined) return short;
+  const summary = data.smoke?.summary;
+  if (!summary || !Array.isArray(summary.events)) return { ...short, data: shortIssuesIn(data) };
   const { events, ...rest } = summary;
-  return { ...short, data: { ...data, smoke: { ...data.smoke, summary: { eventsLeftOut: events.length, ...rest } } } };
+  return { ...short, data: shortIssuesIn({ ...data, smoke: { ...data.smoke, summary: { eventsLeftOut: events.length, ...rest } } }) };
 }
 
 export function createMcpServer(opts: McpOptions): McpServer {

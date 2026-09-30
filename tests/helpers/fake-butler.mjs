@@ -2,10 +2,11 @@
 // A stand-in for itch.io's butler 15.31.0 in tests (GAMESHIPPER_BUTLER points at it). With --json it prints the JSON
 // lines the real one printed on 2026-09-29, and it records every run.
 //   FAKE_BUTLER_STATE  folder for runs.jsonl, pushes.jsonl and the saved "creds" file (required)
-//   FAKE_BUTLER_MODE   ok | push-fails | login-fails | offline | server-error
+//   FAKE_BUTLER_MODE   ok | push-fails | noisy-push | noisy-login | login-fails | offline | server-error
 // BUTLER_API_KEY counts as a login; the value "bad" is refused the way itch.io refuses an invalid key. "offline" and
 // "server-error" fail every call that needs itch.io (checking a login, a real push) the way butler did with itch.io's
-// address pointed at an unknown host and at a server answering 500.
+// address pointed at an unknown host and at a server answering 500. "noisy-push" fails each real push, and
+// "noisy-login" each check of a login it has, with 60 errors whose first lines are 1,000 characters each.
 // It never calls process.exit(): with NODE_USE_SYSTEM_CA=1, Node 24.7 on macOS can crash there.
 import * as fs from 'node:fs';
 import * as path from 'node:path';
@@ -17,6 +18,8 @@ const json = raw.includes('--json') || raw.includes('-j');
 const args = raw.filter((a) => a !== '--json' && a !== '-j');
 const now = 1790734889;
 const STACK = '\ngithub.com/itchio/go-itchio.(*Client).GetResponse\n\t/Users/runner/go/pkg/mod/github.com/itchio/go-itchio/http_helpers.go:130';
+/** 60 different errors, each a 1,000-character line and a line of stack. */
+const NOISY = Array.from({ length: 60 }, (_, i) => `${`itch.io API error (400): problem ${i + 1} `.padEnd(1000, 'x')}\nmain.main()`);
 
 const emit = (obj) => process.stdout.write(`${JSON.stringify({ ...obj, time: now })}\n`);
 const log = (message) => (json ? emit({ level: 'info', message, type: 'log' }) : process.stderr.write(`${message}\n`));
@@ -33,6 +36,10 @@ function refuse() {
   }
   if ((key || fs.existsSync(creds())) && mode === 'server-error') {
     error(`itch.io API error (500): /wharf/status: internal error${STACK}\nvalidating credentials`);
+    return 1;
+  }
+  if ((key || fs.existsSync(creds())) && mode === 'noisy-login') {
+    for (const message of NOISY) error(message);
     return 1;
   }
   if (key === 'bad') {
@@ -72,6 +79,10 @@ function push() {
   if (refused !== null) return refused;
   if (mode === 'push-fails') {
     error(`itch.io API error (400): /wharf/builds: invalid target (bad user/game)${STACK}`);
+    return 1;
+  }
+  if (mode === 'noisy-push') {
+    for (const message of NOISY) error(message);
     return 1;
   }
   const pushes = path.join(state, 'pushes.jsonl');

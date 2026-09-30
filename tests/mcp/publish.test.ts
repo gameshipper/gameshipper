@@ -1,3 +1,5 @@
+import * as fs from 'node:fs';
+import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Client } from '@modelcontextprotocol/client';
 import { InMemoryTransport } from '@modelcontextprotocol/server';
@@ -61,6 +63,31 @@ describe.skipIf(process.platform === 'win32' || !canRunTs)('gameshipper_publish 
       expect(dry.errors.map((e) => e.code)).toEqual(['STEAM_LOGIN_REQUIRED']);
       expect(dry.warnings.map((w) => w.code)).toEqual(['ITCH_UPLOADS_LIVE', 'ITCH_LOGIN_REQUIRED']);
       expect(dry.data.destinations.map((d: { status: string }) => d.status)).toEqual(['failed', 'previewed']);
+    } finally {
+      await client.close();
+    }
+  });
+
+  it('keeps the result small when butler prints 60 errors of 1,000 characters for every push', async () => {
+    const butlerState = makeTmpDir();
+    fs.writeFileSync(path.join(butlerState, 'creds'), 'key');
+    vi.stubEnv('GAMESHIPPER_BUTLER', FAKE_BUTLER);
+    vi.stubEnv('FAKE_BUTLER_STATE', butlerState);
+    vi.stubEnv('FAKE_BUTLER_MODE', 'noisy-push');
+    vi.stubEnv('BUTLER_API_KEY', undefined);
+    const p = fakeProject({ itch: { project: 'moonstudio/moon-game' } });
+    const server = createMcpServer({ projectDir: p.dir, run: realCli });
+    const [clientSide, serverSide] = InMemoryTransport.createLinkedPair();
+    await server.connect(serverSide);
+    const client = new Client({ name: 'test', version: '1.0.0' });
+    await client.connect(clientSide);
+    try {
+      const r = await client.callTool({ name: 'gameshipper_publish', arguments: {} });
+      const result = r.structuredContent as unknown as ToolResult;
+      expect(result.errors.map((e) => e.code)).toEqual(['ITCH_PUSH_FAILED', 'ITCH_PUSH_FAILED', 'ITCH_PUSH_FAILED']);
+      expect(JSON.stringify(r).length).toBeLessThan(20_000);
+      const [itch] = result.data.destinations;
+      for (const issue of [...result.errors, ...result.warnings, ...itch.errors, ...itch.warnings]) expect(issue.message.length).toBeLessThanOrEqual(300);
     } finally {
       await client.close();
     }

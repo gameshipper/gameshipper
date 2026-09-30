@@ -114,6 +114,35 @@ describe('publishItch', () => {
     expect(r.errors[0].message).toBe('Pushing windows to moonstudio/moon-game:windows failed: itch.io API error (400): /wharf/builds: invalid target (bad user/game)');
   });
 
+  it("keeps butler's reasons short: first lines of 300 characters, 10 in all, and how many more there were", async () => {
+    const p = itchProject();
+    const pushed = await publishItch(testCtx(p.dir), p.config, p.builds, setup({}, 'noisy-push').opts);
+    expect(pushed.errors.map((e) => e.code)).toEqual(['ITCH_PUSH_FAILED', 'ITCH_PUSH_FAILED', 'ITCH_PUSH_FAILED']);
+    const login = await publishItch(testCtx(p.dir), p.config, p.builds, setup({}, 'noisy-login').opts);
+    expect(login.errors.map((e) => e.code)).toEqual(['ITCH_LOGIN_REQUIRED']);
+    // The login check and the first failed push quote 10 reasons; the other pushes, which come after, their first.
+    for (const [e, quoted] of [
+      [login.errors[0], 10],
+      [pushed.errors[0], 10],
+      [pushed.errors[1], 1],
+      [pushed.errors[2], 1],
+    ] as const) {
+      expect(e.message).not.toContain('\n');
+      const reasons = e.message.split('; ');
+      expect(reasons).toHaveLength(quoted + 1);
+      expect(reasons[0]).toMatch(/itch\.io API error \(400\): problem 1 x+…$/);
+      for (const [i, r] of reasons.slice(1, quoted).entries()) {
+        expect(r).toMatch(new RegExp(`^itch\\.io API error \\(400\\): problem ${i + 2} x+…$`));
+        expect(r).toHaveLength(301);
+      }
+      expect(reasons.at(-1)).toMatch(new RegExp(`^…and ${60 - quoted} more(\\)\\.)?$`));
+      expect(e.message.length).toBeLessThan(3500);
+    }
+    expect(pushed.errors[1].message).toMatch(/^Pushing mac to moonstudio\/moon-game:mac failed: itch\.io API error \(400\): problem 1 x+…; …and 59 more$/);
+    // Refused, not unreachable: the fix is about the login.
+    expect(login.errors[0].fix).toContain('in their own terminal');
+  });
+
   it("ITCH_PUSH_FAILED when itch.io can't be reached: never a login problem, and no browser login", async () => {
     const p = itchProject();
     for (const [name, extra, apiKey] of [
