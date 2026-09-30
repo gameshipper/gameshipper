@@ -3,7 +3,7 @@ import * as path from 'node:path';
 import * as zlib from 'node:zlib';
 import { outputTail } from '../proc.js';
 import { readZipEntries, readZipEntry } from '../steam/zip.js';
-import { runExternal, toolCommand } from './run.js';
+import { runExternal, toolCommand, withoutSecrets } from './run.js';
 
 const LOCAL_HEADER = 0x04034b50;
 const DIRECTORY_ENTRY = 0x02014b50;
@@ -155,7 +155,7 @@ export async function zipFolder(srcDir: string, zipFile: string, opts: { platfor
     return;
   }
   const args = ['-c', '-k', '--norsrc', '--noextattr', '--noacl', srcDir, zipFile];
-  const r = await runExternal(toolCommand(opts.ditto ?? DITTO, { ...process.env }), args, { timeoutMs: ZIP_TIMEOUT_MS });
+  const r = await runExternal(toolCommand(opts.ditto ?? DITTO, withoutSecrets(process.env)), args, { timeoutMs: ZIP_TIMEOUT_MS });
   if (r.exitCode === 0) return;
   fs.rmSync(zipFile, { force: true });
   const why =

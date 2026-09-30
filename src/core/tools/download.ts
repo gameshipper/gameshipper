@@ -28,19 +28,17 @@ const size = (bytes: number) => (bytes >= 1 << 20 ? `${Math.round(bytes / (1 << 
 /** The whole body, or an Error once it's larger than maxBytes (as it says, or as it arrives). */
 async function readCapped(res: Response, maxBytes: number): Promise<Buffer> {
   const tooLarge = () => new Error(`it's larger than ${size(maxBytes)}`);
+  if (!res.body) return Buffer.alloc(0);
   if (Number(res.headers.get('content-length')) > maxBytes) {
-    await res.body?.cancel();
+    await res.body.cancel();
     throw tooLarge();
   }
   const chunks: Buffer[] = [];
   let total = 0;
-  if (!res.body) return Buffer.alloc(0);
   for await (const chunk of res.body) {
     total += chunk.byteLength;
-    if (total > maxBytes) {
-      // Leaving the loop early cancels the rest of the download.
-      throw tooLarge();
-    }
+    // Leaving the loop early cancels the rest of the download.
+    if (total > maxBytes) throw tooLarge();
     chunks.push(Buffer.from(chunk));
   }
   return Buffer.concat(chunks);
