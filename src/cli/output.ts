@@ -38,6 +38,8 @@ const USAGE_CODES = new Set([
   'LOGO_NOT_TRANSPARENT',
   'GAME_DIR_MISSING',
   'GAME_DIR_INVALID',
+  // `play --packaged` before `build` made this computer's build.
+  'PACKAGED_BUILD_MISSING',
 ]);
 
 export function exitCodeFor(result: Result<unknown>): number {

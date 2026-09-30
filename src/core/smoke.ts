@@ -417,6 +417,30 @@ export function launch(ctx: Ctx, command: string, args: string[], opts: LaunchOp
   });
 }
 
+/**
+ * Starts a game without waiting for it (`play --detach`, which the MCP server uses): it keeps running after
+ * Gameshipper exits, and nothing stops it with Gameshipper. Its output goes to the run log. Resolves with its
+ * process ID once it has started; rejects with LAUNCH_FAILED when it can't start.
+ */
+export async function launchDetached(ctx: Ctx, command: string, args: string[], env: NodeJS.ProcessEnv): Promise<number> {
+  const out = fs.openSync(ctx.logPath, 'a');
+  try {
+    // Output to a file, not a pipe: nothing of the game's holds Gameshipper's own output open after it exits.
+    const child = spawn(command, args, { env, detached: true, stdio: ['ignore', out, out], windowsHide: true });
+    await new Promise<void>((resolve, reject) => {
+      child.once('spawn', resolve);
+      child.once('error', (e) =>
+        reject(new GsFailure('LAUNCH_FAILED', `Couldn't start ${command}: ${e.message}`, 'Reinstall Gameshipper (e.g. `npx gameshipper@latest`), or check the build exists.')),
+      );
+    });
+    child.unref();
+    ctx.log(`started ${[command, ...args].join(' ')} as process ${child.pid}; not waiting for it`);
+    return child.pid!;
+  } finally {
+    fs.closeSync(out);
+  }
+}
+
 export function gameEnv(eventsLog: string, userDataDir: string, windowed: boolean): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = { ...process.env, GAMESHIPPER_LOG: eventsLog, GAMESHIPPER_USER_DATA: userDataDir, GAMESHIPPER_WINDOWED: windowed ? '1' : '' };
   delete env.ELECTRON_RUN_AS_NODE;

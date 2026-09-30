@@ -287,6 +287,11 @@ async function playCommand(projectDir: string, values: Values, io: CliIO, run: R
   if (badSeconds(seconds)) return secondsUsage(10);
   const smoke = values.smoke === true || secondsRaw !== undefined;
   const screenshotsRaw = str(values.screenshot);
+  const detach = values.detach === true;
+  if (detach && (smoke || screenshotsRaw !== undefined)) {
+    return usage("--detach can't be combined with --smoke, --seconds or --screenshot.", 'Drop --detach: timed runs always wait for the game to finish.');
+  }
+  const packaged = values.packaged === true;
   const screenshotAt = screenshotsRaw === undefined ? undefined : parseScreenshotTimes(screenshotsRaw);
   if (screenshotAt === null) {
     return usage(
@@ -300,7 +305,7 @@ async function playCommand(projectDir: string, values: Values, io: CliIO, run: R
   const ctx = startRun(projectDir, 'play', run);
   let result: Result<unknown>;
   if (loaded.ok) {
-    if (!run.json) io.write(playStartLine(smoke ? seconds : undefined, screenshotAt));
+    if (!run.json) io.write(playStartLine(smoke ? seconds : undefined, screenshotAt, packaged));
     const frozenLock = values['frozen-lock'] === true;
     result = await capture(
       () =>
@@ -309,6 +314,8 @@ async function playCommand(projectDir: string, values: Values, io: CliIO, run: R
           smokeSeconds: smoke ? seconds : undefined,
           screenshotAt,
           fullscreen: values.fullscreen === true,
+          packaged,
+          detach,
           frozenLock,
           steamSdk: steamSdkFlag(values),
           onGameStarted: (data, warnings) => (run.playing = { data, warnings }),
@@ -325,12 +332,14 @@ async function playCommand(projectDir: string, values: Values, io: CliIO, run: R
 }
 
 /** What a person sees while `play` starts the game. */
-function playStartLine(smokeSeconds: number | undefined, screenshotAt: number[] | undefined): string {
+function playStartLine(smokeSeconds: number | undefined, screenshotAt: number[] | undefined, packaged: boolean): string {
   if (screenshotAt) {
     const seconds = screenshotRunSeconds(screenshotAt, smokeSeconds);
     return `Running the game for ${plural(seconds, 'second')} to save ${plural(screenshotAt.length, 'screenshot')}…\n`;
   }
   if (smokeSeconds !== undefined) return `Running the game for ${plural(smokeSeconds, 'second')} to check it…\n`;
+  // A packaged game ignores F12 outside smoke runs: in a shipped game it's Steam's screenshot key.
+  if (packaged) return "Starting the build in out/. Close its window when you're done.\n";
   return "Starting the game. Close its window when you're done. F12 saves a 1920x1080 store screenshot.\n";
 }
 

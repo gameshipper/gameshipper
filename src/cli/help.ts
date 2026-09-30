@@ -64,7 +64,7 @@ export const COMMANDS: CommandHelp[] = [
   {
     name: 'play',
     summary: 'Run the game in the desktop shell; F12 saves a 1920x1080 store screenshot. --smoke runs it briefly and reports problems.',
-    usage: 'npx gameshipper play [--smoke [--seconds <n>]] [--screenshot <s,s,...>] [--fullscreen] [--frozen-lock] [--steam-sdk <path>]',
+    usage: 'npx gameshipper play [--smoke [--seconds <n>]] [--screenshot <s,s,...>] [--packaged] [--detach] [--fullscreen] [--frozen-lock] [--steam-sdk <path>]',
     flags: [
       { name: 'smoke', description: 'Run for a few seconds, quit, and report errors, missing files, internet use and crashes.' },
       { name: 'seconds', value: '<n>', description: 'How long a smoke run lasts after loading (default 5, at most 600). Implies --smoke.' },
@@ -74,6 +74,11 @@ export const COMMANDS: CommandHelp[] = [
         description: 'Save 1920x1080 store screenshots to out/store/screenshots this many seconds after loading, then quit (e.g. 5,10,15,20,25; up to 20 times, each at most 600).',
       },
       { name: 'fullscreen', description: 'Honour window.fullscreen (play is windowed by default).' },
+      {
+        name: 'packaged',
+        description: "Run this computer's build from out/ (made by `build`) as it is, instead of preparing the game. With --smoke, tests the real build.",
+      },
+      { name: 'detach', description: 'Start the game and return at once, leaving it running. Not with --smoke, --seconds or --screenshot.' },
       FROZEN_LOCK,
       STEAM_SDK,
     ],
