@@ -7,6 +7,8 @@ export default defineConfig({
     include: ['tests/**/*.test.ts'],
     exclude: ['tests/**/*.int.test.ts', 'node_modules/**'],
     testTimeout: 30_000,
+    // Deletes each test file's temp folders when it's done (GAMESHIPPER_KEEP_TMP=1 keeps a failing file's).
+    setupFiles: ['tests/setup.ts'],
     // Tests never find the developer's own Steamworks SDK: not through GAMESHIPPER_STEAM_SDK, and not in
     // Gameshipper's cache, which keeps an SDK once a build has used one. They never sign with the developer's
     // Apple identity or notarize either: the Apple variables are set empty, which means unset.

@@ -58,7 +58,7 @@ describe('smoke detectors in real Electron', () => {
     checkBrokenGame(packaged, 'packaged app');
     expect(packaged.warnings.every((w) => w.code.startsWith('GAME_'))).toBe(true);
 
-    // Kept when a check fails, for debugging.
+    // Deleted now to free the disk space; when a check fails, GAMESHIPPER_KEEP_TMP=1 keeps it for debugging.
     fs.rmSync(dir, { recursive: true, force: true, maxRetries: 3 });
   });
 

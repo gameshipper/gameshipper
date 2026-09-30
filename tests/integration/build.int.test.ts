@@ -77,7 +77,7 @@ describe('end to end on this computer', () => {
     expect(Object.keys(lastRuns).sort()).toEqual(['build', 'init', 'play']);
     expect(Object.values(lastRuns).every((r) => r.ok)).toBe(true);
 
-    // Kept when a check fails, for debugging with `status --json --dir <dir>`.
+    // Deleted now to free the disk space; when a check fails, GAMESHIPPER_KEEP_TMP=1 keeps it for `status --json --dir <dir>`.
     fs.rmSync(dir, { recursive: true, force: true, maxRetries: 3 });
   });
 

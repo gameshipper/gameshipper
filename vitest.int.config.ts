@@ -9,6 +9,8 @@ export default defineConfig({
     hookTimeout: 600_000,
     // Integration tests package real apps; running them side by side makes them fight over downloads and CPU.
     fileParallelism: false,
+    // Deletes each test file's temp folders when it's done (GAMESHIPPER_KEEP_TMP=1 keeps a failing file's).
+    setupFiles: ['tests/setup.ts'],
     // Builds never find the developer's own Steamworks SDK: not through GAMESHIPPER_STEAM_SDK, and not in
     // Gameshipper's cache, which keeps an SDK once a build has used one. The Steam tests bring their own.
     // Mac builds are never signed with the developer's Apple identity or notarized: empty means unset.
