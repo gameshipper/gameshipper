@@ -192,9 +192,12 @@ describe('publishSteam', () => {
 
   it('STEAMCMD_CANT_RUN when this computer cannot run SteamCMD', async () => {
     const p = steamProject();
-    const r = await publishSteam(testCtx(p.dir), p.config, p.builds, setup({ platform: 'darwin' }, 'bad-cpu').opts);
+    // Publishes as a Mac wherever the project's path could be a Mac's. A Windows path has backslashes, which
+    // SteamCMD's build scripts can't hold on a Mac (STEAM_PATH_UNSUPPORTED), so there it publishes as Windows.
+    const platform = process.platform === 'win32' ? 'win32' : 'darwin';
+    const r = await publishSteam(testCtx(p.dir), p.config, p.builds, setup({ platform }, 'bad-cpu').opts);
     expect(r.errors[0].code).toBe('STEAMCMD_CANT_RUN');
-    expect(r.errors[0].fix).toContain('softwareupdate --install-rosetta');
+    expect(r.errors[0].fix).toContain(platform === 'win32' ? 'steamcmd.exe' : 'softwareupdate --install-rosetta');
   });
 
   it('never waits at a password prompt', async () => {

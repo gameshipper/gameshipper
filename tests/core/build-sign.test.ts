@@ -47,7 +47,8 @@ describe('runBuild signs the Mac app', () => {
     const r = await runBuild(testCtx(dir), config({ targets: ['mac', 'linux'] }), { shellDir, host: 'darwin', tools, pack: fakePack, env: {}, finishMac });
     expect(r.errors).toEqual([]);
     // No Steamworks SDK, so no Steam in the app and none of Steam's entitlements.
-    expect(readText(dir, 'order.txt')).toBe('afterPackage mac\nsign adhoc /out/mac/Moon Game.app steam=false\nafterPackage linux\n');
+    // The app's path is joined the way this OS joins paths: \out\mac\Moon Game.app on Windows.
+    expect(readText(dir, 'order.txt')).toBe(`afterPackage mac\nsign adhoc ${path.join('/out/mac', 'Moon Game.app')} steam=false\nafterPackage linux\n`);
     const [mac, linux] = r.data!.targets;
     expect(mac.output).toMatchObject({ mac: { signing: 'adhoc', notarized: false } });
     expect(mac.warnings.map((w) => w.code)).toEqual(['MAC_UNSIGNED']);

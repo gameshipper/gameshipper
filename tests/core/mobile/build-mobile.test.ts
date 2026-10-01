@@ -43,7 +43,8 @@ describe('buildMobileTargets', () => {
     expect(readText(android, 'app/src/main/assets/public/_gameshipper/mobile.js')).toContain('Preferences');
     expect(externalRefs(ios)).toEqual([]);
     expect(externalRefs(android)).toEqual([]);
-    expect(fs.statSync(path.join(android, 'gradlew')).mode & 0o111).not.toBe(0);
+    // Windows has no executable bits: there Android Studio and gradlew.bat run the build.
+    if (process.platform !== 'win32') expect(fs.statSync(path.join(android, 'gradlew')).mode & 0o111).not.toBe(0);
     expect(fs.existsSync(path.join(dir, '.gameshipper/mobile/ios'))).toBe(false);
   });
 
