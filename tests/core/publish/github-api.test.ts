@@ -1,5 +1,6 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
+import { Worker } from 'node:worker_threads';
 import { afterEach, describe, expect, it } from 'vitest';
 import { GithubClient } from '../../../src/core/publish/github/api.js';
 import { startFakeGithub, type FakeGithub } from '../../helpers/fake-github.js';
@@ -97,6 +98,37 @@ describe('GithubClient', () => {
     await client('test-token').createDraft({ tag: 'v1.0.0', name: 'x', body: '' });
     expect((await client('test-token').findRelease('v1.0.0'))?.draft).toBe(true);
     expect(await client('test-token').findRelease('v9.9.9')).toBeNull();
+  });
+
+  it('reaches GitHub after zipping kept Node busy for longer than GitHub keeps an idle connection open', async () => {
+    // On Windows and Linux the builds are zipped in one go: for that long Node handles nothing, not even the server
+    // closing the connection the earlier calls used. The server runs in a thread of its own, so it can close it then.
+    const server = new Worker(
+      `const http = require('node:http');
+       const { parentPort } = require('node:worker_threads');
+       const release = { id: 1, tag_name: 'v1.0.0', name: 'x', draft: true, html_url: '', upload_url: '', assets: [] };
+       const server = http.createServer((req, res) => {
+         req.resume().on('end', () => {
+           res.writeHead(req.method === 'POST' ? 201 : 200, { 'content-type': 'application/json' });
+           res.end(JSON.stringify(req.method === 'POST' ? release : []));
+           // As GitHub does after a while: here 100 ms after each answer.
+           setTimeout(() => req.socket.destroy(), 100);
+         });
+       });
+       server.listen(0, '127.0.0.1', () => parentPort.postMessage(server.address().port));`,
+      { eval: true },
+    );
+    try {
+      const port = await new Promise<number>((resolve) => server.once('message', resolve));
+      const c = new GithubClient({ apiBase: `http://127.0.0.1:${port}`, token: 'test-token', repo: REPO, userAgent: 'gameshipper-test', log: () => {} });
+      expect(await c.findRelease('v1.0.0')).toBeNull();
+      // From the next turn of Node's loop, fetch would use that connection again.
+      await new Promise((resolve) => setImmediate(resolve));
+      for (const until = Date.now() + 500; Date.now() < until; );
+      expect(await c.createDraft({ tag: 'v1.0.0', name: 'x', body: '' })).toMatchObject({ tag_name: 'v1.0.0' });
+    } finally {
+      await server.terminate();
+    }
   });
 
   it('uploads a file as it streams from disk, replaces it, and publishes', async () => {

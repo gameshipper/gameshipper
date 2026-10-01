@@ -97,6 +97,10 @@ export class GithubClient {
       accept: 'application/vnd.github+json',
       'x-github-api-version': '2022-11-28',
       'user-agent': this.opts.userAgent,
+      // A connection of its own for every call. Zipping the builds on Windows and Linux keeps Node busy in one go,
+      // often for longer than GitHub keeps an idle connection open; Node can't see GitHub closing it meanwhile, and
+      // the next call, sent on that connection, would fail (ECONNRESET).
+      connection: 'close',
     };
     let body: string | ReadableStream | undefined;
     if (init.json !== undefined) {
