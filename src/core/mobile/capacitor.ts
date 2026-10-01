@@ -1,4 +1,5 @@
 import { spawn } from 'node:child_process';
+import * as fs from 'node:fs';
 import { createRequire } from 'node:module';
 import * as path from 'node:path';
 import type { Ctx } from '../context.js';
@@ -29,8 +30,22 @@ function failed(message: string, fix: string): GsFailure {
 }
 
 /**
+ * An empty folder in workDir that the Capacitor CLI gets as its home folder. In the real one it looks for the
+ * Android SDK where Android Studio installs it on a Mac (~/Library/Android/sdk). When that exists, `cap add android`
+ * writes its path into the project's local.properties and runs ./gradlew, which downloads Gradle and the Android
+ * build tools: minutes on the network, for a project that is generated offline and holds no path from this computer.
+ */
+function emptyHome(workDir: string): string {
+  const home = path.join(workDir, 'home');
+  fs.rmSync(home, { recursive: true, force: true });
+  fs.mkdirSync(home, { recursive: true });
+  return home;
+}
+
+/**
  * Runs Gameshipper's own copy of the Capacitor CLI in workDir, logging its output to the run log. Piped output
- * and CI=1 keep it non-interactive, which also keeps its telemetry off and its settings file unwritten.
+ * and CI=1 keep it non-interactive, which also keeps its telemetry off and its settings file unwritten. Its home
+ * folder (HOME, or USERPROFILE on Windows) is an empty one, so it never runs Gradle (see emptyHome).
  * Throws MOBILE_GENERATE_FAILED.
  */
 export function runCapacitor(ctx: Ctx, workDir: string, args: string[], opts: { timeoutMs?: number } = {}): Promise<void> {
@@ -38,9 +53,10 @@ export function runCapacitor(ctx: Ctx, workDir: string, args: string[], opts: { 
   const shown = `cap ${args.join(' ')}`;
   ctx.log(`${shown} (in ${workDir})`);
   return new Promise((resolve, reject) => {
+    const home = emptyHome(workDir);
     const child = spawn(process.execPath, [cli, ...args], {
       cwd: workDir,
-      env: { ...process.env, CI: '1' },
+      env: { ...process.env, CI: '1', HOME: home, USERPROFILE: home },
       stdio: ['ignore', 'pipe', 'pipe'],
       detached: process.platform !== 'win32',
       windowsHide: true,

@@ -1,6 +1,6 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { parseConfig } from '../../../src/core/config/load.js';
 import { CAPACITOR_VERSION, runCapacitor } from '../../../src/core/mobile/capacitor.js';
 import { SHIM_TAG } from '../../../src/core/mobile/shim.js';
@@ -36,6 +36,10 @@ describe('capacitorConfig', () => {
 });
 
 describe('prepareMobileWorkspace', () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
   it('writes a Capacitor project with the staged game and the saves shim', () => {
     const { dir, stageDir } = staged();
     const work = prepareMobileWorkspace(testCtx(dir), config(), stageDir);
@@ -87,6 +91,24 @@ describe('prepareMobileWorkspace', () => {
     expect(readText(work, 'android/app/src/main/assets/public/index.html')).toContain(SHIM_TAG);
     expect(readText(work, 'android/app/src/main/assets/capacitor.plugins.json')).toContain('PreferencesPlugin');
     expect(fs.readFileSync(ctx.logPath, 'utf8')).toContain('[capacitor]');
+  });
+
+  it('never runs Gradle, even on a computer with an Android SDK in the home folder', async () => {
+    // Android Studio on a Mac installs its SDK in ~/Library/Android/sdk, and GitHub's macOS runners have one there.
+    // When the Capacitor CLI finds it, `cap add android` writes that path into local.properties and runs ./gradlew:
+    // minutes of downloads, and a path from this computer in the generated project.
+    const home = makeTmpDir();
+    fs.mkdirSync(path.join(home, 'Library', 'Android', 'sdk'), { recursive: true });
+    vi.stubEnv('HOME', home);
+    vi.stubEnv('USERPROFILE', home);
+    const { dir, stageDir } = staged();
+    const ctx = testCtx(dir);
+    const work = prepareMobileWorkspace(ctx, config(), stageDir);
+    await runCapacitor(ctx, work, ['add', 'android']);
+    expect(fs.existsSync(path.join(work, 'android', 'gradlew'))).toBe(true);
+    expect(fs.existsSync(path.join(work, 'android', 'local.properties'))).toBe(false);
+    expect(fs.existsSync(path.join(work, 'android', '.gradle'))).toBe(false);
+    expect(fs.readFileSync(ctx.logPath, 'utf8')).not.toContain(home);
   });
 
   it('MOBILE_GENERATE_FAILED with the end of the CLI output when it fails', async () => {
