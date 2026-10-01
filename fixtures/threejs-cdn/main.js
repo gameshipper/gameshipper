@@ -7,7 +7,10 @@ document.body.appendChild(renderer.domElement);
 
 const scene = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(60, innerWidth / innerHeight, 0.1, 100);
-camera.position.set(2, 2, 3);
+// Near enough that the cube covers a good part of the window whichever way it's turned. From further away, the
+// moments when it shows one face only look like a small square on an empty screen, which `gameshipper check` warns
+// about (a frame that is mostly one colour).
+camera.position.set(1.4, 1.4, 2.1);
 new OrbitControls(camera, renderer.domElement);
 
 const cube = new THREE.Mesh(new THREE.BoxGeometry(), new THREE.MeshNormalMaterial());
