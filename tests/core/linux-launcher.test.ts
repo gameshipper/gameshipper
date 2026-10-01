@@ -190,8 +190,9 @@ describe.skipIf(!posix)('the launcher, run', () => {
     expect(ok.started?.pid).toBe(ok.pid);
     expect([ok.status, ok.signal]).toEqual([0, null]);
     expect([run(sh, [launcher], { how: '7' }).status, run(sh, [launcher], { how: '134' }).status]).toEqual([7, 134]);
-    // A shell that waited for the game would end with exit code 128 + the signal's number instead.
-    for (const signal of ['SIGTERM', 'SIGKILL', 'SIGTRAP'] as const) {
+    // A shell that waited for the game would end with exit code 128 + the signal's number instead. (Not tried with
+    // SIGTRAP, the signal Chromium stops itself with: macOS files a crash report for every process that ends so.)
+    for (const signal of ['SIGTERM', 'SIGKILL'] as const) {
       const r = run(sh, [launcher], { how: signal });
       expect([r.status, r.signal], signal).toEqual([null, signal]);
     }
