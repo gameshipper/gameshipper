@@ -2,7 +2,9 @@ import { spawnSync } from 'node:child_process';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { linuxLauncherScript } from '../../src/core/desktop/linux-launcher.js';
 import { runSmoke } from '../../src/core/smoke.js';
+import { readZipEntries } from '../../src/core/steam/zip.js';
 import { cli, cliAsync, ROOT } from '../helpers/built-cli.js';
 import { testCtx } from '../helpers/ctx.js';
 import { FAKE_BUTLER, FAKE_STEAMCMD } from '../helpers/fake-builds.js';
@@ -76,6 +78,10 @@ describe('publish end to end: real builds, fake SteamCMD, butler and GitHub', ()
     const windowsDepot = build.depots.find((d: { depotId: number }) => d.depotId === 1234561);
     expect(windowsDepot.files).toContain('Spinning Cube.exe');
     expect(build.depots.flatMap((d: { files: string[] }) => d.files).some((f: string) => f.endsWith('steam_appid.txt'))).toBe(false);
+    // The Linux depot has the launcher the launch option names, and the Electron binary it starts.
+    const linuxDepot = build.depots.find((d: { root: string }) => path.basename(d.root) === 'linux');
+    expect(linuxDepot.files).toEqual(expect.arrayContaining(['spinning-cube', 'spinning-cube-bin']));
+    expect(steam.details.dashboard.launchOptions).toContainEqual({ os: 'Linux + SteamOS', executable: 'spinning-cube' });
     // Every launch option names a file that's in the depot.
     for (const option of steam.details.dashboard.launchOptions as Array<{ os: string; executable: string }>) {
       const target = ({ Windows: 'windows', macOS: 'mac', 'Linux + SteamOS': 'linux' } as Record<string, string>)[option.os];
@@ -100,11 +106,18 @@ describe('publish end to end: real builds, fake SteamCMD, butler and GitHub', ()
       const smoke = await runSmoke(testCtx(dir), { command: path.join(app, 'Contents', 'MacOS', 'Spinning Cube'), args: [], seconds: 3, userDataDir: path.join(tmp, 'data'), windowed: true });
       expect(smoke.errors).toEqual([]);
     }
+    // The Linux build made on this OS, Windows included: its launcher is the script as written, with LF line endings,
+    // and in the release zip the launcher and the Electron binary are both executable (on Windows, which has no file
+    // modes, the zip writer knows them by their first bytes).
+    expect(fs.readFileSync(path.join(dir, 'out', 'linux', 'spinning-cube'), 'utf8')).toBe(linuxLauncherScript('spinning-cube'));
+    const linuxZip = gh.uploads['spinning-cube-1.0.0-linux.zip'];
+    const zipModes = Object.fromEntries(readZipEntries(linuxZip).map((e) => [e.name, e.unixMode === null ? null : e.unixMode & 0o777]));
+    expect([zipModes['spinning-cube'], zipModes['spinning-cube-bin']]).toEqual([0o755, 0o755]);
     if (process.platform !== 'win32') {
       const tmp = makeTmpDir('gs-e2e-zip-');
-      fs.writeFileSync(path.join(tmp, 'linux.zip'), gh.uploads['spinning-cube-1.0.0-linux.zip']);
+      fs.writeFileSync(path.join(tmp, 'linux.zip'), linuxZip);
       expect(spawnSync('unzip', ['-q', path.join(tmp, 'linux.zip'), '-d', tmp]).status).toBe(0);
-      expect(fs.statSync(path.join(tmp, 'spinning-cube')).mode & 0o111).not.toBe(0);
+      for (const file of ['spinning-cube', 'spinning-cube-bin']) expect(fs.statSync(path.join(tmp, file)).mode & 0o111, file).toBe(0o111);
     }
   });
 
