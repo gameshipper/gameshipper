@@ -20,7 +20,7 @@ Needs Node.js 22.12 or newer. The first build for each OS downloads Electron (12
 
 ## Status of 0.1.0
 
-`gameshipper` isn't published to npm yet, so `npx gameshipper` doesn't run it: run `node bin/gameshipper.js` from a clone of this repository (after `npm install` and `npm run build`) until the first release.
+0.1.0 is the first release. It's young: the list below says what has been verified and what hasn't.
 
 Verified on macOS: every command on the fixture games, builds for all three OSes (cross-built from the Mac), the Mac app ad-hoc signed and running with the hardened runtime, Steam with Valve's test app 480 on a signed-in client (achievements, stats, the overlay hooking the game), the iOS project building and running in the Simulator, the MCP server end to end, and Claude Code shipping a game through the plugin loaded from this folder.
 
