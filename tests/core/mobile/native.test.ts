@@ -2,10 +2,10 @@ import { execFileSync, spawnSync } from 'node:child_process';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { configureAndroid } from '../../../src/core/mobile/native-android.js';
+import { configureAndroid, removeLocalProperties } from '../../../src/core/mobile/native-android.js';
 import { configureIos, readDevelopmentTeam } from '../../../src/core/mobile/native-ios.js';
 import { generatedPlatform, mobileConfig } from '../../helpers/capacitor.js';
-import { readText, writeFiles } from '../../helpers/tmp.js';
+import { makeTmpDir, readText, writeFiles } from '../../helpers/tmp.js';
 
 describe('configureIos', () => {
   it('sets version, build number, deployment target, orientation and full screen', async () => {
@@ -41,6 +41,23 @@ describe('configureIos', () => {
     const plist = path.join(platformDir, 'App/App/Info.plist');
     fs.writeFileSync(plist, fs.readFileSync(plist, 'utf8').replace('<key>UISupportedInterfaceOrientations</key>', '<key>Renamed</key>'));
     expect(() => configureIos(platformDir, config, null)).toThrow(expect.objectContaining({ error: expect.objectContaining({ code: 'MOBILE_TEMPLATE_UNEXPECTED' }) }));
+  });
+});
+
+describe('removeLocalProperties', () => {
+  it("deletes the file that holds this computer's Android SDK path, and nothing else", () => {
+    const dir = makeTmpDir();
+    writeFiles(dir, { 'local.properties': 'sdk.dir=/Users/u/Library/Android/sdk\n', 'gradle.properties': 'android.useAndroidX=true\n', 'app/local.properties': 'kept' });
+    removeLocalProperties(dir);
+    expect(fs.readdirSync(dir).sort()).toEqual(['app', 'gradle.properties']);
+    expect(readText(dir, 'app/local.properties')).toBe('kept');
+  });
+
+  it('does nothing in a project without one', () => {
+    const dir = makeTmpDir();
+    writeFiles(dir, { 'gradle.properties': '' });
+    expect(() => removeLocalProperties(dir)).not.toThrow();
+    expect(fs.readdirSync(dir)).toEqual(['gradle.properties']);
   });
 });
 

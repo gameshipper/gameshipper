@@ -45,15 +45,29 @@ function emptyHome(workDir: string): string {
 /**
  * Runs Gameshipper's own copy of the Capacitor CLI in workDir, logging its output to the run log. Piped output
  * and CI=1 keep it non-interactive, which also keeps its telemetry off and its settings file unwritten. Its home
- * folder (HOME, or USERPROFILE on Windows) is an empty one, so it never runs Gradle (see emptyHome).
+ * folder (HOME, or USERPROFILE on Windows) is an empty one, so it never runs Gradle (see emptyHome); the folder is
+ * deleted again when the CLI is done, however it ended.
  * Throws MOBILE_GENERATE_FAILED.
  */
-export function runCapacitor(ctx: Ctx, workDir: string, args: string[], opts: { timeoutMs?: number } = {}): Promise<void> {
+export async function runCapacitor(ctx: Ctx, workDir: string, args: string[], opts: { timeoutMs?: number } = {}): Promise<void> {
+  const home = emptyHome(workDir);
+  try {
+    await runCapacitorWithHome(ctx, workDir, home, args, opts);
+  } finally {
+    try {
+      fs.rmSync(home, { recursive: true, force: true, maxRetries: 3 });
+    } catch (e) {
+      // Still in use (Windows, a CLI that was just stopped): the next run empties it before it starts.
+      ctx.log(`couldn't delete ${home}: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  }
+}
+
+function runCapacitorWithHome(ctx: Ctx, workDir: string, home: string, args: string[], opts: { timeoutMs?: number }): Promise<void> {
   const cli = path.join(packageDir('@capacitor/cli'), 'bin', 'capacitor');
   const shown = `cap ${args.join(' ')}`;
   ctx.log(`${shown} (in ${workDir})`);
   return new Promise((resolve, reject) => {
-    const home = emptyHome(workDir);
     const child = spawn(process.execPath, [cli, ...args], {
       cwd: workDir,
       env: { ...process.env, CI: '1', HOME: home, USERPROFILE: home },

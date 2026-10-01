@@ -91,6 +91,8 @@ describe('prepareMobileWorkspace', () => {
     expect(readText(work, 'android/app/src/main/assets/public/index.html')).toContain(SHIM_TAG);
     expect(readText(work, 'android/app/src/main/assets/capacitor.plugins.json')).toContain('PreferencesPlugin');
     expect(fs.readFileSync(ctx.logPath, 'utf8')).toContain('[capacitor]');
+    // The empty home folder the CLI ran with is gone again.
+    expect(fs.existsSync(path.join(work, 'home'))).toBe(false);
   });
 
   it('never runs Gradle, even on a computer with an Android SDK in the home folder', async () => {
@@ -118,5 +120,16 @@ describe('prepareMobileWorkspace', () => {
     fs.writeFileSync(path.join(work, 'capacitor.config.json'), '{"appName":"x","webDir":"www"}');
     const run = runCapacitor(ctx, work, ['add', 'android']);
     await expect(run).rejects.toMatchObject({ error: { code: 'MOBILE_GENERATE_FAILED', message: expect.stringContaining('appId') } });
+    // A failed run leaves no home folder behind either.
+    expect(fs.existsSync(path.join(work, 'home'))).toBe(false);
+  });
+
+  it('deletes its home folder when the CLI is stopped for running too long, too', async () => {
+    const { dir, stageDir } = staged();
+    const ctx = testCtx(dir);
+    const work = prepareMobileWorkspace(ctx, config(), stageDir);
+    const run = runCapacitor(ctx, work, ['add', 'android'], { timeoutMs: 1 });
+    await expect(run).rejects.toMatchObject({ error: { code: 'MOBILE_GENERATE_FAILED', message: expect.stringContaining('still running') } });
+    expect(fs.existsSync(path.join(work, 'home'))).toBe(false);
   });
 });

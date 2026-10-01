@@ -6,7 +6,7 @@ import { errorDetails, GsFailure, gsError, type GsError } from '../result.js';
 import { mobileConfigError } from './bundle-id.js';
 import { runCapacitor } from './capacitor.js';
 import { writeAndroidImages, writeIosImages } from './images.js';
-import { configureAndroid } from './native-android.js';
+import { configureAndroid, removeLocalProperties } from './native-android.js';
 import { configureIos, readDevelopmentTeam } from './native-ios.js';
 import { vendorAndroid, vendorIos } from './vendor.js';
 import { prepareMobileWorkspace } from './workspace.js';
@@ -41,6 +41,7 @@ async function generateTarget(ctx: Ctx, config: Config, workDir: string, target:
     vendorIos(platformDir);
     if (iconPng) await writeIosImages(platformDir, iconPng);
   } else {
+    removeLocalProperties(platformDir);
     configureAndroid(platformDir, config);
     vendorAndroid(platformDir);
     if (iconPng) await writeAndroidImages(platformDir, iconPng);

@@ -43,6 +43,9 @@ describe('buildMobileTargets', () => {
     expect(readText(android, 'app/src/main/assets/public/_gameshipper/mobile.js')).toContain('Preferences');
     expect(externalRefs(ios)).toEqual([]);
     expect(externalRefs(android)).toEqual([]);
+    // Nothing from this computer: no path of an Android SDK, and nothing left of the Capacitor CLI's own home folder.
+    expect(fs.existsSync(path.join(android, 'local.properties'))).toBe(false);
+    expect(fs.existsSync(path.join(dir, '.gameshipper/mobile/home'))).toBe(false);
     // Windows has no executable bits: there Android Studio and gradlew.bat run the build.
     if (process.platform !== 'win32') expect(fs.statSync(path.join(android, 'gradlew')).mode & 0o111).not.toBe(0);
     expect(fs.existsSync(path.join(dir, '.gameshipper/mobile/ios'))).toBe(false);

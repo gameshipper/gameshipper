@@ -14,6 +14,16 @@ const GENERATED = [
   'app/src/main/res/xml/config.xml',
 ];
 
+/**
+ * Deletes local.properties from an Android project: the path of the Android SDK on the computer that made it, which
+ * Android Studio writes again for whoever opens the project. The Capacitor CLI writes one when it finds an SDK in the
+ * home folder; it gets an empty home folder so that it doesn't (capacitor.ts emptyHome), and this makes sure that no
+ * path from this computer ever ships in out/android, whatever a later CLI version does.
+ */
+export function removeLocalProperties(androidDir: string): void {
+  fs.rmSync(path.join(androidDir, 'local.properties'), { force: true });
+}
+
 /** Version, versionCode and screen orientation. */
 export function configureAndroid(androidDir: string, config: Config): void {
   const manifestFile = path.join(androidDir, 'app', 'src', 'main', 'AndroidManifest.xml');
