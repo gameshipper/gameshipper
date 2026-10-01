@@ -68,6 +68,13 @@ const STOP_ON_OVERLAP = 1024;
 const CONTROL_SEQUENCE = /\x1b\[[0-?]*[ -/]*[@-~]/g;
 /** The start of one at the end of a chunk; the next chunk has the rest. */
 const CUT_SEQUENCE = /\x1b(?:\[[0-?]*[ -/]*)?$/;
+/**
+ * The longest start of one that waits for its end. A real control sequence is a few characters long. Text that only
+ * starts like one (ESC[ and then digits without end) is handed on as text once it's longer than this: held whole, it
+ * would be searched again with every chunk, in time that grows with the square of its length, and lost if its end
+ * never came.
+ */
+const MAX_CUT_SEQUENCE_CHARS = 64;
 
 /**
  * Takes the terminal control sequences out of one stream of a tool's output, chunk by chunk, so the text reads the
@@ -76,12 +83,15 @@ const CUT_SEQUENCE = /\x1b(?:\[[0-?]*[ -/]*)?$/;
 class PlainText {
   private held = '';
 
-  /** `chunk` without its control sequences. One cut off by the end of the chunk waits for the next chunk. */
+  /**
+   * `chunk` without its control sequences. One cut off by the end of the chunk waits for the next chunk, unless it's
+   * already longer than any real one (MAX_CUT_SEQUENCE_CHARS): then it's text.
+   */
   add(chunk: string): string {
     const text = this.held + chunk;
     const cut = CUT_SEQUENCE.exec(text);
-    this.held = cut ? cut[0] : '';
-    return (cut ? text.slice(0, cut.index) : text).replace(CONTROL_SEQUENCE, '');
+    this.held = cut && cut[0].length <= MAX_CUT_SEQUENCE_CHARS ? cut[0] : '';
+    return (this.held ? text.slice(0, text.length - this.held.length) : text).replace(CONTROL_SEQUENCE, '');
   }
 }
 

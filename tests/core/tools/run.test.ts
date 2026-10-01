@@ -65,6 +65,37 @@ describe('runExternal', () => {
     expect(r.output).toBe(`${lines.join('\n')}\n`);
   });
 
+  it('hands on text that only starts like a colour code, instead of holding it all for an end that never comes', async () => {
+    // ESC[ and then 16 MB of the digits and semicolons a colour code may have, with no letter to end it.
+    const file = script(
+      `const chunk = '0;'.repeat(1 << 19);
+       process.stdout.write(String.fromCharCode(27) + '[');
+       for (let i = 0; i < 16; i++) process.stdout.write(chunk);`,
+    );
+    const lines: string[] = [];
+    const started = Date.now();
+    const r = await runExternal(toolCommand(file, { ...process.env }), [], { timeoutMs: 60_000, onLine: (l) => lines.push(l) });
+    // Held whole, it was searched again with every write: seconds for this much, growing with the square of its length.
+    expect(Date.now() - started).toBeLessThan(5_000);
+    expect(r.exitCode).toBe(0);
+    // Nothing of it is lost when the tool ends without ever finishing the "code": it's text, cut like any long line.
+    const length = 2 + 16 * (1 << 20);
+    expect(lines).toEqual([`\x1b[${'0;'.repeat((OUTPUT_BUFFER_CHARS - 2) / 2)}… (${length - OUTPUT_BUFFER_CHARS} more characters)`]);
+    expect(r.output).toBe('0;'.repeat(OUTPUT_BUFFER_CHARS / 2));
+  });
+
+  it('still takes out a colour code cut in two between writes when a long run of its digits came first', async () => {
+    // 64 characters of an unfinished code wait for its end; this one has 40 before the cut.
+    const file = script(
+      `const ESC = String.fromCharCode(27);
+       process.stdout.write('one' + ESC + '[' + '1;'.repeat(19));
+       setTimeout(() => process.stdout.write('1mtwo\\n'), 300);`,
+    );
+    const lines: string[] = [];
+    await runExternal(toolCommand(file, { ...process.env }), [], { timeoutMs: 10_000, onLine: (l) => lines.push(l) });
+    expect(lines).toEqual(['onetwo']);
+  });
+
   it('finds a prompt whose words have colour codes between them', async () => {
     const file = script(`process.stdout.write('Steam Guard' + String.fromCharCode(27) + '[0m code: '); setInterval(() => {}, 1000);`);
     const r = await runExternal(toolCommand(file, { ...process.env }), [], { timeoutMs: 20_000, stopOn: /Steam Guard code:/ });
