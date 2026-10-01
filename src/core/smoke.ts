@@ -541,8 +541,9 @@ export async function runSmoke(ctx: Ctx, opts: SmokeOptions): Promise<Result<Smo
       : run.signal
         ? `it was stopped by ${run.signal}`
         : `exit code ${run.exitCode}`;
-    const message =
-      summary === 'missing' ? `The game didn't report back (${ended}).` : `The game's report ${outFile} couldn't be read (${ended}).`;
+    const what = summary === 'missing' ? `The game didn't report back (${ended}).` : `The game's report ${outFile} couldn't be read (${ended}).`;
+    // What it printed last usually says why: a crash before the window opened never reaches the events log.
+    const message = run.outputTail.trim() ? `${what} Last lines of its output:\n${run.outputTail}` : what;
     return fail([gsError('SMOKE_NO_RESULT', message, `Run \`npx gameshipper play\` to watch it start. ${details}`), ...timeout]);
   }
   const { errors, warnings } = summaryToIssues(summary, { seconds: opts.seconds, eventsLog, storeArt: opts.storeArt });

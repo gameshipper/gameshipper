@@ -180,7 +180,15 @@ describe('runPlay --smoke', () => {
     const { dir, shellDir } = project('process.exitCode = 4;');
     const r = await runPlay(testCtx(dir), config, { shellDir, smokeSeconds: 1, electronPath: process.execPath });
     expect(r.errors[0].code).toBe('SMOKE_NO_RESULT');
-    expect(r.errors[0].message).toContain('exit code 4');
+    expect(r.errors[0].message).toBe("The game didn't report back (exit code 4).");
+  });
+
+  it('SMOKE_NO_RESULT quotes the last lines the game printed: why it stopped before it could report', async () => {
+    const { dir, shellDir } = project(`console.error('FATAL:zygote_host_impl_linux.cc(128)] No usable sandbox!'); process.exitCode = 4;`);
+    const r = await runPlay(testCtx(dir), config, { shellDir, smokeSeconds: 1, electronPath: process.execPath });
+    expect(r.errors.map((e) => [e.code, e.message])).toEqual([
+      ['SMOKE_NO_RESULT', "The game didn't report back (exit code 4). Last lines of its output:\nFATAL:zygote_host_impl_linux.cc(128)] No usable sandbox!"],
+    ]);
   });
 
   it('reports a page that never finished loading against the smoke duration', async () => {
