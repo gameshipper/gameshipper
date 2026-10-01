@@ -7,12 +7,37 @@ import { describe, expect, it } from 'vitest';
 import { listFiles } from '../../src/core/fsutil.js';
 import { SHIM_TAG } from '../../src/core/mobile/shim.js';
 import { cli, ROOT } from '../helpers/built-cli.js';
-import { bootSimulator, buildForSimulator, hasXcode, pickIphone, runOnSimulator, screenshot, shutdownSimulator } from '../helpers/ios-sim.js';
+import {
+  bootSimulator,
+  buildForSimulator,
+  hasXcode,
+  MARKERS_TIMEOUT_MS,
+  pickIphone,
+  runOnSimulator,
+  screenshot,
+  shutdownSimulator,
+  START_END_MS,
+  startUntilWarm,
+} from '../helpers/ios-sim.js';
 import { makeSolidPng } from '../helpers/png.js';
 import { makeTmpDir, readText, writeFiles } from '../helpers/tmp.js';
 
 const BUNDLE_ID = 'com.gameshipper.spinningcube';
 const BRIDGE_OK = 'gameshipper-bridge:{"ok":true}';
+
+/**
+ * The Simulator test's time limit, and what its slow steps may take of it at most. They add up to less than the
+ * limit: xcodebuild 7 minutes, booting the simulator 3, three starts of the game of 3.5 each (10.5), and a minute to
+ * check the last start, shut the simulator down and delete the project. Each step is stopped at its own limit, and no
+ * start begins that couldn't be over before the last minute.
+ */
+const IOS_TEST_LIMIT_MS = 22 * 60_000;
+const XCODEBUILD_LIMIT_MS = 7 * 60_000;
+const BOOT_LIMIT_MS = 3 * 60_000;
+const MAX_STARTS = 3;
+/** One start: the wait for the game to report, then the screenshot and closing the app. */
+const START_LIMIT_MS = MARKERS_TIMEOUT_MS + START_END_MS;
+const WRAP_UP_MS = 60_000;
 
 /** The three.js fixture plus a probe script that reports what the mobile page sees. */
 function mobileGame(): string {
@@ -88,6 +113,8 @@ describe('iOS and Android projects', () => {
       expect(spawnSync('xmllint', ['--noout', ...xml], { encoding: 'utf8' }).stderr).toBe('');
     }
     expect(fs.statSync(path.join(android, 'gradlew')).mode & 0o111).not.toBe(0);
+    // No path of this computer's Android SDK, wherever the Capacitor CLI might have found one.
+    expect(files.has('local.properties')).toBe(false);
     expect(readText(path.join(dir, 'out', 'ios'), 'App/CapApp-SPM/Package.swift')).not.toContain('node_modules');
     fs.rmSync(dir, { recursive: true, force: true, maxRetries: 3 });
   });
@@ -95,6 +122,7 @@ describe('iOS and Android projects', () => {
   it.runIf(hasXcode())(
     'the iOS project builds for the Simulator and runs the game there',
     async (ctx) => {
+      const deadline = Date.now() + IOS_TEST_LIMIT_MS - WRAP_UP_MS;
       const dir = mobileGame();
       const build = cli(['build', '--target', 'ios'], dir);
       expect(build.result.errors).toEqual([]);
@@ -102,31 +130,27 @@ describe('iOS and Android projects', () => {
       expect(spawnSync('plutil', ['-lint', path.join(ios, 'App', 'App', 'Info.plist')]).status).toBe(0);
 
       // The first build downloads Capacitor's Swift package (two binary frameworks, about 8 MB) from GitHub.
-      const app = buildForSimulator(ios, path.join(dir, '.gameshipper', 'xcode'));
+      const app = buildForSimulator(ios, path.join(dir, '.gameshipper', 'xcode'), XCODEBUILD_LIMIT_MS);
       const device = pickIphone();
-      const booted = bootSimulator(device);
+      const booted = bootSimulator(device, BOOT_LIMIT_MS);
       // Outside the project, which is removed afterwards (Xcode's build folder alone is about 340 MB); each run replaces it.
       const shot = path.join(os.tmpdir(), 'gameshipper-ios-simulator.png');
       try {
         // A simulator that has just booted is busy for a while. On GitHub's macOS runner the game's first start
-        // there took over a minute and drew one frame in its first 1.5 s. So the game is started again, three times
-        // at most, until a start draws its frames at speed; everything below is checked on that start.
-        const starts: string[] = [];
-        let out = '';
-        let frames = 0;
-        while (starts.length < 3 && frames <= 10) {
-          const launched = Date.now();
-          out = await runOnSimulator(device, app, BUNDLE_ID, [BRIDGE_OK, 'mobile-probe:', 'gameshipper-frames:'], () => screenshot(device, shot));
-          frames = Number(/gameshipper-frames:(\d+)/.exec(out)?.[1] ?? 0);
-          starts.push(`${frames} frames, reported after ${Math.round((Date.now() - launched) / 1000)} s`);
-        }
+        // there took over a minute and drew one frame in its first 1.5 s. So a start that reported everything but
+        // drew too few frames is followed by another, three in all at most, and everything below is checked on the
+        // last one. A start that never reported, or whose saves didn't work, is checked as it is: it fails here.
+        const { out, frames, starts } = await startUntilWarm(
+          (budgetMs) => runOnSimulator(device, app, BUNDLE_ID, [BRIDGE_OK, 'mobile-probe:', 'gameshipper-frames:'], () => screenshot(device, shot), budgetMs - START_END_MS),
+          { markers: [BRIDGE_OK, 'mobile-probe:', 'gameshipper-frames:'], minFrames: 10, maxStarts: MAX_STARTS, startLimitMs: START_LIMIT_MS, deadline },
+        );
         const how = `start ${starts.length}: ${starts.join('; ')}`;
         expect(out, how).toContain(BRIDGE_OK); // saved and loaded through Capacitor Preferences
         expect(out, how).toContain('mobile-probe:steam=undefined');
         const [, w, h] = /size=(\d+)x(\d+)/.exec(out)!.map(Number);
         expect(w).toBeGreaterThan(h); // landscape, laid out at the device's width (not the 980px desktop default)
         expect(w).toBeLessThan(980);
-        expect(frames, `WebGL frames drawn in the first 1.5 s (${how})`).toBeGreaterThan(10);
+        expect(frames ?? 0, `WebGL frames drawn in the first 1.5 s (${how})`).toBeGreaterThan(10);
         const stats = await sharp(shot).stats();
         expect(stats.channels.slice(0, 3).some((c) => c.max - c.min > 8)).toBe(true); // not a blank frame
         await ctx.annotate(`${device.name} (${device.udid}), ${w}x${h}, ${how}, screenshot: ${shot}`);
@@ -136,6 +160,6 @@ describe('iOS and Android projects', () => {
       }
     },
     // xcodebuild, a simulator that boots from cold, and the app's first start on it: minutes each on a hosted runner.
-    15 * 60_000,
+    IOS_TEST_LIMIT_MS,
   );
 });
