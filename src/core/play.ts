@@ -74,7 +74,22 @@ function savedScreenshots(eventsLog: string): string[] {
   return readLoggedEvents(eventsLog, ['screenshot']).map((e) => e.file);
 }
 
-/** What play starts: Electron with the prepared app, or (`--packaged`) the build in out/<target>. */
+/**
+ * The arguments Electron itself is started with when `play` runs the app folder: the folder, and on Linux
+ * `--no-sandbox`. The shell asks Chromium for the same (shell/flags.ts), but Chromium sets up its sandbox before any
+ * of the game's code runs, and reads only its command line by then. Where the sandbox can't start (Ubuntu 24.04 and
+ * later keep programs outside a package from the user namespaces it needs; GitHub's Linux runners are such), Electron
+ * would otherwise stop with SIGTRAP before it opens a window. A build needs no such argument from Gameshipper: its
+ * launcher passes it (desktop/linux-launcher.ts).
+ */
+export function electronArgs(appDir: string, platform: NodeJS.Platform = process.platform): string[] {
+  return platform === 'linux' ? [appDir, '--no-sandbox'] : [appDir];
+}
+
+/**
+ * What play starts: Electron with the prepared app, or (`--packaged`) the build in out/<target>, with no arguments,
+ * the way a player starts it.
+ */
 interface Game {
   command: string;
   args: string[];
@@ -135,7 +150,7 @@ export async function runPlay(ctx: Ctx, config: Config, opts: PlayOptions): Prom
 
   try {
     const game: Game = prepared
-      ? { command: opts.electronPath ?? (await electronBinary()), args: [prepared.appDir], appDir: prepared.appDir }
+      ? { command: opts.electronPath ?? (await electronBinary()), args: electronArgs(prepared.appDir), appDir: prepared.appDir }
       : packagedGame(ctx.projectDir, config, opts.host ?? process.platform);
     if (smokeSeconds) {
       const storeArt = storeArtNames(config);

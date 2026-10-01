@@ -46,7 +46,8 @@ describe('play --packaged', () => {
     writeFiles(dir, {
       [path.relative(dir, exe).split(path.sep).join('/')]: [
         `#!${process.execPath}`,
-        "const events = [{ kind: 'console', level: 'info', message: 'packaged:' + process.env.GAMESHIPPER_SMOKE_SECONDS, source: '', line: 0 }];",
+        "const message = 'packaged:' + process.env.GAMESHIPPER_SMOKE_SECONDS + ' args:' + JSON.stringify(process.argv.slice(2));",
+        "const events = [{ kind: 'console', level: 'info', message, source: '', line: 0 }];",
         "require('fs').writeFileSync(process.env.GAMESHIPPER_SMOKE_OUT, JSON.stringify({ droppedInfo: 0, events }));",
       ].join('\n'),
     });
@@ -56,7 +57,8 @@ describe('play --packaged', () => {
     expect(r.errors).toEqual([]);
     expect(r.warnings).toEqual([]);
     expect(r.data!.appDir).toBe(path.join(dir, 'out', 'linux'));
-    expect(r.data!.smoke!.summary.events[0]).toMatchObject({ message: 'packaged:2' });
+    // No arguments, on any OS: a build is started the way a player starts it. On Linux its launcher passes --no-sandbox.
+    expect(r.data!.smoke!.summary.events[0]).toMatchObject({ message: 'packaged:2 args:[]' });
     expect(fs.existsSync(path.join(dir, '.gameshipper', 'app'))).toBe(false);
   });
 });

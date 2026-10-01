@@ -26,8 +26,9 @@ export function isSoftwareGlNote(message: string): boolean {
  * - disable-direct-composition (Windows): lets the overlay draw over the window.
  * - no-sandbox / no-zygote / disable-dev-shm-usage (Linux): Chromium's sandbox conflicts
  *   with the Steam Linux Runtime container and breaks in paths containing spaces. Appended here they reach the
- *   processes Chromium starts from then on; its own sandbox check comes before any of this code runs, so
- *   Gameshipper also starts every game with --no-sandbox on its command line (core/smoke.ts launchArgs).
+ *   processes Chromium starts from then on; its own sandbox check comes before any of this code runs, and reads
+ *   only the command line. So a Linux build is started by a launcher that passes --no-sandbox there
+ *   (core/desktop/linux-launcher.ts), and `play` starts Electron with it (core/play.ts electronArgs).
  * - enable-unsafe-swiftshader (only with `softwareGl`, see softwareGl above): machines without a GPU, such as
  *   hosted CI runners, may render WebGL in software. Chromium no longer falls back to it by itself.
  */

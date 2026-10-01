@@ -338,25 +338,16 @@ export interface LaunchResult {
 }
 
 /**
- * The arguments a game is started with: its own, and on Linux `--no-sandbox`. The shell asks Chromium for the same
- * (shell/flags.ts), but Chromium sets up its sandbox before any of the game's code runs, and reads only its command
- * line by then. Where the sandbox can't start (Ubuntu 24.04 and later keep programs outside a package from the
- * user namespaces it needs; GitHub's Linux runners are such), the game would otherwise stop with SIGTRAP before it
- * opens a window.
- */
-export function launchArgs(args: string[], platform: NodeJS.Platform = process.platform): string[] {
-  return platform === 'linux' ? [...args, '--no-sandbox'] : args;
-}
-
-/**
  * Runs a game until it exits, logging its output to the run log. On POSIX the game leads its own
  * process group, so it and its helper processes (Electron's GPU and renderer processes) are stopped
  * together: on timeout, when Gameshipper stops, or when helpers outlive the game.
+ * The game gets exactly `args`: a build is started the way a player starts it, with none (on Linux its launcher adds
+ * --no-sandbox itself), and `play` gives Electron its own (play.ts electronArgs).
  * Rejects with LAUNCH_FAILED when the game can't start.
  */
 export function launch(ctx: Ctx, command: string, args: string[], opts: LaunchOptions): Promise<LaunchResult> {
   return new Promise((resolve, reject) => {
-    const child = spawn(command, launchArgs(args), {
+    const child = spawn(command, args, {
       env: opts.env,
       stdio: ['ignore', 'pipe', 'pipe'],
       detached: process.platform !== 'win32',
@@ -437,7 +428,7 @@ export async function launchDetached(ctx: Ctx, command: string, args: string[], 
   const out = fs.openSync(ctx.logPath, 'a');
   try {
     // Output to a file, not a pipe: nothing of the game's holds Gameshipper's own output open after it exits.
-    const child = spawn(command, launchArgs(args), { env, detached: true, stdio: ['ignore', out, out], windowsHide: true });
+    const child = spawn(command, args, { env, detached: true, stdio: ['ignore', out, out], windowsHide: true });
     await new Promise<void>((resolve, reject) => {
       child.once('spawn', resolve);
       child.once('error', (e) =>

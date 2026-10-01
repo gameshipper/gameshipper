@@ -2,8 +2,8 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import { parseConfig } from '../../src/core/config/load.js';
-import { runPlay } from '../../src/core/play.js';
-import { eventsLogPath, launchArgs, runSmoke, summaryToIssues, truncateSummary } from '../../src/core/smoke.js';
+import { electronArgs, runPlay } from '../../src/core/play.js';
+import { eventsLogPath, runSmoke, summaryToIssues, truncateSummary } from '../../src/core/smoke.js';
 import { LOAD_TIMEOUT_DESCRIPTION, type DiagEvent, type DiagSummary } from '../../src/shell/diagnostics.js';
 import { testCtx } from '../helpers/ctx.js';
 import { makeSolidPng } from '../helpers/png.js';
@@ -191,9 +191,9 @@ describe('runPlay --smoke', () => {
     ]);
   });
 
-  it('starts the game without Chromium\'s sandbox on Linux, on its command line, where Chromium reads it in time', async () => {
-    expect(launchArgs(['/game/app'], 'linux')).toEqual(['/game/app', '--no-sandbox']);
-    for (const platform of ['darwin', 'win32'] as const) expect(launchArgs(['/game/app'], platform)).toEqual(['/game/app']);
+  it('starts Electron without Chromium\'s sandbox on Linux, on its command line, where Chromium reads it in time', async () => {
+    expect(electronArgs('/game/app', 'linux')).toEqual(['/game/app', '--no-sandbox']);
+    for (const platform of ['darwin', 'win32'] as const) expect(electronArgs('/game/app', platform)).toEqual(['/game/app']);
     const { dir, shellDir } = project(`
       const events = [{ kind: 'console', level: 'info', message: JSON.stringify(process.argv.slice(2)), source: '', line: 0 }];
       require('fs').writeFileSync(process.env.GAMESHIPPER_SMOKE_OUT, JSON.stringify({ droppedInfo: 0, events }));

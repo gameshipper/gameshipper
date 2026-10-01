@@ -28,7 +28,8 @@ describe('packagerOptions', () => {
       arch: 'x64',
       electronVersion: '44.4.5',
       name: 'Moon Game',
-      executableName: 'moon-game',
+      // The Electron binary; the build's own name, moon-game, is its launcher's (linux-launcher.ts).
+      executableName: 'moon-game-bin',
       appVersion: '1.2.3',
       appBundleId: 'local.gameshipper.moongame',
       icon: '/p/.gameshipper/icons/icon',

@@ -8,6 +8,7 @@ import { defaultBundleId, fileSafeName, slugify } from '../names.js';
 import { GsFailure, type GsError } from '../result.js';
 import type { MacSigningInfo } from '../sign/mac.js';
 import { packageIgnore } from '../steam/natives.js';
+import { linuxBinaryName, writeLinuxLauncher } from './linux-launcher.js';
 import type { DesktopJob, PackagerPlatform } from './targets.js';
 
 /**
@@ -20,7 +21,7 @@ export interface DesktopOutput {
   target: DesktopTarget;
   /** out/<target> */
   dir: string;
-  /** The file to launch: .exe, Linux binary, or the binary inside the .app bundle. */
+  /** The file to launch: the .exe, the Linux build's launcher, or the binary inside the .app bundle. */
   executable: string;
   warnings: GsError[];
   /** Mac only: how build signed the app, after its afterPackage hooks. */
@@ -47,7 +48,8 @@ export function packagerOptions(
     arch: job.arch,
     electronVersion: ELECTRON_VERSION,
     name: config.name,
-    executableName: job.platform === 'linux' ? slugify(config.name) : config.name,
+    // On Linux the build's own name is its launcher's (linux-launcher.ts); the Electron binary goes next to it.
+    executableName: job.platform === 'linux' ? linuxBinaryName(slugify(config.name)) : config.name,
     appVersion: config.version,
     appBundleId: config.mobile.bundleId ?? defaultBundleId(config.name),
     icon: iconBase ?? undefined,
@@ -70,6 +72,10 @@ export function packagerOptions(
   };
 }
 
+/**
+ * The file a player, Steam's launch option and Gameshipper start. On Linux that is the launcher script, which starts
+ * the Electron binary next to it (linux-launcher.ts).
+ */
 export function executableFor(config: Config, target: DesktopTarget, dir: string): string {
   if (target === 'windows') return path.join(dir, `${fileSafeName(config.name)}.exe`);
   if (target === 'linux') return path.join(dir, slugify(config.name));
@@ -137,6 +143,7 @@ export async function packageDesktop(
   }
   const outDir = path.join(ctx.projectDir, 'out', job.target);
   try {
+    if (job.platform === 'linux') writeLinuxLauncher(produced[0], slugify(config.name));
     // The previous build here is the one a player is most likely to have running.
     fs.rmSync(outDir, { recursive: true, force: true, maxRetries: 3 });
     fs.mkdirSync(path.dirname(outDir), { recursive: true });
