@@ -62,6 +62,30 @@ const CLOSE_GRACE_MS = 2000;
 const STOP_ON_OVERLAP = 1024;
 
 /**
+ * Terminal control sequences: colours, bold, cursor moves (ECMA-48 CSI). SteamCMD on Linux prints them into a pipe
+ * too: "Connecting anonymously to Steam Public...ESC[0mOK", "ESC[0mESC[1mCached credentials not found."
+ */
+const CONTROL_SEQUENCE = /\x1b\[[0-?]*[ -/]*[@-~]/g;
+/** The start of one at the end of a chunk; the next chunk has the rest. */
+const CUT_SEQUENCE = /\x1b(?:\[[0-?]*[ -/]*)?$/;
+
+/**
+ * Takes the terminal control sequences out of one stream of a tool's output, chunk by chunk, so the text reads the
+ * same on every OS: in the run log, in messages that quote it, and where it's searched for what the tool said.
+ */
+class PlainText {
+  private held = '';
+
+  /** `chunk` without its control sequences. One cut off by the end of the chunk waits for the next chunk. */
+  add(chunk: string): string {
+    const text = this.held + chunk;
+    const cut = CUT_SEQUENCE.exec(text);
+    this.held = cut ? cut[0] : '';
+    return (cut ? text.slice(0, cut.index) : text).replace(CONTROL_SEQUENCE, '');
+  }
+}
+
+/**
  * Splits a tool's output into lines as it arrives. A line is kept up to OUTPUT_BUFFER_CHARS; the rest is only
  * counted, and the line says how much was left out.
  */
@@ -97,10 +121,10 @@ class LineSplitter {
 }
 
 /**
- * Runs a tool with no stdin (so it can never wait for input) and captures its output. On macOS and Linux it leads its
- * own process group, so stopping it also stops what it started: steamcmd.sh runs the real steamcmd as its child. If
- * Gameshipper is stopped meanwhile (Ctrl+C, or the MCP server cancelling the call), the tool's whole tree is stopped
- * and the CLI reports INTERRUPTED. Never rejects.
+ * Runs a tool with no stdin (so it can never wait for input) and captures its output, without the terminal control
+ * sequences it printed (PlainText). On macOS and Linux it leads its own process group, so stopping it also stops
+ * what it started: steamcmd.sh runs the real steamcmd as its child. If Gameshipper is stopped meanwhile (Ctrl+C, or
+ * the MCP server cancelling the call), the tool's whole tree is stopped and the CLI reports INTERRUPTED. Never rejects.
  */
 export function runExternal(tool: ToolCommand, args: string[], opts: ExternalRunOptions): Promise<ExternalRun> {
   return new Promise((resolve) => {
@@ -144,8 +168,10 @@ export function runExternal(tool: ToolCommand, args: string[], opts: ExternalRun
         }
       }
     };
-    child.stdout.setEncoding('utf8').on('data', onData);
-    child.stderr.setEncoding('utf8').on('data', onData);
+    for (const stream of [child.stdout, child.stderr]) {
+      const plain = new PlainText();
+      stream.setEncoding('utf8').on('data', (text: string) => onData(plain.add(text)));
+    }
     const finish = (exitCode: number | null, spawnError: string | null): void => {
       if (settled) return;
       settled = true;

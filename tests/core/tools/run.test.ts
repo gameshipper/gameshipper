@@ -48,6 +48,29 @@ describe('runExternal', () => {
     expect(r.output.trim()).toBe('+login|a b hello unset');
   });
 
+  it("takes a tool's terminal colour codes out of what it printed, even one cut in two between writes", async () => {
+    // What SteamCMD prints on Linux, into a pipe too: ESC[0m and ESC[1m around its words.
+    const file = script(
+      `const ESC = String.fromCharCode(27);
+       process.stdout.write('Connecting anonymously to Steam Public...' + ESC + '[0mOK\\n' + ESC + '[0m' + ESC + '[1mCached credentials not found.\\n' + ESC + '[');
+       setTimeout(() => process.stdout.write('0mFAILED (No cached credentials and @NoPromptForPassword is set)\\n'), 300);`,
+    );
+    const lines: string[] = [];
+    const r = await runExternal(toolCommand(file, { ...process.env }), [], { timeoutMs: 10_000, onLine: (l) => lines.push(l) });
+    expect(lines).toEqual([
+      'Connecting anonymously to Steam Public...OK',
+      'Cached credentials not found.',
+      'FAILED (No cached credentials and @NoPromptForPassword is set)',
+    ]);
+    expect(r.output).toBe(`${lines.join('\n')}\n`);
+  });
+
+  it('finds a prompt whose words have colour codes between them', async () => {
+    const file = script(`process.stdout.write('Steam Guard' + String.fromCharCode(27) + '[0m code: '); setInterval(() => {}, 1000);`);
+    const r = await runExternal(toolCommand(file, { ...process.env }), [], { timeoutMs: 20_000, stopOn: /Steam Guard code:/ });
+    expect([r.stoppedOn, r.exitCode]).toEqual(['Steam Guard code:', null]);
+  });
+
   it('stops at a prompt nobody can answer, even before its newline', async () => {
     const file = script(`process.stdout.write('Loading...OK\\npassword: '); setInterval(() => {}, 1000);`);
     const r = await runExternal(toolCommand(file, { ...process.env }), [], { timeoutMs: 20_000, stopOn: /password:/ });
