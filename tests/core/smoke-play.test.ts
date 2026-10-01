@@ -202,6 +202,22 @@ describe('runPlay --smoke', () => {
     expect(r.data!.smoke!.summary.events[0]).toMatchObject({ message: JSON.stringify(process.platform === 'linux' ? ['--no-sandbox'] : []) });
   });
 
+  it('the run log shows the command a smoke run started as it was started, --no-sandbox included', async () => {
+    for (const host of ['linux', 'darwin'] as const) {
+      const { dir, shellDir } = project(`
+        const events = [{ kind: 'console', level: 'info', message: JSON.stringify(process.argv.slice(2)), source: '', line: 0 }];
+        require('fs').writeFileSync(process.env.GAMESHIPPER_SMOKE_OUT, JSON.stringify({ droppedInfo: 0, events }));
+      `);
+      const ctx = testCtx(dir);
+      const r = await runPlay(ctx, config, { shellDir, smokeSeconds: 1, electronPath: process.execPath, host });
+      const extra = host === 'linux' ? ['--no-sandbox'] : [];
+      // What the game got after the app folder, and what the log says it got: someone repeating the line gets the same run.
+      expect(r.data!.smoke!.summary.events[0], host).toMatchObject({ message: JSON.stringify(extra) });
+      const started = [process.execPath, r.data!.appDir, ...extra].join(' ');
+      expect(fs.readFileSync(ctx.logPath, 'utf8'), host).toContain(`smoke run: ${started} for 1s\n`);
+    }
+  });
+
   it('reports a page that never finished loading against the smoke duration', async () => {
     const { dir, shellDir } = project(`
       const events = [{ kind: 'load-failed', url: 'app://game/index.html', code: 0, description: ${JSON.stringify(LOAD_TIMEOUT_DESCRIPTION)} }];

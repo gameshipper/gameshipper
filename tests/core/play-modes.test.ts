@@ -102,6 +102,28 @@ describe('play --detach', () => {
     }
   });
 
+  it('the run log shows the command it started as it was started, --no-sandbox included, for a game left running and for one played', async () => {
+    for (const host of ['linux', 'darwin'] as const) {
+      for (const detach of [true, false]) {
+        const dir = makeTmpDir();
+        const shellDir = makeTmpDir();
+        const argsFile = path.join(dir, 'args.json');
+        writeFiles(dir, { 'index.html': '<html></html>' });
+        writeFiles(shellDir, { 'main.js': `require('fs').writeFileSync(${JSON.stringify(argsFile)}, JSON.stringify(process.argv.slice(2)));` });
+        const ctx = testCtx(dir);
+        const r = await runPlay(ctx, config, { shellDir, detach, electronPath: process.execPath, host });
+        expect(r.errors, `${host} ${detach}`).toEqual([]);
+        expect(await waitFor(() => fs.existsSync(argsFile))).toBe(true);
+        const extra = host === 'linux' ? ['--no-sandbox'] : [];
+        expect(await waitFor(() => fs.readFileSync(argsFile, 'utf8') === JSON.stringify(extra)), `${host} ${detach}`).toBe(true);
+        const started = [process.execPath, r.data!.appDir, ...extra].join(' ');
+        const log = fs.readFileSync(ctx.logPath, 'utf8');
+        if (detach) expect(log, host).toContain(`started ${started} as process ${r.data!.pid}; not waiting for it\n`);
+        else expect(log, host).toContain(`playing: ${started}\n`);
+      }
+    }
+  });
+
   it('USAGE, before anything runs, when combined with a timed run', async () => {
     for (const timed of [{ smokeSeconds: 3 }, { screenshotAt: [5] }]) {
       const dir = makeTmpDir();
