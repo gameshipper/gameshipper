@@ -64,11 +64,25 @@ export function buildForSimulator(iosDir: string, derivedData: string): string {
 }
 
 /**
+ * How long a launched app gets to print every marker. A simulator that has just booted is slow: on GitHub's macOS
+ * runner the app took 43 seconds to start, and its page hadn't loaded 17 seconds later. On a warm simulator the
+ * markers are there within seconds, and the wait ends with them.
+ */
+const MARKERS_TIMEOUT_MS = 4 * 60_000;
+
+/**
  * Installs and launches the app, collecting its console (Capacitor prints `⚡️  [log] - …` lines in Debug
  * builds) until every marker has appeared or the timeout passes. `onReady` runs while the app is still open
  * (to take a screenshot, say); the app is closed afterwards.
  */
-export async function runOnSimulator(device: SimDevice, appPath: string, bundleId: string, markers: string[], onReady: () => void, timeoutMs = 60_000): Promise<string> {
+export async function runOnSimulator(
+  device: SimDevice,
+  appPath: string,
+  bundleId: string,
+  markers: string[],
+  onReady: () => void,
+  timeoutMs = MARKERS_TIMEOUT_MS,
+): Promise<string> {
   execFileSync('xcrun', ['simctl', 'install', device.udid, appPath]);
   return new Promise((resolve) => {
     const child = spawn('xcrun', ['simctl', 'launch', '--console-pty', '--terminate-running-process', device.udid, bundleId]);

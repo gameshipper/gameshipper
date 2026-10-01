@@ -92,34 +92,41 @@ describe('iOS and Android projects', () => {
     fs.rmSync(dir, { recursive: true, force: true, maxRetries: 3 });
   });
 
-  it.runIf(hasXcode())('the iOS project builds for the Simulator and runs the game there', async (ctx) => {
-    const dir = mobileGame();
-    const build = cli(['build', '--target', 'ios'], dir);
-    expect(build.result.errors).toEqual([]);
-    const ios = path.join(dir, 'out', 'ios');
-    expect(spawnSync('plutil', ['-lint', path.join(ios, 'App', 'App', 'Info.plist')]).status).toBe(0);
+  it.runIf(hasXcode())(
+    'the iOS project builds for the Simulator and runs the game there',
+    async (ctx) => {
+      const dir = mobileGame();
+      const build = cli(['build', '--target', 'ios'], dir);
+      expect(build.result.errors).toEqual([]);
+      const ios = path.join(dir, 'out', 'ios');
+      expect(spawnSync('plutil', ['-lint', path.join(ios, 'App', 'App', 'Info.plist')]).status).toBe(0);
 
-    // The first build downloads Capacitor's Swift package (two binary frameworks, about 8 MB) from GitHub.
-    const app = buildForSimulator(ios, path.join(dir, '.gameshipper', 'xcode'));
-    const device = pickIphone();
-    const booted = bootSimulator(device);
-    // Outside the project, which is removed afterwards (Xcode's build folder alone is about 340 MB); each run replaces it.
-    const shot = path.join(os.tmpdir(), 'gameshipper-ios-simulator.png');
-    try {
-      const out = await runOnSimulator(device, app, BUNDLE_ID, [BRIDGE_OK, 'mobile-probe:'], () => screenshot(device, shot));
-      expect(out).toContain(BRIDGE_OK); // saved and loaded through Capacitor Preferences
-      expect(out).toContain('mobile-probe:steam=undefined');
-      const [, w, h] = /size=(\d+)x(\d+)/.exec(out)!.map(Number);
-      expect(w).toBeGreaterThan(h); // landscape, laid out at the device's width (not the 980px desktop default)
-      expect(w).toBeLessThan(980);
-      const frames = /gameshipper-frames:(\d+)/.exec(out);
-      expect(Number(frames?.[1] ?? 0), 'WebGL frames drawn in the first 1.5 s').toBeGreaterThan(10);
-      const stats = await sharp(shot).stats();
-      expect(stats.channels.slice(0, 3).some((c) => c.max - c.min > 8)).toBe(true); // not a blank frame
-      await ctx.annotate(`${device.name} (${device.udid}), ${w}x${h}, screenshot: ${shot}`);
-    } finally {
-      if (booted) shutdownSimulator(device);
-      fs.rmSync(dir, { recursive: true, force: true, maxRetries: 3 });
-    }
-  });
+      // The first build downloads Capacitor's Swift package (two binary frameworks, about 8 MB) from GitHub.
+      const app = buildForSimulator(ios, path.join(dir, '.gameshipper', 'xcode'));
+      const device = pickIphone();
+      const booted = bootSimulator(device);
+      // Outside the project, which is removed afterwards (Xcode's build folder alone is about 340 MB); each run replaces it.
+      const shot = path.join(os.tmpdir(), 'gameshipper-ios-simulator.png');
+      try {
+        const launched = Date.now();
+        const out = await runOnSimulator(device, app, BUNDLE_ID, [BRIDGE_OK, 'mobile-probe:', 'gameshipper-frames:'], () => screenshot(device, shot));
+        const waited = Math.round((Date.now() - launched) / 1000);
+        expect(out).toContain(BRIDGE_OK); // saved and loaded through Capacitor Preferences
+        expect(out).toContain('mobile-probe:steam=undefined');
+        const [, w, h] = /size=(\d+)x(\d+)/.exec(out)!.map(Number);
+        expect(w).toBeGreaterThan(h); // landscape, laid out at the device's width (not the 980px desktop default)
+        expect(w).toBeLessThan(980);
+        const frames = /gameshipper-frames:(\d+)/.exec(out);
+        expect(Number(frames?.[1] ?? 0), 'WebGL frames drawn in the first 1.5 s').toBeGreaterThan(10);
+        const stats = await sharp(shot).stats();
+        expect(stats.channels.slice(0, 3).some((c) => c.max - c.min > 8)).toBe(true); // not a blank frame
+        await ctx.annotate(`${device.name} (${device.udid}), ${w}x${h}, the game reported ${waited} s after the launch, screenshot: ${shot}`);
+      } finally {
+        if (booted) shutdownSimulator(device);
+        fs.rmSync(dir, { recursive: true, force: true, maxRetries: 3 });
+      }
+    },
+    // xcodebuild, a simulator that boots from cold, and the app's first start on it: minutes each on a hosted runner.
+    15 * 60_000,
+  );
 });
