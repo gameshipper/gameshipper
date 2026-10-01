@@ -22,7 +22,7 @@ import {
   mainProcessErrorReason,
   writeSummary,
 } from './diagnostics.js';
-import { chromiumSwitches, softwareGl } from './flags.js';
+import { chromiumSwitches, isSoftwareGlNote, softwareGl } from './flags.js';
 import { isFullscreenToggle, isScreenshotKey } from './keys.js';
 import { mimeType } from './mime.js';
 import { chooseOverlay, startRepaint } from './overlay.js';
@@ -185,7 +185,8 @@ if (smoke) {
 }
 
 // Everything below must happen before the app is ready.
-for (const [name, value] of chromiumSwitches(process.platform, { softwareGl: softwareGl(env, app.isPackaged) })) {
+const softwareRendering = softwareGl(env, app.isPackaged);
+for (const [name, value] of chromiumSwitches(process.platform, { softwareGl: softwareRendering })) {
   app.commandLine.appendSwitch(name, value);
 }
 // Electron names the save folder after the app name the first time something asks for it, so pin it
@@ -371,15 +372,17 @@ function createWindow(pluginManifest: Record<string, string[]>): BrowserWindow {
     },
   });
   const wc = win.webContents;
-  wc.on('console-message', (details) =>
+  wc.on('console-message', (details) => {
+    // Chromium's note about its own software rendering isn't one of the game's messages.
+    if (softwareRendering && isSoftwareGlNote(details.message)) return;
     diagnostics.record({
       kind: 'console',
       level: details.level,
       message: details.message,
       source: details.sourceId,
       line: details.lineNumber,
-    }),
-  );
+    });
+  });
   wc.on('did-fail-load', (_event, code, description, url, isMainFrame) => {
     const failure = classifyLoadFailure(code, isMainFrame);
     if (failure === 'fatal') diagnostics.record({ kind: 'load-failed', url, code, description });

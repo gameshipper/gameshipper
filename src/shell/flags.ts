@@ -11,6 +11,16 @@ export function softwareGl(env: NodeJS.ProcessEnv, isPackaged: boolean): boolean
 }
 
 /**
+ * Chromium's own console warning about a WebGL frame it read back from the software renderer to show it:
+ *   [.WebGL-0x…]GL Driver Message (OpenGL, Performance, GL_CLOSE_PATH_NV, High): GPU stall due to ReadPixels
+ * Every WebGL game gets it in a `softwareGl` run on a machine without a GPU (seen on GitHub's Windows runner). It
+ * says how Chromium drew the frame there, nothing about the game, so such a run doesn't record it (main.ts).
+ */
+export function isSoftwareGlNote(message: string): boolean {
+  return /^\[\.WebGL-[^\]]*\]GL Driver Message \([^)]*\bPerformance\b[^)]*\): GPU stall due to ReadPixels/.test(message);
+}
+
+/**
  * Chromium command-line switches, pinned with the Electron version.
  * - in-process-gpu: the Steam overlay hooks rendering in the game's main process.
  * - disable-direct-composition (Windows): lets the overlay draw over the window.
