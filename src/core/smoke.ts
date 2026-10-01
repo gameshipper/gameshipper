@@ -340,7 +340,7 @@ export interface LaunchResult {
 /**
  * The arguments a game is started with: its own, and on Linux `--no-sandbox`. The shell asks Chromium for the same
  * (shell/flags.ts), but Chromium sets up its sandbox before any of the game's code runs, and reads only its command
- * line by then. Where the sandbox can't start (Ubuntu 23.10 and later keep programs outside a package from the
+ * line by then. Where the sandbox can't start (Ubuntu 24.04 and later keep programs outside a package from the
  * user namespaces it needs; GitHub's Linux runners are such), the game would otherwise stop with SIGTRAP before it
  * opens a window.
  */
