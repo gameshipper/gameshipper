@@ -38,11 +38,15 @@ node bin/gameshipper.js init --yes --name "Release Check" --dir "$game"
 node bin/gameshipper.js build --steam-sdk "$(ls .sdk/steamworks_sdk_*.zip | tail -1)" --dir "$game"
 ```
 
-Copy `out/windows` to the PC and `out/linux` to the Deck and the Linux PC (over USB, or with `scp`; on the Deck, in Desktop Mode).
+Copy `out/windows` to the PC and `out/linux` to the Deck and the Linux PC (over USB, or with `scp`; on the Deck, in Desktop Mode). Copy `out/linux` in a way that keeps file modes (`scp -r`, `rsync -a` or a `.tar.gz`): its launcher `release-check` and the game `release-check-bin` must stay executable.
 
 **Check each build on its own OS** first: copy the test game's folder (with `gameshipper.json` and `out/<target>`) to the PC and the Linux PC, and run `npx gameshipper@X.Y.Z check --dir <folder>` there. It runs that computer's build, and every `launch.*`, `deck.*` and `offline.*` check passes.
 
-**Launch it through Steam** on each machine: Steam → Games → Add a Non-Steam Game to My Library → Browse, then pick `Release Check.exe` (Windows), `Release Check.app` (Mac) or `release-check` (Deck in Desktop Mode, and Linux). Start it from the Steam library; on the Deck, switch to Game Mode first. Steam only hooks its overlay into games it launched.
+**Start the Linux build by hand** on the Deck (Desktop Mode) and the Linux PC, before adding it to Steam. CI only starts it as a program on Ubuntu 24.04:
+
+- [ ] In a terminal, `./release-check` with no arguments opens the game's window. So does `release-check` started from the file manager (in GNOME's Files, which opens scripts in a text editor on a double-click: right-click → Run as a Program).
+
+**Launch it through Steam** on each machine: Steam → Games → Add a Non-Steam Game to My Library → Browse, then pick `Release Check.exe` (Windows), `Release Check.app` (Mac) or `release-check` (Deck in Desktop Mode, and Linux; that's the build's launcher, never pick `release-check-bin`). Leave the launch options empty: the Linux launcher needs no arguments. Start it from the Steam library; on the Deck, switch to Game Mode first. Steam only hooks its overlay into games it launched.
 
 The page shows whether Steam is running for the game, the player's Steam name, a log of every call, live gamepad input and a text field.
 
