@@ -96,7 +96,10 @@ describe.skipIf(!steamHost)('the real SteamCMD', () => {
     expectLaunchctlIntercepted(launchctlCalls);
     expect(r.output).toContain('Connecting anonymously to Steam Public...OK');
     expect(r.output).toContain('Waiting for user info...OK');
-    expect(r.exitCode).toBe(0);
+    // On Windows the run in which SteamCMD updates itself ends with exit code 7, though every command worked.
+    // (Gameshipper judges an upload by what SteamCMD printed, not by its exit code: judgeSteamRun.)
+    const updatedItself = process.platform === 'win32' && /Downloading update|Update complete/.test(r.output);
+    expect(r.exitCode, r.output.slice(-3000)).toBe(updatedItself ? 7 : 0);
     if (process.platform === 'darwin') {
       const home = steamCmdPaths(CACHE, 'darwin').homeDir;
       expect(fs.existsSync(path.join(home, 'Library', 'Application Support', 'Steam', 'config', 'config.vdf'))).toBe(true);

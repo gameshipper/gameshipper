@@ -90,7 +90,9 @@ describe('gameshipper mcp, driven by a real MCP client', () => {
     expect(check.result.errors.map((e) => e.code)).toEqual(expect.arrayContaining(['CHECK_BUILD_MISSING', 'CHECK_STORE_IMAGES', 'CHECK_SCREENSHOTS']));
     expect(check.result.data.launched.target).toBe(HOST_TARGET);
     const statuses = Object.fromEntries(check.result.data.checks.map((c: { id: string; status: string }) => [c.id, c.status]));
-    expect(statuses).toMatchObject({ 'offline.requests': 'pass', 'launch.run': 'pass', 'launch.errors': 'pass', 'launch.frame': 'pass', 'launch.exit': 'pass' });
+    // A check that didn't pass says why in its message.
+    const said = check.result.data.checks.map((c: { id: string; status: string; message?: string }) => `${c.id} ${c.status}: ${c.message ?? ''}`).join('\n');
+    expect(statuses, said).toMatchObject({ 'offline.requests': 'pass', 'launch.run': 'pass', 'launch.errors': 'pass', 'launch.frame': 'pass', 'launch.exit': 'pass' });
 
     const packaged = await call('gameshipper_play', { packaged: true, smoke: true, seconds: 3 });
     expect(packaged.result.errors).toEqual([]);

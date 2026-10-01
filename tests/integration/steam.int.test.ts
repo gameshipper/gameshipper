@@ -148,6 +148,15 @@ describe('a game with globals of its own named steam and gameshipper', () => {
   });
 });
 
+// Says why, so a green run doesn't hide what it never tested.
+if (!ENABLED) {
+  console.warn(
+    process.platform === 'darwin'
+      ? 'Skipping the Steam tests with App ID 480: they need a running, signed-in Steam client and a Steamworks SDK zip, and run only with GAMESHIPPER_STEAM_E2E=1.'
+      : 'Skipping the Steam tests with App ID 480: they are written for a Mac with a running, signed-in Steam client.',
+  );
+}
+
 describe.skipIf(!ENABLED)('Steam on this Mac with App ID 480', () => {
   // A fresh cache, so SDK extraction and the Intel Mac koffi download really happen.
   const env = { GAMESHIPPER_CACHE: makeTmpDir('gs-steam-cache-') };
