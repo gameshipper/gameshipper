@@ -73,8 +73,6 @@ jobs:
     needs: unit
     runs-on: ${{ matrix.os }}
     timeout-minutes: 60
-    # macOS is where these tests were written and run; Linux and Windows report, but can't fail CI until they've been green.
-    continue-on-error: ${{ matrix.os != 'macos-latest' }}
     strategy:
       fail-fast: false
       matrix:

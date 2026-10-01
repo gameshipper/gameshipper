@@ -12,7 +12,7 @@ Run this for every Gameshipper release, and in full whenever the pinned Electron
 
 ## 1. Automated checks
 
-- [ ] CI is green on the commit you're releasing: unit tests on Linux, macOS and Windows, the workflow lint, and the macOS integration tests (which include the MCP end-to-end test). The Linux and Windows integration jobs can't fail CI yet: read their results anyway.
+- [ ] CI is green on the commit you're releasing: unit tests on Linux, macOS and Windows, the workflow lint, and the integration tests on all three (they include the MCP end-to-end test and, on Linux, a build started with no arguments the way a player starts it). Every job can fail CI.
 - [ ] If Electron changed since the last release: the **Electron canary** workflow passed with the new version (Actions → Electron canary → Run workflow), and section 3 is done on all four machines.
 - [ ] On a Mac: `npm run test:integration` passes (it opens game windows).
 - [ ] `claude plugin validate . --strict` and `claude plugin validate ./plugin --strict` both print `✔ Validation passed`.
