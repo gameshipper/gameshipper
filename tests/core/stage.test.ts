@@ -54,6 +54,14 @@ const present = (file: string): boolean => {
   }
 };
 
+/**
+ * The kinds of link to a folder this OS has. On Windows a link is made for a file or for a folder, and one made
+ * without a kind is a file link when its target doesn't exist yet, which never opens the folder made later. A
+ * junction is Windows' older folder link, the kind `mklink /J` makes without administrator rights. Other systems
+ * have one kind of link and ignore the name.
+ */
+const FOLDER_LINKS: readonly ('dir' | 'junction')[] = process.platform === 'win32' ? ['dir', 'junction'] : ['dir'];
+
 const killIfAlive = (pid: number | null): void => {
   if (pid !== null && alive(pid)) process.kill(pid, 'SIGKILL');
 };
@@ -225,12 +233,13 @@ describe('stageGame', () => {
     for (const w of warnings) expect(w.fix).toBe('Remove the link, or replace it with a copy of the folder.');
   });
 
-  it('skips links to a folder that holds the stage, which would copy the stage into itself', async () => {
+  it.each(FOLDER_LINKS)('skips links to a folder that holds the stage, which would copy the stage into itself (%s)', async (kind) => {
     const dir = makeTmpDir();
     writeFiles(dir, { 'index.html': '', 'js/main.js': '' });
-    fs.symlinkSync('.gameshipper', path.join(dir, 'gs'));
-    fs.symlinkSync(path.join('..', '.gameshipper', 'stage'), path.join(dir, 'js', 'stage'));
-    fs.symlinkSync('.', path.join(dir, 'here'));
+    // .gameshipper doesn't exist yet, so the links say themselves that they lead to a folder (see FOLDER_LINKS).
+    fs.symlinkSync('.gameshipper', path.join(dir, 'gs'), kind);
+    fs.symlinkSync(path.join('..', '.gameshipper', 'stage'), path.join(dir, 'js', 'stage'), kind);
+    fs.symlinkSync('.', path.join(dir, 'here'), kind);
     const { stageDir, warnings } = await stageGame(testCtx(dir), cfg());
     expect(present(path.join(stageDir, 'js', 'main.js'))).toBe(true);
     for (const link of ['gs', 'here', path.join('js', 'stage')]) expect(present(path.join(stageDir, link)), link).toBe(false);
@@ -240,14 +249,16 @@ describe('stageGame', () => {
     for (const w of warnings) expect(w.fix).toBe('Remove the link, or replace it with a copy of the folder.');
   });
 
-  it('skips links to the stage from a game folder that is not the project root', async () => {
+  it.each(FOLDER_LINKS)('skips links to the stage from a game folder that is not the project root (%s)', async (kind) => {
     const dir = makeTmpDir();
     writeFiles(dir, { 'dist/index.html': '' });
-    fs.symlinkSync(path.join('..', '.gameshipper'), path.join(dir, 'dist', 'cache'));
+    fs.symlinkSync(path.join('..', '.gameshipper'), path.join(dir, 'dist', 'cache'), kind);
     const { stageDir, warnings } = await stageGame(testCtx(dir), cfg({ game: { buildCommand: 'true', outputDir: 'dist' } }));
     expect(present(path.join(stageDir, 'index.html'))).toBe(true);
     expect(present(path.join(stageDir, 'cache'))).toBe(false);
-    expect(warnings.map((w) => [w.code, w.message])).toEqual([['BROKEN_SYMLINK', expect.stringContaining(path.join('dist', 'cache'))]]);
+    expect(warnings.map((w) => [w.code, w.message, w.fix])).toEqual([
+      ['BROKEN_SYMLINK', expect.stringContaining(path.join('dist', 'cache')), 'Remove the link, or replace it with a copy of the folder.'],
+    ]);
   });
 
   it('never ships a .env file through a link with another name', async () => {
