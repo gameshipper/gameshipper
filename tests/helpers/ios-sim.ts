@@ -68,7 +68,7 @@ export function buildForSimulator(iosDir: string, derivedData: string): string {
  * runner the app took 43 seconds to start, and its page hadn't loaded 17 seconds later. On a warm simulator the
  * markers are there within seconds, and the wait ends with them.
  */
-const MARKERS_TIMEOUT_MS = 4 * 60_000;
+const MARKERS_TIMEOUT_MS = 3 * 60_000;
 
 /**
  * Installs and launches the app, collecting its console (Capacitor prints `⚡️  [log] - …` lines in Debug

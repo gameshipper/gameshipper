@@ -108,19 +108,28 @@ describe('iOS and Android projects', () => {
       // Outside the project, which is removed afterwards (Xcode's build folder alone is about 340 MB); each run replaces it.
       const shot = path.join(os.tmpdir(), 'gameshipper-ios-simulator.png');
       try {
-        const launched = Date.now();
-        const out = await runOnSimulator(device, app, BUNDLE_ID, [BRIDGE_OK, 'mobile-probe:', 'gameshipper-frames:'], () => screenshot(device, shot));
-        const waited = Math.round((Date.now() - launched) / 1000);
-        expect(out).toContain(BRIDGE_OK); // saved and loaded through Capacitor Preferences
-        expect(out).toContain('mobile-probe:steam=undefined');
+        // A simulator that has just booted is busy for a while. On GitHub's macOS runner the game's first start
+        // there took over a minute and drew one frame in its first 1.5 s. So the game is started again, three times
+        // at most, until a start draws its frames at speed; everything below is checked on that start.
+        const starts: string[] = [];
+        let out = '';
+        let frames = 0;
+        while (starts.length < 3 && frames <= 10) {
+          const launched = Date.now();
+          out = await runOnSimulator(device, app, BUNDLE_ID, [BRIDGE_OK, 'mobile-probe:', 'gameshipper-frames:'], () => screenshot(device, shot));
+          frames = Number(/gameshipper-frames:(\d+)/.exec(out)?.[1] ?? 0);
+          starts.push(`${frames} frames, reported after ${Math.round((Date.now() - launched) / 1000)} s`);
+        }
+        const how = `start ${starts.length}: ${starts.join('; ')}`;
+        expect(out, how).toContain(BRIDGE_OK); // saved and loaded through Capacitor Preferences
+        expect(out, how).toContain('mobile-probe:steam=undefined');
         const [, w, h] = /size=(\d+)x(\d+)/.exec(out)!.map(Number);
         expect(w).toBeGreaterThan(h); // landscape, laid out at the device's width (not the 980px desktop default)
         expect(w).toBeLessThan(980);
-        const frames = /gameshipper-frames:(\d+)/.exec(out);
-        expect(Number(frames?.[1] ?? 0), 'WebGL frames drawn in the first 1.5 s').toBeGreaterThan(10);
+        expect(frames, `WebGL frames drawn in the first 1.5 s (${how})`).toBeGreaterThan(10);
         const stats = await sharp(shot).stats();
         expect(stats.channels.slice(0, 3).some((c) => c.max - c.min > 8)).toBe(true); // not a blank frame
-        await ctx.annotate(`${device.name} (${device.udid}), ${w}x${h}, the game reported ${waited} s after the launch, screenshot: ${shot}`);
+        await ctx.annotate(`${device.name} (${device.udid}), ${w}x${h}, ${how}, screenshot: ${shot}`);
       } finally {
         if (booted) shutdownSimulator(device);
         fs.rmSync(dir, { recursive: true, force: true, maxRetries: 3 });
