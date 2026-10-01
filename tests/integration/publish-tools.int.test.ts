@@ -153,7 +153,9 @@ describe('the real butler', () => {
     writeFiles(dir, { 'game.txt': 'x' });
     const push = await runExternal(tool, ['--json', 'push', '--dry-run', dir, 'gameshipper/probe:linux', '--userversion', '0.0.1'], { timeoutMs: 60_000 });
     expect(butlerResult(parseButlerJson(push.output))).toMatchObject({ dryRun: true, channel: 'linux' });
-    expect(await checkButlerLogin(c, tool)).toEqual({ ok: false, reason: 'No credentials and stdin is not a terminal - terminating.', unreachable: false });
+    // On Windows butler can't tell that nobody is at a terminal: it asks for a login in the browser, and is stopped there.
+    const reason = process.platform === 'win32' ? 'it has no saved login and asked for one in the browser' : 'No credentials and stdin is not a terminal - terminating.';
+    expect(await checkButlerLogin(c, tool)).toEqual({ ok: false, reason, unreachable: false });
   });
 
   it("tells itch.io being unreachable from a refused login, and never sends the key anywhere", async () => {

@@ -2,11 +2,13 @@
 // A stand-in for itch.io's butler 15.31.0 in tests (GAMESHIPPER_BUTLER points at it). With --json it prints the JSON
 // lines the real one printed on 2026-09-29, and it records every run.
 //   FAKE_BUTLER_STATE  folder for runs.jsonl, pushes.jsonl and the saved "creds" file (required)
-//   FAKE_BUTLER_MODE   ok | push-fails | noisy-push | noisy-login | login-fails | offline | server-error
+//   FAKE_BUTLER_MODE   ok | push-fails | noisy-push | noisy-login | login-fails | offline | server-error | windows
 // BUTLER_API_KEY counts as a login; the value "bad" is refused the way itch.io refuses an invalid key. "offline" and
 // "server-error" fail every call that needs itch.io (checking a login, a real push) the way butler did with itch.io's
 // address pointed at an unknown host and at a server answering 500. "noisy-push" fails each real push, and
 // "noisy-login" each check of a login it has, with 60 errors whose first lines are 1,000 characters each.
+// "windows" is the real butler on Windows, which can't tell there that nobody is at a terminal: without a login,
+// `--json login` asks for one in the browser (a `login` message with the address) and waits for it.
 // It never calls process.exit(): with NODE_USE_SYSTEM_CA=1, Node 24.7 on macOS can crash there.
 import * as fs from 'node:fs';
 import * as path from 'node:path';
@@ -114,6 +116,12 @@ function main() {
       if (refused !== null) return refused;
       log('Your local credentials are valid!');
       result({ status: 'success' });
+      return 0;
+    }
+    if (json && mode === 'windows') {
+      const uri = 'https://itch.io/user/oauth?client_id=butler&redirect_uri=http%3A%2F%2F127.0.0.1%3A49152%2Foauth%2Fcallback&response_type=token&scope=wharf';
+      process.stdout.write(`${JSON.stringify({ time: now, type: 'login', uri })}\n`);
+      setInterval(() => {}, 1000);
       return 0;
     }
     if (json) return refuse();

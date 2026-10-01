@@ -72,6 +72,18 @@ describe('publishItch', () => {
     expect([pushes(s.state), s.handOffs]).toEqual([[], []]);
   });
 
+  it('ITCH_LOGIN_REQUIRED on Windows too, where butler asks for a login in the browser and waits for it', async () => {
+    const p = itchProject();
+    const s = setup({}, 'windows', false);
+    const started = Date.now();
+    const r = await publishItch(testCtx(p.dir), p.config, p.builds, s.opts);
+    expect([r.status, r.errors[0].code]).toEqual(['failed', 'ITCH_LOGIN_REQUIRED']);
+    expect(r.errors[0].message).toBe("butler isn't logged in to itch.io (it has no saved login and asked for one in the browser).");
+    // Stopped as soon as it asked: nobody is there to log in.
+    expect(Date.now() - started).toBeLessThan(15_000);
+    expect([pushes(s.state), s.handOffs]).toEqual([[], []]);
+  });
+
   it('hands the terminal to `butler login`, then pushes', async () => {
     const p = itchProject();
     const s = setup({ interactive: true }, 'ok', false);

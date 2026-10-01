@@ -29,9 +29,23 @@ export interface ButlerLogin {
   unreachable: boolean;
 }
 
-/** Asks butler whether its login works, without it ever prompting (no stdin). */
+/**
+ * butler asking for a login in the browser: with --json, a `login` message with the address to open, after which it
+ * waits for the login.
+ */
+const BUTLER_LOGIN_REQUEST = /"type":"login"/;
+
+/**
+ * Asks butler whether its login works, without it ever waiting for one. It has no stdin, and on macOS and Linux
+ * that makes a butler without a login say so and exit. On Windows butler can't tell that nobody is at a terminal
+ * (its own check always says someone is): it asks for a login in the browser instead, and is stopped as it does.
+ */
 export async function checkButlerLogin(ctx: Ctx, tool: ToolCommand): Promise<ButlerLogin> {
-  const r = await runExternal(tool, ['--json', 'login'], { timeoutMs: LOGIN_CHECK_TIMEOUT_MS, onLine: (l) => ctx.log(`butler: ${l}`) });
+  const r = await runExternal(tool, ['--json', 'login'], { timeoutMs: LOGIN_CHECK_TIMEOUT_MS, onLine: (l) => ctx.log(`butler: ${l}`), stopOn: BUTLER_LOGIN_REQUEST });
+  if (r.stoppedOn !== null) {
+    ctx.log('butler: asked for a login in the browser; stopped, as this run only checks for one');
+    return { ok: false, reason: 'it has no saved login and asked for one in the browser', unreachable: false };
+  }
   const messages = parseButlerJson(r.output);
   if (r.exitCode === 0 && butlerResult(messages)?.status === 'success') return { ok: true, reason: '', unreachable: false };
   const errors = butlerErrors(messages);
