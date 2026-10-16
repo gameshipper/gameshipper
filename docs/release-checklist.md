@@ -6,8 +6,8 @@ Run this for every Gameshipper release, and in full whenever the pinned Electron
 
 - [ ] The npm package name `gameshipper` belongs to the Gameshipper npm account (never a personal account). Until it's published, `npx gameshipper` and the plugin's `npx -y gameshipper@<version> mcp` run whatever package someone else registers under that name, so claim it before telling anyone about the tool.
 - [ ] On npmjs.com, under the package's Settings, add a trusted publisher: GitHub Actions, organization `gameshipper`, repository `gameshipper`, workflow `release.yml`, environment `npm`. If npm won't add a trusted publisher to a package that doesn't exist yet, do the very first publish by hand from the Gameshipper npm account, then add it.
-- [ ] In the GitHub repository settings, create the environment `npm`, limit its deployment branches and tags to the tag pattern `v*`, and require a reviewer (the Gameshipper account), so every publish needs a click.
-- [ ] Add a tag ruleset for `v*`: only the Gameshipper account (or repository admins) may create, update or delete those tags.
+- [ ] In the GitHub repository settings, create the environment `npm`, limit its deployment branches and tags to the tag pattern `v*`, and require a reviewer (a maintainer), so every publish needs a click.
+- [ ] Add a tag ruleset for `v*`: only repository admins may create, update or delete those tags.
 - [ ] On npmjs.com, set the package's publishing access to "Require two-factor authentication and disallow tokens", so only the trusted publisher (the Release workflow) can publish.
 
 ## 1. Automated checks
@@ -22,7 +22,7 @@ Run this for every Gameshipper release, and in full whenever the pinned Electron
 ## 2. Version and publish
 
 - [ ] Set the new version in all four places: `package.json` (`npm version --no-git-tag-version X.Y.Z`), `plugin/.claude-plugin/plugin.json`, `.claude-plugin/marketplace.json`, and the `gameshipper@X.Y.Z` pin in `plugin/.mcp.json`. `npx vitest run tests/plugin` fails until all four match.
-- [ ] Commit, then tag and push from the Gameshipper account only (never a personal one): `git tag vX.Y.Z && git push origin main vX.Y.Z`. The **Release** workflow checks that the tag matches `package.json`, runs the tests and packs the package, publishes that tarball to npm through trusted publishing once the `npm` environment's reviewer (again the Gameshipper account) approves, and creates the GitHub release.
+- [ ] Commit, then tag and push as a maintainer: `git tag vX.Y.Z && git push origin main vX.Y.Z`. The **Release** workflow checks that the tag matches `package.json`, runs the tests and packs the package, publishes that tarball to npm through trusted publishing once the `npm` environment's reviewer (again the Gameshipper account) approves, and creates the GitHub release.
 - [ ] Afterwards, `npx gameshipper@X.Y.Z --version` prints `X.Y.Z`.
 
 ## 3. Manual Steam checks on real hardware

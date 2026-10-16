@@ -26,10 +26,12 @@ Verified on macOS: every command on the fixture games, builds for all three OSes
 
 Verified on GitHub's hosted runners (Ubuntu, macOS and Windows), by this repository's CI: the unit tests, and the integration tests that build, run and check the fixture games on each OS, with software WebGL (`GAMESHIPPER_SOFTWARE_GL`) on the Linux and Windows runners, which have no GPU. On the Ubuntu runner (24.04, where Chromium's sandbox can't start for a game in a folder) that includes a Linux build started the way a player starts it, with no arguments: by its own path, through a symbolic link, and from a folder with spaces in its name.
 
+Verified in a Windows 11 virtual machine (on Arm, running the x64 build): `check` on a Steam-enabled build, and through Steam the connection to Steam, achievements, saves, fullscreen and a clean exit. Steam's overlay appeared only once Chromium was made to use the virtual GPU (see [Steam](#steam)).
+
 Not verified yet:
 
 - notarization with a real Apple Developer account (only a stand-in for Apple's notary service is tested);
-- Steam on Windows, desktop Linux and the Steam Deck: overlay, achievements, gamepads, the on-screen keyboard and clean exits (the manual checks in [docs/release-checklist.md](docs/release-checklist.md));
+- Steam on a Windows PC with a real GPU (the overlay, gamepads), desktop Linux and the Steam Deck (overlay, achievements, gamepads, the on-screen keyboard and clean exits): the manual checks in [docs/release-checklist.md](docs/release-checklist.md);
 - a Linux build started by Steam (in its Linux runtime, and on the Deck) or from a desktop's file manager: its [launcher](#build) is only tested started as a program, as above. GNOME's Files opens a script in a text editor on a double-click; there, right-click the launcher and choose Run as a Program;
 - the workflow `ci init` writes, in a game's own repository on GitHub's runners;
 - installing the Claude Code plugin from the marketplace (`/plugin marketplace add gameshipper/gameshipper`);
@@ -371,6 +373,7 @@ Every method resolves to a harmless value (`false`, `null` or `[]`) when Steam i
 
 - **App ID.** `steam.appId` defaults to 480, Valve's Spacewar test app, which every Steam account can use. With your own App ID, a packaged build started outside Steam asks Steam to launch it (Valve's standard check).
 - **Overlay (Shift+Tab).** `steam.overlay` is `"auto"` by default. On macOS that uses a native window that mirrors the game so Steam's overlay can draw on it; on Windows and Linux it keeps a new frame coming 60 times a second. On macOS and Linux this happens only when Steam launched the game, which is when Steam injects its overlay. Set `"native"`, `"repaint"` or `"off"` to override. `play --smoke` warns `STEAM_OVERLAY_FAILED` when the native window couldn't start.
+- **The overlay needs the GPU.** Steam draws its overlay into the frames a game shows through the GPU. Where Chromium won't use the GPU (a blocklisted or very old driver, a virtual machine, remote desktop), it draws the page in software and the overlay can't appear, though Steam's other features still work. In a Windows virtual machine, the overlay appeared once Chromium was made to use the virtual GPU.
 - **Steam Deck.** Steam's on-screen keyboard opens when a text field gets focus, and again when the player taps the field after closing it. Read-only fields get no keyboard.
 - **Quitting.** The game waits up to a second for Steam calls still in flight (a leaderboard upload, say) before it disconnects from Steam.
 - **Troubleshooting.** `play --smoke --json` reports `STEAM_NOT_RUNNING` (a warning: start Steam) or `STEAM_INIT_FAILED` (an error: usually an App ID the signed-in account doesn't own).
@@ -518,6 +521,10 @@ GAMESHIPPER_STEAM_E2E=1 GAMESHIPPER_STEAM_E2E_SDK=/path/to/steamworks_sdk_165.zi
 While it runs, Steam shows your friends that you're playing Spacewar (App ID 480, Valve's test game), once for every game the test launches, and Spacewar appears in your recent activity. Set your status to Invisible in Steam's Friends list first if you'd rather they didn't see it.
 
 Steam's overlay can only hook a game on an unlocked screen, so on a locked one the overlay-hook test is reported as skipped, with the reason.
+
+## Contributing
+
+Issues and pull requests are welcome: see [CONTRIBUTING.md](CONTRIBUTING.md). Contributions are taken under the MIT License. Report security problems privately, as [SECURITY.md](SECURITY.md) says.
 
 ## License
 
