@@ -13,6 +13,7 @@ import {
   hasXcode,
   MARKERS_TIMEOUT_MS,
   pickIphone,
+  READY_FAILED,
   runOnSimulator,
   screenshot,
   shutdownSimulator,
@@ -145,6 +146,7 @@ describe('iOS and Android projects', () => {
           { markers: [BRIDGE_OK, 'mobile-probe:', 'gameshipper-frames:'], minFrames: 10, maxStarts: MAX_STARTS, startLimitMs: START_LIMIT_MS, deadline },
         );
         const how = `start ${starts.length}: ${starts.join('; ')}`;
+        expect(out.split('\n').find((l) => l.startsWith(READY_FAILED)) ?? 'screenshot taken', how).toBe('screenshot taken');
         expect(out, how).toContain(BRIDGE_OK); // saved and loaded through Capacitor Preferences
         expect(out, how).toContain('mobile-probe:steam=undefined');
         const [, w, h] = /size=(\d+)x(\d+)/.exec(out)!.map(Number);

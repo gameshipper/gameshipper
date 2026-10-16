@@ -1,4 +1,5 @@
 import { execFileSync, spawn, spawnSync } from 'node:child_process';
+import * as fs from 'node:fs';
 import * as path from 'node:path';
 
 export interface SimDevice {
@@ -75,6 +76,8 @@ export function buildForSimulator(iosDir: string, derivedData: string, timeoutMs
  * markers are there within seconds, and the wait ends with them.
  */
 export const MARKERS_TIMEOUT_MS = 3 * 60_000;
+/** Starts the line runOnSimulator adds to a start's output when `onReady` threw (a screenshot that timed out, say). */
+export const READY_FAILED = 'gameshipper-test: onReady failed: ';
 /** How long taking the screenshot, and closing the app, may each take once a start is over. */
 const END_STEP_TIMEOUT_MS = 15_000;
 /** How long a start may take to end after its wait: the screenshot and closing the app (runOnSimulator). */
@@ -84,7 +87,8 @@ export const START_END_MS = 2 * END_STEP_TIMEOUT_MS;
  * Installs and launches the app, collecting its console (Capacitor prints `⚡️  [log] - …` lines in Debug
  * builds) until every marker has appeared or the timeout passes; installing counts towards the timeout. `onReady`
  * runs while the app is still open (to take a screenshot, say); the app is closed afterwards. Both of those are
- * given START_END_MS at most.
+ * given START_END_MS at most. If `onReady` throws, the error ends up in the output (a READY_FAILED line), not out
+ * of the timer that called it: thrown there, it would be an unhandled error after the test's result.
  */
 export async function runOnSimulator(
   device: SimDevice,
@@ -107,6 +111,8 @@ export async function runOnSimulator(
       clearTimeout(timer);
       try {
         onReady();
+      } catch (e) {
+        out += `\n${READY_FAILED}${e instanceof Error ? e.message : String(e)}\n`;
       } finally {
         child.kill();
         spawnSync('xcrun', ['simctl', 'terminate', device.udid, bundleId], { timeout: END_STEP_TIMEOUT_MS });
@@ -124,7 +130,9 @@ export async function runOnSimulator(
   });
 }
 
+/** Saves the simulator's screen to `file`, removing any older one first, so a screenshot that failed can't pass for this one. */
 export function screenshot(device: SimDevice, file: string): void {
+  fs.rmSync(file, { force: true });
   execFileSync('xcrun', ['simctl', 'io', device.udid, 'screenshot', file], { stdio: 'ignore', timeout: END_STEP_TIMEOUT_MS });
 }
 
