@@ -30,4 +30,5 @@ npm run test:integration  # builds Gameshipper, then packages and runs real apps
   section: one Result, every error with a code, a message and a fix.
 - Never commit the Steamworks SDK, or anything from it: it's licensed to its account holder.
 
-Pull requests run CI on Ubuntu, macOS and Windows. A first-time contributor's run waits for a maintainer's approval.
+Pull requests run CI on Ubuntu, macOS and Windows. A pull request from outside the project waits for a maintainer to
+approve its run.
