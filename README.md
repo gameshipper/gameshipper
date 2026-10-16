@@ -26,6 +26,8 @@ Verified on macOS: every command on the fixture games, builds for all three OSes
 
 Verified on GitHub's hosted runners (Ubuntu, macOS and Windows), by this repository's CI: the unit tests, and the integration tests that build, run and check the fixture games on each OS, with software WebGL (`GAMESHIPPER_SOFTWARE_GL`) on the Linux and Windows runners, which have no GPU. On the Ubuntu runner (24.04, where Chromium's sandbox can't start for a game in a folder) that includes a Linux build started the way a player starts it, with no arguments: by its own path, through a symbolic link, and from a folder with spaces in its name.
 
+Verified from the public repository: installing the Claude Code plugin from its marketplace (`/plugin marketplace add gameshipper/gameshipper`), which runs the published `gameshipper` package from npm as its MCP server.
+
 Verified in a Windows 11 virtual machine (on Arm, running the x64 build): `check` on a Steam-enabled build, and through Steam the connection to Steam, achievements, saves, fullscreen and a clean exit. Steam's overlay appeared only once Chromium was made to use the virtual GPU (see [Steam](#steam)).
 
 Not verified yet:
@@ -34,7 +36,6 @@ Not verified yet:
 - Steam on a Windows PC with a real GPU (the overlay, gamepads), desktop Linux and the Steam Deck (overlay, achievements, gamepads, the on-screen keyboard and clean exits): the manual checks in [docs/release-checklist.md](docs/release-checklist.md);
 - a Linux build started by Steam (in its Linux runtime, and on the Deck) or from a desktop's file manager: its [launcher](#build) is only tested started as a program, as above. GNOME's Files opens a script in a text editor on a double-click; there, right-click the launcher and choose Run as a Program;
 - the workflow `ci init` writes, in a game's own repository on GitHub's runners;
-- installing the Claude Code plugin from the marketplace (`/plugin marketplace add gameshipper/gameshipper`);
 - the iOS and Android projects on real devices, and the Android project in Android Studio;
 - `publish` to real Steam, itch.io and GitHub accounts: it's tested with the real SteamCMD and butler (without logging in) and against stand-ins for the uploads.
 
